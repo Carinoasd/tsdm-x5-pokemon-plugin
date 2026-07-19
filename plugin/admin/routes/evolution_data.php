@@ -1,0 +1,370 @@
+<?php
+
+function count_evolution_info()
+{
+  $count = DB::result_first("SELECT count(*) from pm_up");
+
+  $item = [];
+  $item["count"] = intval($count);
+
+  $item["_TYPE"] = "::count";
+
+  return [$item];
+}
+
+function list_evolution_info($from, $count)
+{
+  $from = intval($from);
+  $count = intval($count);
+
+  $ret = [];
+  if ($query_all = DB::query("SELECT * from pm_up order by `id` asc, `priority` asc limit $from,$count")) {
+    // 先收集所有结果到数组
+    $rows = [];
+    $pokemon_ids = [];
+    $item_ids = [];
+    while ($query = DB::fetch($query_all)) {
+      $pokemon_ids[intval($query['pmid'])] = true;
+      $pokemon_ids[intval($query['targetpmid'])] = true;
+      // 收集道具ID（仅当条件是 item 时）
+      if ($query['cond'] == 'item') {
+        $item_ids[intval($query['val'])] = true;
+      }
+      $rows[] = $query;
+    }
+
+    // 批量查询宠物名称
+    $pokemon_names = [];
+    if (!empty($pokemon_ids)) {
+      $ids_str = implode(',', array_keys($pokemon_ids));
+      $name_query = DB::query("SELECT id, name from pm_data where id in ($ids_str)");
+      while ($row = DB::fetch($name_query)) {
+        $pokemon_names[intval($row['id'])] = $row['name'];
+      }
+    }
+
+    // 批量查询道具名称
+    $item_names = [];
+    if (!empty($item_ids)) {
+      $ids_str = implode(',', array_keys($item_ids));
+      $item_name_query = DB::query("SELECT id, name from pm_itemdata where id in ($ids_str)");
+      while ($row = DB::fetch($item_name_query)) {
+        $item_names[intval($row['id'])] = $row['name'];
+      }
+    }
+
+    // 构建结果
+    foreach ($rows as $query) {
+      $source_id = intval($query['pmid']);
+      $target_id = intval($query['targetpmid']);
+      // 获取道具名称
+      $item_name = null;
+      if ($query['cond'] == 'item' && isset($item_names[intval($query['val'])])) {
+        $item_name = $item_names[intval($query['val'])];
+      }
+      $item = new_evolution_info(
+        intval($query['id']),
+        $source_id,
+        $target_id,
+        isset($pokemon_names[$source_id]) ? $pokemon_names[$source_id] : '',
+        isset($pokemon_names[$target_id]) ? $pokemon_names[$target_id] : '',
+        new_evolution_limit_type($query['cond'], $query['val'], $item_name),
+        intval($query['priority']),
+        $item_name
+      );
+
+      $item["_TYPE"] = "evolution_info";
+      array_push($ret, $item);
+    }
+    return $ret;
+  } else {
+    $json_ret = [];
+    $json_ret["success"] = false;
+    $json_ret["reason"] = "数据库无法访问";
+    exit(json_encode($json_ret, JSON_UNESCAPED_UNICODE));
+  }
+}
+
+function get_evolution_info($id)
+{
+  $id = intval($id);
+
+  $ret = [];
+  if ($query = DB::fetch_first("SELECT * from pm_up where `id`=$id")) {
+    $source_id = intval($query['pmid']);
+    $target_id = intval($query['targetpmid']);
+
+    // 查询宠物名称
+    $pokemon_names = [];
+    $ids = [$source_id, $target_id];
+    $ids_str = implode(',', $ids);
+    $name_query = DB::query("SELECT id, name from pm_data where id in ($ids_str)");
+    while ($row = DB::fetch($name_query)) {
+      $pokemon_names[intval($row['id'])] = $row['name'];
+    }
+
+    // 查询道具名称
+    $item_name = null;
+    if ($query['cond'] == 'item') {
+      $item_query = DB::fetch_first("SELECT name from pm_itemdata where id=" . intval($query['val']));
+      if ($item_query) {
+        $item_name = $item_query['name'];
+      }
+    }
+
+    $item = new_evolution_info(
+      intval($query['id']),
+      $source_id,
+      $target_id,
+      isset($pokemon_names[$source_id]) ? $pokemon_names[$source_id] : '',
+      isset($pokemon_names[$target_id]) ? $pokemon_names[$target_id] : '',
+      new_evolution_limit_type($query['cond'], $query['val'], $item_name),
+      intval($query['priority']),
+      $item_name
+    );
+
+    $item["_TYPE"] = "evolution_info";
+    array_push($ret, $item);
+
+    return $ret;
+  } else {
+    $json_ret = [];
+    $json_ret["success"] = false;
+    $json_ret["reason"] = "无法查询进化路线 #$id";
+    exit(json_encode($json_ret, JSON_UNESCAPED_UNICODE));
+  }
+}
+
+function set_evolution_info($info)
+{
+  $id = intval($info["id"]);
+
+  if ($query = DB::fetch_first("SELECT * from pm_up where `id`=$id")) {
+    if (intval($query['pmid']) != intval($info["source_id"])) {
+      DB::query("UPDATE pm_up set `pmid`=" . intval($info["source_id"]) . " where `id`=$id");
+    }
+    if (intval($query['targetpmid']) != intval($info["target_id"])) {
+      DB::query("UPDATE pm_up set `targetpmid`=" . intval($info["target_id"]) . " where `id`=$id");
+    }
+    $cond = translate_evolution_info_label_to_db_cond($info["condition"]);
+    if ($query['cond'] != $cond[0]) {
+      DB::query("UPDATE pm_up set `cond`='" . $cond[0] . "' where `id`=$id");
+    }
+    if ($query['val'] != $cond[1]) {
+      DB::query("UPDATE pm_up set `val`='" . $cond[1] . "' where `id`=$id");
+    }
+    if (intval($query['priority']) != intval($info["priority"])) {
+      DB::query("UPDATE pm_up set `priority`=" . intval($info["priority"]) . " where `id`=$id");
+    }
+  } else {
+    $json_ret = [];
+    $json_ret["success"] = false;
+    $json_ret["reason"] = "进化路线更新失败，未找到 #$id";
+    exit(json_encode($json_ret, JSON_UNESCAPED_UNICODE));
+  }
+}
+
+function insert_evolution_info($info)
+{
+  $source_id = intval($info["source_id"]);
+  $target_id = intval($info["target_id"]);
+  $cond = translate_evolution_info_label_to_db_cond($info["condition"]);
+  $priority = intval($info["priority"]);
+
+  $last_id = DB::fetch_first("SELECT id from pm_up order by id desc limit 1");
+  $last_id = intval($last_id['id']);
+  $new_id = $last_id + 1;
+
+  DB::query("INSERT INTO pm_up (
+    `id`, `pmid`, `targetpmid`, `cond`, `val`, `priority`
+  ) VALUES (
+    $new_id, $source_id, $target_id, '" .
+    $cond[0] . "', '" .
+    $cond[1] . "', 
+    $priority
+  )");
+
+  return $new_id;
+}
+
+function delete_evolution_info($id)
+{
+  $id = intval($id);
+  DB::query("DELETE from pm_up where `id`=$id");
+}
+
+function filter_evolution_info($list)
+{
+  $ret = [];
+
+  foreach ($list as $item) {
+    $query_sql = "SELECT * from pm_up where ";
+    $query_sql_list = [];
+    $operator = $item["operator"];
+    $value = addslashes($item["value"]);
+
+    switch ($item["tag"]) {
+      case "ID":
+        array_push($query_sql_list, generate_filter_sql('id', $operator, $value, 'id'));
+        break;
+      case '进化来源':
+        // 智能判断：如果是纯数字，优先按 ID 精确查询
+        if (ctype_digit($value) && $value !== '') {
+          // 先尝试 ID 精确查询
+          $id_query_sql = "SELECT * from pm_up where pmid = " . intval($value);
+          if ($query_all = DB::query($id_query_sql)) {
+            $found_id_results = [];
+            while ($query = DB::fetch($query_all)) {
+              $found_id_results[] = $query;
+            }
+            // 如果找到 ID 匹配的结果，直接返回
+            if (count($found_id_results) > 0) {
+              // 收集所有 source_id 和 target_id
+              $pokemon_ids = [];
+              foreach ($found_id_results as $query) {
+                $pokemon_ids[intval($query['pmid'])] = true;
+                $pokemon_ids[intval($query['targetpmid'])] = true;
+              }
+
+              // 批量查询宠物名称
+              $pokemon_names = [];
+              if (!empty($pokemon_ids)) {
+                $ids_str = implode(',', array_keys($pokemon_ids));
+                $name_query = DB::query("SELECT id, name from pm_data where id in ($ids_str)");
+                while ($row = DB::fetch($name_query)) {
+                  $pokemon_names[intval($row['id'])] = $row['name'];
+                }
+              }
+
+              foreach ($found_id_results as $query) {
+                $source_id = intval($query['pmid']);
+                $target_id = intval($query['targetpmid']);
+                $item = new_evolution_info(
+                  intval($query['id']),
+                  $source_id,
+                  $target_id,
+                  isset($pokemon_names[$source_id]) ? $pokemon_names[$source_id] : "未知宠物 #$source_id",
+                  isset($pokemon_names[$target_id]) ? $pokemon_names[$target_id] : "未知宠物 #$target_id",
+                  new_evolution_limit_type($query['cond'], $query['val'], null),
+                  intval($query['priority']),
+                  null
+                );
+
+                $item["_TYPE"] = "evolution_info";
+                array_push($ret, $item);
+              }
+              return $ret;
+            }
+          }
+        }
+        // ID 查询无结果或非数字输入，使用名称模糊搜索
+        array_push($query_sql_list, generate_filter_sql('pmid', $operator, $value, 'text'));
+        break;
+      case '进化目标':
+        // 智能判断：如果是纯数字，优先按 ID 精确查询
+        if (ctype_digit($value) && $value !== '') {
+          // 先尝试 ID 精确查询
+          $id_query_sql = "SELECT * from pm_up where targetpmid = " . intval($value);
+          if ($query_all = DB::query($id_query_sql)) {
+            $found_id_results = [];
+            while ($query = DB::fetch($query_all)) {
+              $found_id_results[] = $query;
+            }
+            // 如果找到 ID 匹配的结果，直接返回
+            if (count($found_id_results) > 0) {
+              // 收集所有 source_id 和 target_id
+              $pokemon_ids = [];
+              foreach ($found_id_results as $query) {
+                $pokemon_ids[intval($query['pmid'])] = true;
+                $pokemon_ids[intval($query['targetpmid'])] = true;
+              }
+
+              // 批量查询宠物名称
+              $pokemon_names = [];
+              if (!empty($pokemon_ids)) {
+                $ids_str = implode(',', array_keys($pokemon_ids));
+                $name_query = DB::query("SELECT id, name from pm_data where id in ($ids_str)");
+                while ($row = DB::fetch($name_query)) {
+                  $pokemon_names[intval($row['id'])] = $row['name'];
+                }
+              }
+
+              foreach ($found_id_results as $query) {
+                $source_id = intval($query['pmid']);
+                $target_id = intval($query['targetpmid']);
+                $item = new_evolution_info(
+                  intval($query['id']),
+                  $source_id,
+                  $target_id,
+                  isset($pokemon_names[$source_id]) ? $pokemon_names[$source_id] : "未知宠物 #$source_id",
+                  isset($pokemon_names[$target_id]) ? $pokemon_names[$target_id] : "未知宠物 #$target_id",
+                  new_evolution_limit_type($query['cond'], $query['val'], null),
+                  intval($query['priority']),
+                  null
+                );
+
+                $item["_TYPE"] = "evolution_info";
+                array_push($ret, $item);
+              }
+              return $ret;
+            }
+          }
+        }
+        // ID 查询无结果或非数字输入，使用名称模糊搜索
+        array_push($query_sql_list, generate_filter_sql('targetpmid', $operator, $value, 'text'));
+        break;
+      default:
+    }
+  }
+
+  if (count($query_sql_list) <= 0) {
+    return $ret;
+  }
+  if (trim(implode(" and ", $query_sql_list)) == "") {
+    return $ret;
+  }
+  $query_sql .= implode(" and ", $query_sql_list);
+  $query_sql .= " limit 20";
+
+  if ($query_all = DB::query($query_sql)) {
+    // 先收集所有结果到数组
+    $rows = [];
+    $pokemon_ids = [];
+    while ($query = DB::fetch($query_all)) {
+      $pokemon_ids[intval($query['pmid'])] = true;
+      $pokemon_ids[intval($query['targetpmid'])] = true;
+      $rows[] = $query;
+    }
+
+    // 批量查询宠物名称
+    $pokemon_names = [];
+    if (!empty($pokemon_ids)) {
+      $ids_str = implode(',', array_keys($pokemon_ids));
+      $name_query = DB::query("SELECT id, name from pm_data where id in ($ids_str)");
+      while ($row = DB::fetch($name_query)) {
+        $pokemon_names[intval($row['id'])] = $row['name'];
+      }
+    }
+
+    // 构建结果
+    foreach ($rows as $query) {
+      $source_id = intval($query['pmid']);
+      $target_id = intval($query['targetpmid']);
+      $item = new_evolution_info(
+        intval($query['id']),
+        $source_id,
+        $target_id,
+        isset($pokemon_names[$source_id]) ? $pokemon_names[$source_id] : '',
+        isset($pokemon_names[$target_id]) ? $pokemon_names[$target_id] : '',
+        new_evolution_limit_type($query['cond'], $query['val'], null),
+        intval($query['priority']),
+        null
+      );
+
+      $item["_TYPE"] = "evolution_info";
+      array_push($ret, $item);
+    }
+  }
+
+  return $ret;
+}

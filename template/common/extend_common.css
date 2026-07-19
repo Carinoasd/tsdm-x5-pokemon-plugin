@@ -1,0 +1,984 @@
+/*
+Main CSS file for Discuz! X5.0
+By zcandy@TSDM
+*/
+
+/*全局设置*/
+
+
+html {
+    /* background: #8CBEEF url(https://img.tsdm39.com/img01/static/background/bg2.jpg) fixed 50% 0 no-repeat; */
+    background: #8CBEEF url(/static/image/common/bg2.jpg) fixed 50% 0 no-repeat;
+    background-size: cover;
+    background-attachment: fixed;
+}
+
+body{
+    height: 100%;
+    background: none;
+}
+
+img{
+    vertical-align: bottom;
+}
+
+.wp:after{
+    display: table;
+    clear: both;
+    content: "";
+}
+
+img.qq_bind{
+    margin-top: 0;
+}
+
+#qmenu{
+    margin-right: 10px;
+}
+
+
+
+/* 导航 */
+
+div#toptb{
+    box-shadow: 0 0 3px 1px rgba(33,33,33,0.5);
+    background: #333;
+    color: #dadada;
+
+}
+div#toptb a{
+    color: #dadada;
+}
+
+div#toptb>div.wp{
+    box-sizing: border-box;
+    width: 100%;
+    min-width: 980px;
+    padding: 0px 10px;
+    position: relative;
+}
+
+div#toptb div.z, div#toptb div.y{
+    font-size: 12px;
+    line-height: 12px;
+    padding: 12px 0px;
+}
+div#toptb div.z>a, div#toptb div.y>a{
+    height: 12px;
+    padding: 0 6px;
+    border-right: 1px solid #eee;
+}
+div#toptb>div.wp a:last-child{
+    border-right: 0px;
+}
+
+div#toptb div.z.chibimiku {
+    margin-right: 20px;
+}
+div#toptb div.y{
+    right: 20px;
+    position: absolute;
+}
+
+
+
+/*搜索栏*/
+div#scbar{
+    height: 36px;
+    line-height: 36px;
+    font-size: 12px;
+    color: #ffbac8;
+    background: none;
+    border-style: none;
+    margin:0 5px;
+    float: left;
+}
+
+div#scbar .scbar_icon_td, div#scbar #scbar_hot{
+    display: none;
+}
+
+div#scbar .xg1{
+    color: #ffbac8 !important;
+}
+
+div#scbar ul{
+    display: inline-block;
+}
+div#scbar ul:after{
+    clear: both;
+    display: table;
+    content: "";
+}
+
+div#scbar #scbar_form ul li{
+    display: block;
+    float: left;
+    background-color: none;
+    background-image: none;
+    line-height: 30px;
+}
+
+div#scbar #scbar_txt,div#scbar #scbar_type,div#scbar #scbar_btn{
+    font-size: 12px;
+    line-height: 36px;
+    height: 36px;
+    
+    background-color: rgba(255,255,255,0);
+    border-width: 0 !important;
+    border-image-width: 0 !important;
+    box-shadow: none;
+    border-style: none;
+}
+
+div#scbar #scbar_txt{
+    line-height: 28px;
+    height: 28px; width: 200px;
+    margin: 4px 10px;
+    padding: 0 10px;
+    background-color: rgba(255,255,255,0.2);
+    border-radius: 5px;
+    color: #fafafa;
+}
+
+div#scbar #scbar_btn{
+    line-height: 28px;
+    height: 28px;
+    margin: 4px 0px;
+    background-color: rgba(0,0,0,0.4);
+    border-radius: 5px;
+}
+
+div#scbar #scbar_btn, div#scbar #scbar_btn .xi2{
+    color: #60cff0 !important;
+}
+
+ul#scbar_type_menu{
+    background-color: #222;
+    border-width: 0;
+    padding: 0;
+    border-radius: 5px;
+    overflow: hidden;
+    box-shadow: 0 0 2px 1px #111;
+}
+
+ul#scbar_type_menu li{
+    float: none;
+    display: block;
+}
+ul#scbar_type_menu li a{
+    width: 100%;
+    padding-left:5px;
+    border-width: 0;
+}
+ul#scbar_type_menu li a:hover{
+    background: rgba(255,255,255,0.2);
+}
+
+
+
+
+/*----页眉用户信息等*/
+div#hd span.pipe{
+    color: #555;
+}
+div#hd{
+    z-index: 1;
+}
+div#hd div.wp{
+    margin-top: 40px; margin-bottom: 0;
+    padding: 10px; padding-top: 30px; padding-bottom: 0px;
+    border-top-left-radius: 10px;
+    border-top-right-radius: 10px;
+    box-shadow: 0 0 3px 1px rgba(0,0,0,0.2);
+    background-color: rgba(255,255,255,0.15);
+}
+
+div#hd div.wp:after{
+    content: "";
+    width: 0; height: 0;
+}
+
+div#hd div.wp div.hdc{
+    padding-bottom: 30px;
+}
+
+div#hd div.wp div#nv{
+    margin: 0 -10px; padding: 0;
+    box-sizing: border-box;
+    border-width: 0px;
+    background-color: #d33774;
+    box-shadow: 0 0 1px 1px rgba(0,0,0,0.3);
+    min-width: 980px;
+}
+div#hd div.wp div#nv:after{
+    clear: both;
+    display: table;
+    content: "";
+}
+
+div#hd div.wp div#nv ul{
+    background: #d33774;
+}
+div#hd div.wp div#nv ul>li{
+    background: #d33774;
+    border-width: 0;
+}
+div#hd div.wp div#nv li.a{
+    background: #d33774;
+}
+div#hd div.wp div#nv li a{
+    text-shadow: 1px 1px 1px rgba(0,0,0,1);
+    padding:0 10px;
+}
+div#hd div.wp div#nv li a:hover, div#hd div.wp div#nv li.hover a{
+    background-image: none;
+    background: #ab1852;
+    text-decoration: none;
+    text-shadow: 0px 0px 1px rgba(255,255,255,0.7);
+}
+
+/* 主体 */
+div#wp span.pipe{
+    color: #888;
+}
+
+div#wp{
+    background-color: rgba(255,255,255,0.15);
+    margin-top: 0;
+    padding: 10px;
+    box-shadow: 0 0 3px 1px rgba(0,0,0,0.2);
+    padding-bottom: 20px;
+    border-bottom-left-radius: 10px;
+    border-bottom-right-radius: 10px;
+    margin-bottom: 20px;
+}
+
+div#wp div#ct{
+    background-color: rgba(255,255,255,0.50);
+    box-shadow: 0 0 2px 0px rgba(0,0,0,0.2);
+    border-color: rgba(255,255,255,0.1);
+    border-radius: 5px;
+}
+
+
+div.tsdm_forum_desc{
+    box-shadow: 1px 1px 3px rgba(0,0,0,0.6);
+}
+
+/*板块小logo*/
+div.tsdm_fl_inf{
+    width: 220px;
+    padding:5px 0px;
+}
+
+/* 版块 */
+div#wp div#chart{
+    padding:5px 15px;
+}
+div#wp div#ct div#pgt{
+    padding-top: 10px;
+}
+
+div.bm_c img{
+    max-width: 100%;
+}
+
+
+
+/* 重定义侧边导航 */
+
+
+/*页脚*/
+div#ft{
+    border-top: 0px;
+    padding: 10px;
+    margin-top: 20px; padding-bottom: 20px; 
+    text-shadow: 1px 1px 1px rgba(0,0,0,0.5);
+
+    border-top-left-radius: 10px;
+    border-top-right-radius: 10px;
+}
+
+div#ft{
+    color: #dcdcdc;
+}
+div#ft a{
+    color: #fcfcfc;
+}
+
+span.pipe{
+    color: #ccc;
+}
+
+
+div#ft div#frt em{
+    display: none;
+}
+
+/*帖子内*/
+/*左边栏个人信息*/
+div.tsdm_norm_title, div.md_ctrl, div.tsdm_statbar{
+    margin-bottom: 8px; margin-top: 0px;
+    background: rgba(255,255,255,0.5);
+    border-color: rgba(255,255,255,0.2);
+    box-shadow: 0 0 2px 1px rgba(0,0,0,0.1);
+    border-radius: 5px;
+}
+
+div.tsdm_norm_title{
+    margin: 0px 5px 8px 5px;
+    padding: 8px 0 8px 0;
+    text-align: center;
+}
+div.md_ctrl{
+    text-align: center;
+}
+div.md_ctrl img{
+    margin: 2px 1px 2px 0;
+}
+div.tsdm_statbar{
+    text-shadow: 1px 1px 1px rgba(255,255,255,0.4);
+}
+
+/*头像*/
+
+div#pcb img{
+    max-width: 100%;
+}
+
+/* NewWing viewthread sidebar */
+.tsdm_newwing_post .pls {
+    width: 220px;
+}
+
+.tsdm_newwing_post .newwing_post_author {
+    overflow: hidden;
+    padding: 8px 10px 0;
+    text-align: center;
+}
+
+.tsdm_newwing_post .newwing_post_username {
+    overflow: hidden;
+    padding: 1px;
+    color: #fff;
+    font-size: 13px;
+    font-weight: 700;
+    line-height: 20px;
+    text-align: center;
+    text-overflow: ellipsis;
+    text-shadow: 0 0 4px #2e8b57;
+    white-space: nowrap;
+}
+
+.tsdm_newwing_post .newwing_post_username_1 {
+    text-shadow: 0 0 4px #00bfff;
+}
+
+.tsdm_newwing_post .newwing_post_username_2 {
+    text-shadow: 0 0 4px #ff1493;
+}
+
+.tsdm_newwing_post .newwing_post_nickname {
+    overflow: hidden;
+    min-height: 18px;
+    color: #8a5270;
+    line-height: 18px;
+    text-align: center;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.tsdm_newwing_post .newwing_post_avatar {
+    display: inline-block;
+    margin: 4px auto 6px;
+}
+
+.tsdm_newwing_post .newwing_post_avatar img {
+    max-width: 180px;
+    height: auto;
+}
+
+.tsdm_newwing_post .newwing_post_groupicon,
+.tsdm_newwing_post .newwing_post_medals {
+    overflow: hidden;
+    margin: 5px auto 0;
+    text-align: center;
+}
+
+.tsdm_newwing_post .newwing_post_groupicon img {
+    display: inline-block;
+    max-width: 180px;
+    height: auto;
+}
+
+.tsdm_newwing_post .newwing_post_medals {
+    font-size: 0;
+}
+
+.tsdm_newwing_post .newwing_post_medals img {
+    display: inline-block;
+    max-width: 32px;
+    max-height: 32px;
+    margin: 1px;
+    vertical-align: middle;
+}
+
+.tsdm_newwing_post .newwing_post_stats {
+    overflow: hidden;
+    box-sizing: border-box;
+    width: calc(100% - 20px);
+    margin: 8px auto;
+    padding: 7px 8px;
+    color: #555;
+    background: rgba(255, 255, 255, 0.50);
+    border: 1px solid rgba(255, 255, 255, 0.25);
+    border-radius: 5px;
+    box-shadow: 0 0 2px 1px rgba(0, 0, 0, 0.1);
+    text-align: left;
+}
+
+.tsdm_newwing_post .newwing_post_authortitle {
+    overflow: hidden;
+    margin-bottom: 4px;
+    color: #d33774;
+    font-weight: 700;
+    text-align: center;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.tsdm_newwing_post .newwing_post_stats dl {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: 2px 5px;
+    margin: 0;
+    line-height: 1.45;
+}
+
+.tsdm_newwing_post .newwing_post_stats dt,
+.tsdm_newwing_post .newwing_post_stats dd {
+    min-width: 0;
+    margin: 0;
+}
+
+.tsdm_newwing_post .newwing_post_stats dt {
+    color: #8a5270;
+    white-space: nowrap;
+}
+
+.tsdm_newwing_post .newwing_post_stats dd {
+    overflow: hidden;
+    color: #555;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.tsdm_newwing_post .bui {
+    max-width: min(530px, calc(100vw - 30px));
+}
+
+.forum_c {
+    overflow: visible;
+}
+
+.forum_c .fl_g {
+    position: relative;
+}
+
+/* Forum-index category cards: image/icon above the existing text rows. */
+.forum_c .fl_g .fl_icn_g {
+    float: none;
+}
+
+.forum_c .fl_g > dl {
+    clear: both;
+    margin-left: 0 !important;
+    padding-left: 0;
+}
+
+.forum_c .tsdm_forum_desc {
+    z-index: 20;
+    padding: 10px;
+    color: #555;
+    background: rgba(255, 255, 255, 0.96);
+    border: 1px solid #fae0e8;
+    border-radius: 5px;
+}
+
+.forum_c .tsdm_forum_desc p {
+    margin-top: 6px;
+}
+
+.forum_c .tsdm_fl_inf {
+    min-width: 0;
+}
+
+.forum_c .tsdm_forum_threads {
+    color: #78E4FF;
+}
+
+.forum_c .tsdm_forum_posts {
+    color: #66FF00;
+}
+
+.forum_c img[onerror] {
+    min-width: 0;
+    min-height: 0;
+}
+
+/* Missing legacy button sprites fall back to the native X5 controls. */
+.pgs #newspecial,
+.pgs #newspecialtmp {
+    float: left;
+    background: rgba(211, 55, 116, 0.85) url({STYLEIMGDIR}/img/pn_post.png) no-repeat 0 0;
+    border-radius: 4px;
+}
+
+#post_reply,
+#post_replytmp {
+    float: left;
+    background: rgba(211, 55, 116, 0.85) url({STYLEIMGDIR}/img/pn_reply.png) no-repeat 0 0;
+    border-radius: 4px;
+}
+
+.pgs #newspecial img,
+.pgs #newspecialtmp img,
+#post_reply img,
+#post_replytmp img {
+    opacity: 1;
+}
+
+
+/*其他背景*/
+
+body.pg_dsu_medalCenter div#wp div.mn, 
+body.pg_tsdmtitle div#wp div.mn, 
+body.pg_bank_ane div#wp div.mn {
+    background-color: rgba(255,255,255,0.8);
+}
+
+
+iframe#frame_content div.active-s1:after{
+    clear: both;
+    display: table;
+    content: "";
+}
+
+/*勋章中心*/
+ul.mdlow {
+    margin: 30px auto;
+}
+
+
+/*发帖*/
+
+#postform:after{
+    display: table;
+    content: "";
+    clear: both;
+}
+#postform #ct{
+    margin-right: 0;
+}
+
+#postform .mn{
+    float: left;
+    padding: 10px;
+    width: 100%;
+    box-sizing: border-box;
+}
+
+#postform #psd{
+    float: left;
+    padding: 5px 10px;
+    width: 100%;
+    box-sizing: border-box;
+}
+#postform #psd div.post_op{
+    margin-right: 10px;
+}
+
+/* Alice full viewthread migration */
+/* legacy viewthread sidebar */
+.pls .o li:before {
+	display: none;
+}
+
+.userinfo_float_side {
+	width: 205px;
+	overflow: hidden;
+	text-align: center;
+}
+
+.userinfo_float_side_ma {
+	text-align: center;
+}
+
+.userinfo_float_a img {
+	max-height: 300px;
+	max-width: 200px;
+	padding: 5px 5px 8px;
+	background: #FFF url({STATICURL}image/common/midavt_shadow.gif) 0 100% repeat-x;
+}
+
+.post_username_1,
+.post_username_2,
+.post_username_3 {
+	height: 18px;
+	color: #74B963;
+	color: #FFFFFF;
+	padding: 1px;
+	font-size: 12px;
+	text-align: center;
+}
+
+.post_username_1 {
+	filter: glow(color=#00BFFF, strength=3);
+	text-shadow: 0 0 4px #00BFFF;
+}
+
+.post_username_2 {
+	filter: glow(color=#FF1493, strength=3);
+	text-shadow: 0 0 4px #FF1493;
+}
+
+.post_username_3 {
+	filter: glow(color=#2E8B57, strength=3);
+	text-shadow: 0 0 4px #2E8B57;
+}
+
+.post_nickname {
+	text-align: center;
+}
+
+.post_nickname:empty {
+	display: none;
+}
+
+.userinfo_float_a {
+	display: inline-block;
+}
+
+/* Profile card opened by showauthor() from a post avatar. */
+.tsdm_post_t .bui {
+	position: absolute;
+	margin: -1px 0 0 -1px;
+	padding: 15px 0;
+	width: 530px !important;
+	border: 1px solid {COMMONBORDER};
+	background: {FLOATBGCOLOR};
+	box-shadow: 2px 2px 3px {WRAPBORDERCOLOR};
+}
+
+.tsdm_post_t .bui dl {
+	margin: 5px 0 10px;
+}
+
+.tsdm_post_t .bui dt {
+	width: 4.5em;
+}
+
+.tsdm_post_t .bui dd {
+	margin-right: 10px;
+	width: 75px;
+}
+
+.tsdm_post_t .bui .m img {
+	margin-bottom: 12px;
+}
+
+.tsdm_post_t .bui .i {
+	width: 290px;
+}
+
+.tsdm_norm_title,
+.tsdm_medalbar,
+	.tsdm_statbar {
+	margin: 6px 10px 0;
+	padding: 0;
+	border: 0;
+	background: none;
+}
+
+.tsdm_norm_title {
+	text-align: center;
+}
+
+/* Adjust this width to change only the sidebar group-title image size. */
+.tsdm_norm_title img {
+	width: 180px !important;
+	height: auto !important;
+	max-width: 100%;
+	display: inline-block;
+}
+
+.tsdm_norm_title img,
+.tsdm_lv_title,
+.tsdm_tales_shell img,
+.tsdmpet_img,
+.tsdm_pokemon > a > img {
+	max-width: 100%;
+	height: auto;
+}
+
+.tsdm_medalbar {
+	text-align: center;
+	font-size: 0;
+}
+
+.tsdm_medalbar a {
+	display: inline-block;
+}
+
+.tsdm_medalbar img {
+	display: inline-block;
+	margin: 0;
+	height: auto;
+	width: auto;
+}
+
+.tsdm_statbar {
+	font-size: 12px;
+	color: #444;
+}
+
+.tsdm_statbar_title {
+	font-weight: 700;
+}
+
+.stat_authortitle {
+	color: #5d6d90;
+}
+
+.stat_authortitle_level {
+	font-weight: 700;
+}
+
+.stat_authortitle_level.lv0 { color: #999; }
+.stat_authortitle_level.lv1 { color: #f60; }
+.stat_authortitle_level.lv2 { color: #5bae23; }
+.stat_authortitle_level.lv3 { color: #2e8b57; }
+.stat_authortitle_level.lv4 { color: #00a6c7; }
+.stat_authortitle_level.lv5 { color: #4169e1; }
+.stat_authortitle_level.lv6 { color: #c59b08; }
+.stat_authortitle_level.lv7 { color: #c03cc0; }
+.stat_authortitle_level.lv8 { color: #d33; }
+.stat_authortitle_level.lv9 { color: #a11; }
+
+.tsdm_statlist {
+	margin: 0;
+	padding: 0;
+	list-style: none;
+}
+
+.tsdm_statlist li {
+	overflow: visible;
+	margin: 0;
+	padding: 0;
+	line-height: 1.5;
+}
+
+/* 天使动漫 statbar 状态栏的小图标 */
+.tsstat_icn_1 { background: url({STATICURL}tsdm/icon_a.gif) 0 0 no-repeat; }
+.tsstat_icn_2 { background: url({STATICURL}tsdm/icon_a.gif) 0 -62px no-repeat; }
+.tsstat_icn_3 { background: url({STATICURL}tsdm/icon_a.gif) 0 -124px no-repeat; }
+.tsstat_icn_4 { background: url({STATICURL}tsdm/icon_a.gif) 0 -186px no-repeat; }
+.tsstat_icn_5 { background: url({STATICURL}tsdm/icon_a.gif) 0 -248px no-repeat; }
+.tsstat_icn_6 { background: url({STATICURL}tsdm/icon_a.gif) 0 -310px no-repeat; }
+.tsstat_icn_7 { background: url({STATICURL}tsdm/icon_a.gif) 0 -372px no-repeat; }
+.tsstat_icn_8 { background: url({STATICURL}tsdm/icon_a.gif) 0 -434px no-repeat; }
+.tsstat_icn_c { border: none; padding-left: 16px; }
+.tsstat_txt_pink { color: #FF3CEF; }
+.tsstat_txt_lblue { color: #78E4FF; }
+.tsstat_txt_red { color: #FF0099; }
+.tsstat_txt_green { color: #66FF00; }
+.tsstat_txt_purple { color: #DD79FE; }
+.tsstat_txt_org { color: #FFBF00; }
+.tsstat_txt_blue { color: #33CCCC; }
+.tsstat_txt_c { padding: 0 2px; }
+.tsstat-male { background: url({STATICURL}tsdm/icon_a.gif) 0 -496px no-repeat; width: 14px; height: 15px; }
+.tsstat-male_offline { background: url({STATICURL}tsdm/icon_a.gif) 0 -561px no-repeat; width: 14px; height: 15px; }
+.tsstat-s_female { background: url({STATICURL}tsdm/icon_a.gif) 0 -626px no-repeat; width: 16px; height: 15px; }
+.tsstat-s_female_offline { background: url({STATICURL}tsdm/icon_a.gif) 0 -691px no-repeat; width: 16px; height: 15px; }
+.tsstat-secret { background: url({STATICURL}tsdm/icon_a.gif) 0 -756px no-repeat; width: 12px; height: 15px; }
+.tsstat-secret_offline { background: url({STATICURL}tsdm/icon_a.gif) 0 -821px no-repeat; width: 12px; height: 15px; }
+
+.tsdm_titleappend {
+	margin-top: 6px;
+}
+
+.tsdm_pokemon {
+	text-align: center;
+}
+
+.tsdm_pokemon p {
+	margin: 6px 0 0;
+}
+
+.tsdm_pokemon_creeps img {
+	margin: 2px;
+	width: auto;
+	height: 32px;
+}
+
+.tsdm_tales_shell p {
+	margin: 0 0 8px;
+	text-align: center;
+}
+
+.tsdm_tales_shell p:last-child {
+	margin-bottom: 0;
+}
+
+.tsdmpet_preview {
+	margin-bottom: 8px;
+	text-align: center;
+}
+
+.pet_meter {
+	overflow: hidden;
+	margin-top: 6px;
+}
+
+.pet_meter span {
+	float: left;
+	width: 45px;
+}
+
+.pet_meter progress {
+	float: left;
+	width: 68px;
+	height: 10px;
+	margin-top: 4px;
+}
+
+.pet_meter em {
+	float: right;
+	font-size: 11px;
+	color: #666;
+}
+
+.tsdm_ship {
+	overflow: hidden;
+}
+
+/* TSDM archived viewthread user panel rules. */
+.tsdm_statbar {
+	border: solid thin #D3E8F2;
+	width: 186px;
+	margin: 0 auto;
+	padding: 0 5px;
+}
+
+.md_ctrl {
+	border: solid thin #D3E8F2;
+	width: 186px;
+	padding: 0 5px;
+	margin: 0 auto 6px auto;
+	font-size: 0;
+}
+
+.qdsmile {
+	padding: 3px;
+	list-style: none;
+}
+
+.qdsmile li {
+	border: 2px dashed #D3E8F2;
+}
+
+.qdsmile li img {
+	margin-left: 10px;
+}
+
+.tsdmtitles {
+	max-width: 185px;
+	max-height: 100px;
+}
+
+#flk .switchwidth {
+	width: auto;
+	height: auto !important;
+	margin: 0;
+	padding: 0 !important;
+	font-family: inherit;
+	font-size: inherit;
+	line-height: inherit;
+	color: inherit;
+	overflow: visible;
+}
+
+#flk .switchwidth:before {
+	content: none;
+}
+
+#fastpostsubmit {
+	border-color: #d33774;
+	background-color: #d33774;
+}
+
+#fastpostsubmit:active {
+	background-color: #ab1852;
+}
+
+/* Compact profile-sidebar cards. */
+.tsdm_medalbar {
+	margin: 6px 5px 0;
+	padding: 5px;
+	border: 0;
+	background: rgba(255,255,255,0.5);
+	box-shadow: 0 0 2px 1px rgba(0,0,0,0.1);
+	border-radius: 5px;
+	text-align: left;
+	line-height: 0;
+}
+
+/* Thread post sidebar: override dsu_medalCenter's injected medal sizing. */
+.tsdm_post_t .pls .tsdm_medalbar {
+	text-align: left !important;
+	font-size: 0;
+	line-height: 0;
+}
+
+.tsdm_post_t .pls .tsdm_medalbar > a[href*="mod=medal"] {
+	display: block !important;
+	width: 170px !important;
+	padding: 0 !important;
+	margin: 0 !important;
+	font-size: 0;
+	line-height: 0;
+}
+
+.tsdm_post_t .pls .tsdm_medalbar > a[href*="mod=medal"] img {
+	display: inline-block !important;
+	box-sizing: border-box;
+	width: 34px !important;
+	height: auto !important;
+	margin: 0 !important;
+	vertical-align: top;
+}
+
+.tsdm_post_t .pls .tsdm_norm_title {
+	margin: 6px 5px 0;
+	padding: 5px;
+	border: 0;
+	background: rgba(255,255,255,0.5);
+	box-shadow: 0 0 2px 1px rgba(0,0,0,0.1);
+	border-radius: 5px;
+	text-align: center;
+}
+
+.tsdm_post_t .pls {
+	width: 190px !important;
+}
+
+.tsdm_post_t .pls .avatar {
+	text-align: center;
+}
+
+.tsdm_statbar {
+	width: 180px;
+	padding: 0 4px;
+	font-size: 11px;
+}

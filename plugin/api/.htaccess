@@ -1,0 +1,5 @@
+# 禁止直接访问配置文件
+<FilesMatch "^\.">
+    Order allow,deny
+    Deny from all
+</FilesMatch>

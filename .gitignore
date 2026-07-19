@@ -1,0 +1,39 @@
+# === Rust / WASM ===
+target/
+rust/*/dist/
+rust/*/*.wasm
+rust/*/*.js
+rust/*/*.d.ts
+rust/*/_bg.wasm
+rust/*/_bg.wasm.d.ts
+
+# === SCSS 编译输出 ===
+rust/*/styles/*.css
+rust/*/styles/*.css.map
+
+# === Python ===
+__pycache__/
+*.pyc
+*.pyo
+.mypy_cache/
+
+# === IDE ===
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# === Docker ===
+docker-compose.override.yml
+.env
+
+# === OS ===
+Thumbs.db
+.DS_Store
+
+# === 日志 ===
+*.log
+
+# === 环境配置 ===
+.env.local
+.env.production
