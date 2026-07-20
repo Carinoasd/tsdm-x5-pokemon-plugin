@@ -4,7 +4,7 @@ use wasm_bindgen::JsCast;
 
 use crate::dioxus::{
     components::icon::{Icon, IconName},
-    state::{hide_toast, AdminNoticeLevel, ADMIN_TOASTS},
+    state::{hide_toast, push_toast, AdminNoticeLevel, ADMIN_TOASTS},
 };
 
 #[component]
@@ -32,6 +32,7 @@ fn AdminToastItem(id: u64, level: AdminNoticeLevel, message: String) -> Element 
         AdminNoticeLevel::Error => "admin-toast admin-toast--error",
     };
     let message_for_copy = message.clone();
+    let mut copied = use_signal(|| false);
 
     #[cfg(target_arch = "wasm32")]
     use_effect(move || {
@@ -59,22 +60,29 @@ fn AdminToastItem(id: u64, level: AdminNoticeLevel, message: String) -> Element 
             button {
                 class: "admin-toast__copy",
                 r#type: "button",
+                title: if copied() { "复制成功" } else { "复制" },
                 onclick: move |evt| {
                     evt.stop_propagation();
                     #[cfg(target_arch = "wasm32")]
                     {
                         let msg = message_for_copy.clone();
-                        spawn(async move {
-                            if let Some(window) = web_sys::window() {
-                                let clipboard = window.navigator().clipboard();
-                                let _ = clipboard.write_text(&msg);
-                            }
-                        });
+                        let mut c = copied;
+                        let js = format!("navigator.clipboard.writeText('{}')", msg.replace('\'', "\\'").replace('\\', "\\\\"));
+                        let _ = js_sys::eval(&js);
+                        c.set(true);
+                        push_toast(AdminNoticeLevel::Success, "已复制到剪贴板");
                     }
                 },
-                Icon {
-                    name: IconName::Copy,
-                    class: "admin-icon admin-icon--sm".to_string(),
+                if copied() {
+                    Icon {
+                        name: IconName::Check,
+                        class: "admin-icon admin-icon--sm".to_string(),
+                    }
+                } else {
+                    Icon {
+                        name: IconName::Copy,
+                        class: "admin-icon admin-icon--sm".to_string(),
+                    }
                 }
             }
             button {
