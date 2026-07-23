@@ -254,26 +254,33 @@ fn save_evolution_payload(payload: EvolutionInfo) {
 
     spawn(async move {
         let result = if is_new {
-            insert_evolution_info(payload).await.map(|saved| saved.id)
+            insert_evolution_info(payload).await
         } else {
-            set_evolution_info(payload).await.map(|saved| saved.id)
+            set_evolution_info(payload).await
         };
 
         match result {
-            Ok(saved_id) => {
+            Ok(saved) => {
                 if is_new {
                     set_notice(
                         AdminNoticeLevel::Success,
-                        format!("进化规则 #{} 已创建", saved_id),
+                        format!("进化规则 #{} 已创建", saved.id),
                     );
                 } else {
                     set_notice(
                         AdminNoticeLevel::Success,
-                        format!("进化规则 #{} 已更新", saved_id),
+                        format!("进化规则 #{} 已更新", saved.id),
                     );
                 }
 
-                reload_evolution();
+                let mut state = ADMIN_EVOLUTION_DATA.write();
+                if is_new {
+                    state.items.insert(0, saved);
+                    state.total_count += 1;
+                    state.loaded_count += 1;
+                } else if let Some(pos) = state.items.iter().position(|e| e.id == saved.id) {
+                    state.items[pos] = saved;
+                }
             }
 
             Err(error) => {

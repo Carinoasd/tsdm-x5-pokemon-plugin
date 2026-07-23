@@ -21,7 +21,7 @@
   line-height: 1.2;
   white-space: nowrap;
   pointer-events: none;
-  z-index: variables.$z-tooltip;
+  z-index: 1100;
   animation: admin-tooltip-fade-in 120ms ease-out;
 }
 

@@ -179,4 +179,5 @@ function set_global_config($data)
       }
     }
   }
+  return get_global_config();
 }

@@ -437,7 +437,14 @@ fn save_pokemon_payload(payload: PokemonType) {
                         format!("宠物 #{} 已更新", saved.id),
                     );
                 }
-                reload_pokemons();
+                let mut state = ADMIN_POKEMON_DATA.write();
+                if is_new {
+                    state.items.insert(0, saved);
+                    state.total_count += 1;
+                    state.loaded_count += 1;
+                } else if let Some(pos) = state.items.iter().position(|p| p.id == saved.id) {
+                    state.items[pos] = saved;
+                }
             }
             Err(error) => {
                 set_notice(AdminNoticeLevel::Error, format!("保存宠物失败: {}", error));

@@ -24,6 +24,12 @@
   background: variables.$color-primary-gradient;
   border-color: transparent;
   color: variables.$color-white;
+
+  &:hover:not(:disabled) {
+    background: linear-gradient(135deg, #a3dff5, #73caee);
+    border-color: transparent;
+    color: variables.$color-white;
+  }
 }
 
 #main .admin-btn--ghost {

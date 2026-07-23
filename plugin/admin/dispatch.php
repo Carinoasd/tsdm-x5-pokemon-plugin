@@ -61,13 +61,22 @@ function admin_dispatch($action, $params) {
             $fn = "set_" . $entity;
             if (!function_exists($fn)) break;
             $data = isset($params["data"]) ? json_decode($params["data"], true) : $params;
-            $result = call_user_func($fn, $data);
+            call_user_func($fn, $data);
+            $id = intval($data["id"] ?? 0);
+            $getFn = "get_" . $entity;
+            if ($id > 0 && function_exists($getFn)) {
+                $result = call_user_func($getFn, $id);
+            }
             break;
         case "insert":
             $fn = "insert_" . $entity;
             if (!function_exists($fn)) break;
             $data = isset($params["data"]) ? json_decode($params["data"], true) : $params;
-            $result = call_user_func($fn, $data);
+            $id = call_user_func($fn, $data);
+            $getFn = "get_" . $entity;
+            if ($id > 0 && function_exists($getFn)) {
+                $result = call_user_func($getFn, $id);
+            }
             break;
         case "delete":
             $fn = "delete_" . $entity;

@@ -189,12 +189,12 @@ function set_pokemon_type($info)
   if ($query = DB::fetch_first("SELECT * from pm_data where id={$id}")) {
     // 提前检查，每个个体值必须在 0 到 255 之间
     if (
-      intval($info["attributes"]["hit_points"]) < 0 || intval($info["attributes"]["hit_points"]) > 255 ||
-      intval($info["attributes"]["attack"]) < 0 || intval($info["attributes"]["attack"]) > 255 ||
-      intval($info["attributes"]["defence"]) < 0 || intval($info["attributes"]["defence"]) > 255 ||
-      intval($info["attributes"]["special_attack"]) < 0 || intval($info["attributes"]["special_attack"]) > 255 ||
-      intval($info["attributes"]["special_defence"]) < 0 || intval($info["attributes"]["special_defence"]) > 255 ||
-      intval($info["attributes"]["speed"]) < 0 || intval($info["attributes"]["speed"]) > 255
+      intval($info["initial_statistic"]["hit_points"]) < 0 || intval($info["initial_statistic"]["hit_points"]) > 255 ||
+      intval($info["initial_statistic"]["attack"]) < 0 || intval($info["initial_statistic"]["attack"]) > 255 ||
+      intval($info["initial_statistic"]["defense"]) < 0 || intval($info["initial_statistic"]["defense"]) > 255 ||
+      intval($info["initial_statistic"]["special_attack"]) < 0 || intval($info["initial_statistic"]["special_attack"]) > 255 ||
+      intval($info["initial_statistic"]["special_defense"]) < 0 || intval($info["initial_statistic"]["special_defense"]) > 255 ||
+      intval($info["initial_statistic"]["speed"]) < 0 || intval($info["initial_statistic"]["speed"]) > 255
     ) {
       $json_ret = [];
       $json_ret["success"] = false;
@@ -204,12 +204,12 @@ function set_pokemon_type($info)
 
     // 提前检查，每个努力值点数必须在 0 到 3 之间
     if (
-      intval($info["effort_value"]["hit_points"]) < 0 || intval($info["effort_value"]["hit_points"]) > 3 ||
-      intval($info["effort_value"]["attack"]) < 0 || intval($info["effort_value"]["attack"]) > 3 ||
-      intval($info["effort_value"]["defence"]) < 0 || intval($info["effort_value"]["defence"]) > 3 ||
-      intval($info["effort_value"]["special_attack"]) < 0 || intval($info["effort_value"]["special_attack"]) > 3 ||
-      intval($info["effort_value"]["special_defence"]) < 0 || intval($info["effort_value"]["special_defence"]) > 3 ||
-      intval($info["effort_value"]["speed"]) < 0 || intval($info["effort_value"]["speed"]) > 3
+      intval($info["initial_base_points"]["hit_points"]) < 0 || intval($info["initial_base_points"]["hit_points"]) > 3 ||
+      intval($info["initial_base_points"]["attack"]) < 0 || intval($info["initial_base_points"]["attack"]) > 3 ||
+      intval($info["initial_base_points"]["defense"]) < 0 || intval($info["initial_base_points"]["defense"]) > 3 ||
+      intval($info["initial_base_points"]["special_attack"]) < 0 || intval($info["initial_base_points"]["special_attack"]) > 3 ||
+      intval($info["initial_base_points"]["special_defense"]) < 0 || intval($info["initial_base_points"]["special_defense"]) > 3 ||
+      intval($info["initial_base_points"]["speed"]) < 0 || intval($info["initial_base_points"]["speed"]) > 3
     ) {
       $json_ret = [];
       $json_ret["success"] = false;
@@ -218,10 +218,10 @@ function set_pokemon_type($info)
     }
 
     if ($query['name'] != $info["name"]) {
-      DB::query('UPDATE %t SET name=%s WHERE id=%d', ['pm_data', $info['name'], $info['id']]);
+      DB::query("UPDATE pm_data set name='" . addslashes($info['name']) . "' where id={$info["id"]}");
     }
     if ($query['txt'] != $info["description"]) {
-      DB::query('UPDATE %t SET txt=%s WHERE id=%d', ['pm_data', $info['description'], $info['id']]);
+      DB::query("UPDATE pm_data set txt='" . addslashes($info['description']) . "' where id={$info["id"]}");
     }
 
     if (intval($query['money']) != intval($info["cost"])) {
@@ -324,18 +324,19 @@ function set_pokemon_type($info)
     $json_ret["reason"] = "宠物类型更新失败，未找到 #$id";
     exit(json_encode($json_ret, JSON_UNESCAPED_UNICODE));
   }
+  return get_pokemon_type($id);
 }
 
 function insert_pokemon_type($info)
 {
   // 提前检查，每个个体值必须在 0 到 255 之间
   if (
-    intval($info["attributes"]["hit_points"]) < 0 || intval($info["attributes"]["hit_points"]) > 255 ||
-    intval($info["attributes"]["attack"]) < 0 || intval($info["attributes"]["attack"]) > 255 ||
-    intval($info["attributes"]["defence"]) < 0 || intval($info["attributes"]["defence"]) > 255 ||
-    intval($info["attributes"]["special_attack"]) < 0 || intval($info["attributes"]["special_attack"]) > 255 ||
-    intval($info["attributes"]["special_defence"]) < 0 || intval($info["attributes"]["special_defence"]) > 255 ||
-    intval($info["attributes"]["speed"]) < 0 || intval($info["attributes"]["speed"]) > 255
+    intval($info["initial_statistic"]["hit_points"]) < 0 || intval($info["initial_statistic"]["hit_points"]) > 255 ||
+    intval($info["initial_statistic"]["attack"]) < 0 || intval($info["initial_statistic"]["attack"]) > 255 ||
+    intval($info["initial_statistic"]["defense"]) < 0 || intval($info["initial_statistic"]["defense"]) > 255 ||
+    intval($info["initial_statistic"]["special_attack"]) < 0 || intval($info["initial_statistic"]["special_attack"]) > 255 ||
+    intval($info["initial_statistic"]["special_defense"]) < 0 || intval($info["initial_statistic"]["special_defense"]) > 255 ||
+    intval($info["initial_statistic"]["speed"]) < 0 || intval($info["initial_statistic"]["speed"]) > 255
   ) {
     $json_ret = [];
     $json_ret["success"] = false;
@@ -345,12 +346,12 @@ function insert_pokemon_type($info)
 
   // 提前检查，每个努力值点数必须在 0 到 3 之间
   if (
-    intval($info["effort_value"]["hit_points"]) < 0 || intval($info["effort_value"]["hit_points"]) > 3 ||
-    intval($info["effort_value"]["attack"]) < 0 || intval($info["effort_value"]["attack"]) > 3 ||
-    intval($info["effort_value"]["defence"]) < 0 || intval($info["effort_value"]["defence"]) > 3 ||
-    intval($info["effort_value"]["special_attack"]) < 0 || intval($info["effort_value"]["special_attack"]) > 3 ||
-    intval($info["effort_value"]["special_defence"]) < 0 || intval($info["effort_value"]["special_defence"]) > 3 ||
-    intval($info["effort_value"]["speed"]) < 0 || intval($info["effort_value"]["speed"]) > 3
+    intval($info["initial_base_points"]["hit_points"]) < 0 || intval($info["initial_base_points"]["hit_points"]) > 3 ||
+    intval($info["initial_base_points"]["attack"]) < 0 || intval($info["initial_base_points"]["attack"]) > 3 ||
+    intval($info["initial_base_points"]["defense"]) < 0 || intval($info["initial_base_points"]["defense"]) > 3 ||
+    intval($info["initial_base_points"]["special_attack"]) < 0 || intval($info["initial_base_points"]["special_attack"]) > 3 ||
+    intval($info["initial_base_points"]["special_defense"]) < 0 || intval($info["initial_base_points"]["special_defense"]) > 3 ||
+    intval($info["initial_base_points"]["speed"]) < 0 || intval($info["initial_base_points"]["speed"]) > 3
   ) {
     $json_ret = [];
     $json_ret["success"] = false;
@@ -366,16 +367,16 @@ function insert_pokemon_type($info)
 
   $hp = intval($info["initial_statistic"]["hit_points"]);
   $atk = intval($info["initial_statistic"]["attack"]);
-  $def = intval($info["initial_statistic"]["defence"]);
+  $def = intval($info["initial_statistic"]["defense"]);
   $spatk = intval($info["initial_statistic"]["special_attack"]);
-  $spdef = intval($info["initial_statistic"]["special_defence"]);
+  $spdef = intval($info["initial_statistic"]["special_defense"]);
   $sd = intval($info["initial_statistic"]["speed"]);
 
   $hpn = intval($info["initial_base_points"]["hit_points"]);
   $atkn = intval($info["initial_base_points"]["attack"]);
-  $defn = intval($info["initial_base_points"]["defence"]);
+  $defn = intval($info["initial_base_points"]["defense"]);
   $spatkn = intval($info["initial_base_points"]["special_attack"]);
-  $spdefn = intval($info["initial_base_points"]["special_defence"]);
+  $spdefn = intval($info["initial_base_points"]["special_defense"]);
   $sdn = intval($info["initial_base_points"]["speed"]);
 
   // 提前检查，属性必须能够通过转换校验

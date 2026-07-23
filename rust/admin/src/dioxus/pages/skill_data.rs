@@ -357,25 +357,32 @@ fn save_skill_payload(payload: SkillType) {
     set_busy(true);
     spawn(async move {
         let result = if is_new {
-            insert_skill_type(payload).await.map(|saved| saved.id)
+            insert_skill_type(payload).await
         } else {
-            set_skill_type(payload).await.map(|saved| saved.id)
+            set_skill_type(payload).await
         };
 
         match result {
-            Ok(saved_id) => {
+            Ok(saved) => {
                 if is_new {
                     set_notice(
                         AdminNoticeLevel::Success,
-                        format!("技能 #{} 已创建", saved_id),
+                        format!("技能 #{} 已创建", saved.id),
                     );
                 } else {
                     set_notice(
                         AdminNoticeLevel::Success,
-                        format!("技能 #{} 已更新", saved_id),
+                        format!("技能 #{} 已更新", saved.id),
                     );
                 }
-                reload_skills();
+                let mut state = ADMIN_SKILL_DATA.write();
+                if is_new {
+                    state.items.insert(0, saved);
+                    state.total_count += 1;
+                    state.loaded_count += 1;
+                } else if let Some(pos) = state.items.iter().position(|s| s.id == saved.id) {
+                    state.items[pos] = saved;
+                }
             }
             Err(error) => {
                 set_notice(AdminNoticeLevel::Error, format!("保存技能失败: {}", error));

@@ -384,7 +384,14 @@ fn save_map_payload(payload: MapInfo) {
                         format!("地图 #{} 已更新", saved.id),
                     );
                 }
-                reload_maps();
+                let mut state = ADMIN_MAP_DATA.write();
+                if is_new {
+                    state.items.insert(0, saved);
+                    state.total_count += 1;
+                    state.loaded_count += 1;
+                } else if let Some(pos) = state.items.iter().position(|m| m.id == saved.id) {
+                    state.items[pos] = saved;
+                }
             }
             Err(error) => {
                 set_notice(AdminNoticeLevel::Error, format!("保存地图失败: {}", error));

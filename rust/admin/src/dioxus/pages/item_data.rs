@@ -384,7 +384,14 @@ fn save_item_payload(payload: ItemType) {
                         format!("道具 #{} 已更新", saved.id),
                     );
                 }
-                reload_items();
+                let mut state = ADMIN_ITEM_DATA.write();
+                if is_new {
+                    state.items.insert(0, saved);
+                    state.total_count += 1;
+                    state.loaded_count += 1;
+                } else if let Some(pos) = state.items.iter().position(|i| i.id == saved.id) {
+                    state.items[pos] = saved;
+                }
             }
             Err(error) => {
                 set_notice(AdminNoticeLevel::Error, format!("保存道具失败: {}", error));
