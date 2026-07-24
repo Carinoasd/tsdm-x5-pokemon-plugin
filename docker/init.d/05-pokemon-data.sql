@@ -1,6 +1,6 @@
 -- Pokemon species data from X2 production database
 SET sql_mode = '';
-INSERT IGNORE INTO `pm_data` (`id`, `name`, `money`, `txt`, `sex`, `xs`, `xs2`, `hp`, `atk`, `def`, `spatk`, `spdef`, `sd`, `mapid`, `capture`, `met`, `shop`, `hpn`, `atkn`, `defn`, `spatkn`, `spdefn`, `sdn`, `birth`, `god`, `minmoney`, `maxmoney`, `strength`) VALUES (1,'妙蛙种子',2500,'背上的种子里储存着营养，所以即使好几天不吃东西也可以活得好好的！',875,'草','毒',45,49,49,65,65,45,'173',30,10,1,0,0,0,1,0,0,1,0,0,0,1),
+INSERT IGNORE INTO `pm_data` (`id`, `name`, `money`, `description`, `sex`, `xs`, `xs2`, `hp`, `atk`, `def`, `spatk`, `spdef`, `sd`, `mapid`, `capture`, `met`, `shop`, `hpn`, `atkn`, `defn`, `spatkn`, `spdefn`, `sdn`, `birth`, `is_legendary`, `minmoney`, `maxmoney`, `strength`) VALUES (1,'妙蛙种子',2500,'背上的种子里储存着营养，所以即使好几天不吃东西也可以活得好好的！',875,'草','毒',45,49,49,65,65,45,'173',30,10,1,0,0,0,1,0,0,1,0,0,0,1),
 (2,'妙蛙草',0,'它的花苞会在吸收养分后长大。当花苞发出香味时，就预示着它快要开花了。',875,'草','毒',60,62,63,80,80,60,'',0,0,0,0,0,0,1,1,0,0,0,0,0,1),
 (3,'妙蛙花',0,'它背上开出的大花能够吸收太阳光并将其转换为能量。',875,'草','毒',80,82,83,100,100,80,'199',0,10,0,0,0,0,2,1,0,0,0,0,0,1),
 (4,'小火龙',2500,'要是把它带到安静的地方，就能听到它的尾巴燃烧时发出的微小的声音。',875,'火','',39,52,43,60,50,65,'173',30,10,1,0,0,0,0,0,1,1,0,0,0,1),

@@ -23,7 +23,7 @@ function list_map_info($from, $count)
         intval($query['id']),
         $query['name'],
         $query['site'],
-        intval($query['kg']) == 1,
+        intval($query['is_enabled']) == 1,
         intval($query['minlevel']),
         intval($query['maxlevel']),
         intval($query['exp']),
@@ -48,7 +48,7 @@ function get_map_info($id)
       intval($query['id']),
       $query['name'],
       $query['site'],
-      intval($query['kg']) == 1,
+      intval($query['is_enabled']) == 1,
       intval($query['minlevel']),
       intval($query['maxlevel']),
       intval($query['exp']),
@@ -105,9 +105,9 @@ function set_map_info($info)
       DB::query("UPDATE pm_map set site='{$info["area_type"]}' where id={$info["id"]}");
     }
 
-    if (boolval($query['kg']) != boolval($info["is_enabled"])) {
+    if (boolval($query['is_enabled']) != boolval($info["is_enabled"])) {
       $is_enabled = boolval($info["is_enabled"]) ? 1 : 0;
-      DB::query("UPDATE pm_map set kg={$is_enabled} where id={$info["id"]}");
+      DB::query("UPDATE pm_map set is_enabled={$is_enabled} where id={$info["id"]}");
     }
     if (intval($query['minlevel']) != intval($info["min_level"])) {
       DB::query("UPDATE pm_map set minlevel={$info["min_level"]} where id={$info["id"]}");
@@ -227,7 +227,7 @@ function insert_map_info($info)
 
   $name = strval($info["name"]);
   $site = strval($info["area_type"]);
-  $kg = boolval($info["is_enabled"]) ? 1 : 0;
+  $is_enabled = boolval($info["is_enabled"]) ? 1 : 0;
   $minlevel = intval($info["min_level"]);
   $maxlevel = intval($info["max_level"]);
 
@@ -302,9 +302,9 @@ function insert_map_info($info)
 
   $expn_escaped = addslashes($expn);
   DB::query("INSERT INTO pm_map (
-    id, name, site, kg, minlevel, maxlevel, expn
+    id, name, site, is_enabled, minlevel, maxlevel, expn
   ) VALUES (
-    $new_id, '$name', '$site', $kg, $minlevel, $maxlevel, '$expn_escaped'
+    $new_id, '$name', '$site', $is_enabled, $minlevel, $maxlevel, '$expn_escaped'
   )");
 
   return $new_id;
@@ -342,7 +342,7 @@ function filter_map_info($list)
                   intval($query['id']),
                   $query['name'],
                   $query['site'],
-                  intval($query['kg']) == 1,
+                  intval($query['is_enabled']) == 1,
                   intval($query['minlevel']),
                   intval($query['maxlevel']),
                   intval($query['exp']),
@@ -394,7 +394,7 @@ function filter_map_info($list)
         intval($query['id']),
         $query['name'],
         $query['site'],
-        intval($query['kg']) == 1,
+        intval($query['is_enabled']) == 1,
         intval($query['minlevel']),
         intval($query['maxlevel']),
         intval($query['exp']),
@@ -565,3 +565,4 @@ function remove_pokemon_from_map($map_id, $pokemon_type_id)
     exit(json_encode($json_ret, JSON_UNESCAPED_UNICODE));
   }
 }
+

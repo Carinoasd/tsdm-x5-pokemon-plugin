@@ -25,7 +25,7 @@ function list_item_type($from, $count)
         intval($query['id']),
         $query['name'],
         $query['tpname'],
-        $query['txt'],
+        $query['description'],
 
         intval($query['shop']) != 0,
         intval($query['money']),
@@ -55,7 +55,7 @@ function get_item_type($id)
         intval($query['id']),
         $query['name'],
         $query['tpname'],
-        $query['txt'],
+        $query['description'],
 
         intval($query['shop']) != 0,
         intval($query['money']),
@@ -89,7 +89,7 @@ function set_item_type($info)
       DB::query("UPDATE pm_itemdata set tpname='" . $info["img_name"] . "' where id=$id");
     }
 
-    if ($query['txt'] != $info["description"]) {
+    if ($query['description'] != $info["description"]) {
       DB::query("UPDATE pm_itemdata set txt='" . $info["description"] . "' where id=$id");
     }
 
@@ -295,7 +295,7 @@ function filter_item_type($list)
                   intval($query['id']),
                   $query['name'],
                   $query['tpname'],
-                  $query['txt'],
+                  $query['description'],
 
                   intval($query['shop']) != 0,
                   intval($query['money']),
@@ -345,7 +345,7 @@ function filter_item_type($list)
         intval($query['id']),
         $query['name'],
         $query['tpname'],
-        $query['txt'],
+        $query['description'],
 
         intval($query['shop']) != 0,
         intval($query['money']),
