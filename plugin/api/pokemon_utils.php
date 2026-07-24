@@ -274,20 +274,8 @@ function create_new_pokemon_data($pokemon_data, $level, $uid, $nickname = null)
         'level' => $level,
         'exp' => $initial_exp,
         'hp' => $max_hp,
-        // IV值 (g后缀字段)
-        'hpg' => $ivs['hp'],
-        'atkg' => $ivs['atk'],
-        'defg' => $ivs['def'],
-        'spatkg' => $ivs['spatk'],
-        'spdefg' => $ivs['spdef'],
-        'sdg' => $ivs['speed'],
-        // EV值 (n后缀字段)
-        'hpn' => $evs['hp'],
-        'atkn' => $evs['atk'],
-        'defn' => $evs['def'],
-        'spatkn' => $evs['spatk'],
-        'spdefn' => $evs['spdef'],
-        'sdn' => $evs['speed'],
+        'iv_values' => addslashes(json_encode($ivs, JSON_UNESCAPED_UNICODE)),
+        'ev_values' => addslashes(json_encode($evs, JSON_UNESCAPED_UNICODE)),
         // 其他属性
         'good' => 70,
         'state' => 1,

@@ -204,10 +204,10 @@ function api_test_create_pokemon()
     $current_time = time();
 
     DB::query(pm_sql("INSERT INTO " . pm_table('pm_mypm') . "
-        (uid, pmno, pmname, nowname, level, exp, sex, sx, hp, hpg, atkg, defg, spatkg, spdefg, sdg, site, pctime, good, ballid, state, statetime, gduptime, initialuid, swap, sg)
+        (uid, pmno, pmname, nowname, level, exp, sex, sx, hp, iv_values, ev_values, site, pctime, good, ballid, state, statetime, gduptime, initialuid, swap, sg)
         VALUES
         (%d, %d, %s, %s, %d, %d, %d,
-         %s, %d, 0, 0, 0, 0, 0, 0, %d,
+         %s, %d, '{}', '{}', %d,
          %d, 0, 0, 0, 0, %d, %d, 1, %d)",
         $uid, $pmno, $pmname, $pmname, $level, $exp_for_level, $sex,
          $xs, $current_hp, $site,

@@ -351,23 +351,8 @@ function calculate_pokemon_full_stats($pm, $pm_data = null)
 
     // 状态修正系数已在 utils.php 中定义（全局变量）
 
-    $iv = [
-        'hp' => (int) $pm['hpg'],
-        'atk' => (int) $pm['atkg'],
-        'def' => (int) $pm['defg'],
-        'spatk' => (int) $pm['spatkg'],
-        'spdef' => (int) $pm['spdefg'],
-        'speed' => (int) $pm['sdg'],
-    ];
-
-    $ev = [
-        'hp' => (int) $pm['hpn'],
-        'atk' => (int) $pm['atkn'],
-        'def' => (int) $pm['defn'],
-        'spatk' => (int) $pm['spatkn'],
-        'spdef' => (int) $pm['spdefn'],
-        'speed' => (int) $pm['sdn'],
-    ];
+    $iv = json_decode($pm['iv_values'], true);
+    $ev = json_decode($pm['ev_values'], true);
 
     $state = (int) $pm['state'];
     $sg = (int) $pm['sg'];
@@ -844,24 +829,27 @@ function calculate_stats($pm, $info)
     $flash_boost = ($sg == 1) ? 2 : 1;
 
     $stat_map = [
-        'hp'     => ['base' => 'hp',     'iv' => 'hpg',   'ev' => 'hpn',   'state' => $statehp],
-        'attack' => ['base' => 'atk',    'iv' => 'atkg',  'ev' => 'atkn',  'state' => $stateatk],
-        'defense'=> ['base' => 'def',    'iv' => 'defg',  'ev' => 'defn',  'state' => $statedef],
-        'sp_attack' => ['base' => 'spatk','iv' => 'spatkg','ev' => 'spatkn','state' => $statespatk],
-        'sp_defense'=>['base' => 'spdef', 'iv' => 'spdefg','ev' => 'spdefn','state' => $statespdef],
-        'speed'  => ['base' => 'sd',     'iv' => 'sdg',   'ev' => 'sdn',   'state' => $statespeed],
+        'hp'     => ['base' => 'hp',     'json_key' => 'hp',    'state' => $statehp],
+        'attack' => ['base' => 'atk',    'json_key' => 'atk',   'state' => $stateatk],
+        'defense'=> ['base' => 'def',    'json_key' => 'def',   'state' => $statedef],
+        'sp_attack' => ['base' => 'spatk','json_key' => 'spatk', 'state' => $statespatk],
+        'sp_defense'=>['base' => 'spdef', 'json_key' => 'spdef', 'state' => $statespdef],
+        'speed'  => ['base' => 'speed',   'json_key' => 'spd',   'state' => $statespeed],
     ];
+
+    $iv = json_decode($pm['iv_values'], true);
+    $ev = json_decode($pm['ev_values'], true);
 
     $result = [];
     foreach ($stat_map as $key => $cfg) {
         $base = (int) $info[$cfg['base']];
-        $iv = (int) $pm[$cfg['iv']];
-        $ev = (int) $pm[$cfg['ev']];
+        $iv_val = (int) ($iv[$cfg['json_key']] ?? 0);
+        $ev_val = (int) ($ev[$cfg['json_key']] ?? 0);
         $is_hp = ($key === 'hp');
         $boost = $is_hp ? (10 + $level) : 5;
         $boost *= $flash_boost;
         $state_multiplier = isset($cfg['state'][$state]) ? (float)$cfg['state'][$state] : 1.0;
-        $result[$key] = (int) floor(((2 * $base + $iv + $ev / 4) * $level / 100 + $boost) * $state_multiplier);
+        $result[$key] = (int) floor(((2 * $base + $iv_val + $ev_val / 4) * $level / 100 + $boost) * $state_multiplier);
     }
 
     $equipment_bonuses = api_parse_pet_wear_items($pm, false, $result['hp']);

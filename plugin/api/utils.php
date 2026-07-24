@@ -445,8 +445,10 @@ function api_calculate_pokemon_max_hp($pm, $pm_data = null, $include_equipment =
     $base_hp = $pm_data ? (int) $pm_data['hp'] : 50;
 
     $level = (int) $pm['level'];
-    $hpg = (int) $pm['hpg'];
-    $hpn = (int) $pm['hpn'];
+    $iv = json_decode($pm['iv_values'], true);
+    $ev = json_decode($pm['ev_values'], true);
+    $hpg = (int) ($iv['hp'] ?? 0);
+    $hpn = (int) ($ev['hp'] ?? 0);
     $state = (int) $pm['state'];
     $sg = (int) $pm['sg'];
 

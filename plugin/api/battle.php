@@ -1727,12 +1727,18 @@ function api_capture_pokemon()
         $message = "捕捉成功！{$npc['name']}已经被你收服了！";
 
         // 生成随机IV值
-        $hpg = rand(0, 31);
-        $atkg = rand(0, 31);
-        $defg = rand(0, 31);
-        $spatkg = rand(0, 31);
-        $spdefg = rand(0, 31);
-        $sdg = rand(0, 31);
+        $iv_json = addslashes(json_encode([
+            'hp' => rand(0, 31),
+            'atk' => rand(0, 31),
+            'def' => rand(0, 31),
+            'spatk' => rand(0, 31),
+            'spdef' => rand(0, 31),
+            'speed' => rand(0, 31),
+        ], JSON_UNESCAPED_UNICODE));
+        $ev_json = addslashes(json_encode([
+            'hp' => 0, 'atk' => 0, 'def' => 0,
+            'spatk' => 0, 'spdef' => 0, 'speed' => 0,
+        ], JSON_UNESCAPED_UNICODE));
 
         // 随机性别
         $sexrand = rand(1, 1000);
@@ -1765,11 +1771,11 @@ function api_capture_pokemon()
         // 插入新宠物
         DB::query("INSERT INTO " . pm_table('pm_mypm') . "
             (uid, pmname, nowname, pmno, level, exp, sex, sx, hp,
-             hpg, atkg, defg, spatkg, spdefg, sdg,
+             iv_values, ev_values,
              good, itemevolve, ballid, site, state, statetime, gduptime, initialuid)
             VALUES (
                 {$_G['uid']}, '{$npc['name']}', '{$npc['name']}', {$npc['id']}, $npc_level, 0, $sex, '{$npc['xs']}',
-                $npc_hp, $hpg, $atkg, $defg, $spatkg, $spdefg, $sdg,
+                $npc_hp, '{$iv_json}', '{$ev_json}',
                 70, '{$npc['itemevolve']}', {$my_ball['ballid']}, $site, 1, " . time() . ", " . time() . ", {$_G['uid']}
             )");
 
