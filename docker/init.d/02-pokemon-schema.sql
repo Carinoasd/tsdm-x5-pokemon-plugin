@@ -64,7 +64,6 @@ CREATE TABLE IF NOT EXISTS `pm_itemdata` (
     `captmax` tinyint(3) unsigned NOT NULL DEFAULT 0,
     `sitemname` varchar(40) NOT NULL DEFAULT '',
     `sitemid` varchar(30) NOT NULL DEFAULT '',
-    `ppkallow` tinyint(2) unsigned NOT NULL DEFAULT 0,
     `zbtype` tinyint(2) NOT NULL DEFAULT 0,
     `equipment_hp` int(8) NOT NULL DEFAULT 0,
     `equipment_atk` int(8) NOT NULL DEFAULT 0,
