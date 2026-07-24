@@ -24,15 +24,15 @@ function list_pokemon_info($uid, $from, $count)
 
       $item = new_pokemon_info(
         $pokemon_id,
-        intval($query['pmno']),
+        intval($query['species_id']),
         $uid,
-        $query['nowname'],
+        $query['nickname'],
         translate_pokemon_site_id_to_label(intval($query['site'])),
         intval($query['level']),
         intval($query['exp']),
         intval($query['good']),
         intval($query['ballid']),
-        intval($query['sg']) == 1,
+        intval($query['is_shiny']) == 1,
         translate_pokemon_status_id_to_label(normalize_pokemon_status($query['state'], $pokemon_id)),
         translate_pokemon_sex_id_to_label(intval($query['sex'])),
         $iv = json_decode($query['iv_values'], true);
@@ -83,15 +83,15 @@ function get_pokemon_info($id)
 
     array_push($ret, new_pokemon_info(
       $pokemon_id,
-      intval($query['pmno']),
+      intval($query['species_id']),
       $uid,
-      $query['nowname'],
+      $query['nickname'],
       translate_pokemon_site_id_to_label(intval($query['site'])),
       intval($query['level']),
       intval($query['exp']),
       intval($query['good']),
       intval($query['ballid']),
-      intval($query['sg']) == 1,
+      intval($query['is_shiny']) == 1,
       translate_pokemon_status_id_to_label(normalize_pokemon_status($query['state'], $pokemon_id)),
       translate_pokemon_sex_id_to_label(intval($query['sex'])),
 
@@ -143,8 +143,8 @@ function set_pokemon_info($info)
       exit(json_encode($json_ret, JSON_UNESCAPED_UNICODE));
     }
 
-    if ($query['nowname'] != $info["name"]) {
-      DB::query("UPDATE pm_mypm set `nowname`='{$info["name"]}' where `id`='$id'");
+    if ($query['nickname'] != $info["name"]) {
+      DB::query("UPDATE pm_mypm set `nickname`='{$info["name"]}' where `id`='$id'");
     }
     if (intval($query['site']) != translate_pokemon_site_label_to_id($info["site"])) {
       DB::query("UPDATE pm_mypm set `site`='" . translate_pokemon_site_label_to_id($info["site"]) . "' where `id`='$id'");
@@ -162,8 +162,8 @@ function set_pokemon_info($info)
     if (intval($query['ballid']) != intval($info["using_ball_id"])) {
       DB::query("UPDATE pm_mypm set `ballid`='" . intval($info["ballid"]) . "' where `id`='$id'");
     }
-    if (boolval($query['sg']) != boolval($info["is_shiny"])) {
-      DB::query("UPDATE pm_mypm set `sg`='" . boolval($info["sg"]) ? 1 : 0 . "' where `id`='$id'");
+    if (boolval($query['is_shiny']) != boolval($info["is_shiny"])) {
+      DB::query("UPDATE pm_mypm set `is_shiny`='" . boolval($info["sg"]) ? 1 : 0 . "' where `id`='$id'");
     }
     if ($query['state'] != translate_pokemon_status_label_to_id($info["status"])) {
       DB::query("UPDATE pm_mypm set `state`='" . translate_pokemon_status_label_to_id($info["state"]) . "' where `id`='$id'");
@@ -293,9 +293,9 @@ function insert_pokemon_info($info)
   $new_id = $last_id + 1;
 
   DB::query("INSERT into pm_mypm (
-      `id`, `pmno`, `uid`, `nowname`, `site`,
+      `id`, `species_id`, `uid`, `nickname`, `site`,
       `level`, `exp`, `good`,
-      `ballid`, `sg`, `state`, `sex`,
+      `ballid`, `is_shiny`, `state`, `sex`,
       `iv_values`, `ev_values`,
       `equipmentid1`, `equipmentid2`, `equipmentid3`, `equipmentid4`
     ) values (
@@ -309,7 +309,7 @@ function insert_pokemon_info($info)
   // 额外更新血量
 
   $ajax_pokemon = my_pokemon_data($new_id);
-  $pmno = $ajax_pokemon['pmno'];
+  $pmno = $ajax_pokemon['species_id'];
   $pmsdata = pm_data($pmno);
   list($petmaxhp, $petatk, $petdef, $petspatk, $petspdef, $petsd) = get_pet_stats($pmsdata, $ajax_pokemon);
   parse_pet_wear_items($ajax_pokemon, false, $petmaxhp, $petatk, $petdef, $petspatk, $petspdef, $petsd);

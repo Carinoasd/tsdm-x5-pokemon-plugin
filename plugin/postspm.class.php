@@ -11,7 +11,7 @@ class plugin_pokemon_forum
 
     private static function pet_img_url($pet)
     {
-        return "source/plugin/pokemon/images/pm/{$pet['pmno']}.png";
+        return "source/plugin/pokemon/images/pm/{$pet['species_id']}.png";
     }
 
     private static function pet_small_url($pmno)
@@ -28,7 +28,7 @@ class plugin_pokemon_forum
   <a href="$href" target="_blank">
     <img src="$img_url" style="width:auto;height:80px;padding:0 24px;" border="0">
   </a>
-  <div style="margin-top:2px;font-size:12px">{$pet['nowname']} Lv.{$pet['level']}</div>
+  <div style="margin-top:2px;font-size:12px">{$pet['nickname']} Lv.{$pet['level']}</div>
 </div>
 HTML;
     }
@@ -37,8 +37,8 @@ HTML;
     {
         $href = "plugin.php?id=pokemon:pokemon&index=ajax_pm&petid={$pet['id']}&action=show&cshu=2";
         $onclick = "showWindow('pokemon',this.href);return false;";
-        $src = self::pet_small_url($pet['pmno']);
-        $title = htmlspecialchars("{$pet['nowname']} Lv:{$pet['level']}");
+        $src = self::pet_small_url($pet['species_id']);
+        $title = htmlspecialchars("{$pet['nickname']} Lv:{$pet['level']}");
         return <<<HTML
 <a href="$href" onclick="$onclick"><img src="$src" title="$title" border="0"></a>
 HTML;

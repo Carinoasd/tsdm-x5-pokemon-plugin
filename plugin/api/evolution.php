@@ -72,14 +72,14 @@ function api_check_evolution()
     $evolution_info = DB::fetch_first(pm_sql(
         "SELECT * FROM " . pm_table('pm_up') . "
         WHERE pmid = %d",
-        $pet['pmno']
+        $pet['species_id']
     ));
 
     if (!$evolution_info) {
         api_success([
             'can_evolve' => false,
             'reason' => 'This Pokemon cannot evolve',
-            'current_form' => $pet['pmno'],
+            'current_form' => $pet['species_id'],
         ]);
     }
 
@@ -89,7 +89,7 @@ function api_check_evolution()
     api_success([
         'can_evolve' => $conditions['can_evolve'],
         'pokemon_id' => $pet_id,
-        'current_form' => (int) $pet['pmno'],
+        'current_form' => (int) $pet['species_id'],
         'target_form' => (int) $evolution_info['targetpmid'],
         'conditions' => $conditions,
         'evolution_method' => $evolution_info['type'],
@@ -127,7 +127,7 @@ function api_evolve_pokemon()
     $evolution_info = DB::fetch_first(pm_sql(
         "SELECT * FROM " . pm_table('pm_up') . "
         WHERE pmid = %d",
-        $pet['pmno']
+        $pet['species_id']
     ));
 
     if (!$evolution_info) {
@@ -165,7 +165,7 @@ function api_evolve_pokemon()
 
     api_success([
         'message' => 'Evolution successful!',
-        'previous_form' => (int) $pet['pmno'],
+        'previous_form' => (int) $pet['species_id'],
         'new_form' => (int) $new_type_id,
         'new_name' => $new_base_info['name'],
         'stats' => [
@@ -206,7 +206,7 @@ function api_get_available_evolutions()
     $rows = DB::fetch_all(pm_sql(
         "SELECT * FROM " . pm_table('pm_up') . "
         WHERE pmid = %d",
-        $pet['pmno']
+        $pet['species_id']
     ));
 
     $evolutions = [];
@@ -219,7 +219,7 @@ function api_get_available_evolutions()
         $conditions = check_evolution_conditions($pet, $row);
 
         $evolutions[] = [
-            'from_id' => (int) $pet['pmno'],
+            'from_id' => (int) $pet['species_id'],
             'to_id' => (int) $row['targetpmid'],
             'to_name' => $target_info ? $target_info['name'] : 'Unknown',
             'evolution_type' => $row['cond'],
@@ -230,7 +230,7 @@ function api_get_available_evolutions()
 
     api_success([
         'pokemon_id' => $pet_id,
-        'current_form' => (int) $pet['pmno'],
+        'current_form' => (int) $pet['species_id'],
         'available_evolutions' => $evolutions,
     ]);
 }

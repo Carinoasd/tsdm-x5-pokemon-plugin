@@ -90,11 +90,11 @@ CREATE TABLE IF NOT EXISTS `pm_data` (
 -- 用户宠物表
 CREATE TABLE IF NOT EXISTS `pm_mypm` (
     `id` mediumint(8) unsigned NOT NULL AUTO_INCREMENT,
-    `pctime` int(10) NOT NULL DEFAULT 0,
+    `created_at` int(10) NOT NULL DEFAULT 0,
     `uid` mediumint(9) NOT NULL,
     `pmname` varchar(10) NOT NULL,
-    `nowname` varchar(10) NOT NULL,
-    `pmno` smallint(8) unsigned NOT NULL,
+    `nickname` varchar(10) NOT NULL,
+    `species_id` smallint(8) unsigned NOT NULL,
     `level` tinyint(5) unsigned NOT NULL DEFAULT 0,
     `exp` int(10) unsigned NOT NULL DEFAULT 0,
     `sex` tinyint(1) NOT NULL DEFAULT 0,
@@ -121,7 +121,7 @@ CREATE TABLE IF NOT EXISTS `pm_mypm` (
     `sdn` smallint(6) NOT NULL DEFAULT 0,
     `initialuid` mediumint(9) NOT NULL DEFAULT 0,
     `swap` tinyint(1) NOT NULL DEFAULT 1,
-    `sg` tinyint(1) NOT NULL DEFAULT 0,
+    `is_shiny` tinyint(1) NOT NULL DEFAULT 0,
     `equipmentid1` mediumint(8) NOT NULL DEFAULT 0,
     `equipmentid2` mediumint(8) NOT NULL DEFAULT 0,
     `equipmentid3` mediumint(8) NOT NULL DEFAULT 0,

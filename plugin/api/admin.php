@@ -152,7 +152,7 @@ function api_test_create_pokemon()
 
     $input = get_json_input();
 
-    $pmno = isset($input['pmno']) ? validate_id($input['pmno'], 'pmno') : null;
+    $pmno = isset($input['species_id']) ? validate_id($input['species_id'], 'pmno') : null;
     if (!$pmno) {
         $pmno = rand(1, 151);
     }
@@ -407,15 +407,15 @@ function api_test_get_state()
 
         $pokemons_response[] = [
             'id' => (int) $p['id'],
-            'pmno' => (int) $p['pmno'],
-            'name' => $p['pmname'] ?: $p['nowname'],
-            'nickname' => $p['nowname'],
+            'pmno' => (int) $p['species_id'],
+            'name' => $p['pmname'] ?: $p['nickname'],
+            'nickname' => $p['nickname'],
             'level' => (int) $p['level'],
             'exp' => (int) $p['exp'],
             'hp' => (int) $p['hp'],
             'max_hp' => api_calculate_pokemon_max_hp($p),
             'is_zd' => (int)($p['site'] == 1),
-            'is_shiny' => (int) $p['sg'],
+            'is_shiny' => (int) $p['is_shiny'],
             'type1' => $p['type1'],
             'type2' => $p['type2'],
             'skills' => $skills_response

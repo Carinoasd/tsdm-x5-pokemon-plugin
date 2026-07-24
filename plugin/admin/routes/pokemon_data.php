@@ -74,7 +74,7 @@ function list_pokemon_type($from, $count)
         intval($query['met']),
         intval($query['birth']),
         intval($query['strength']),
-        [intval($query['minmoney']), intval($query['maxmoney'])]
+        json_decode($query['drop_money'], true)
       );
 
       $item["_TYPE"] = "pokemon_type";
@@ -156,7 +156,7 @@ function get_pokemon_type($id, $depth = 0)
       intval($query['met']),
       intval($query['birth']),
       intval($query['strength']),
-      [intval($query['minmoney']), intval($query['maxmoney'])]
+      json_decode($query['drop_money'], true)
     );
 
     $item["_TYPE"] = "pokemon_type";
@@ -307,11 +307,10 @@ function set_pokemon_type($info)
     if (intval($query['strength']) != intval($info["strength_weight"])) {
       DB::query("UPDATE pm_data set strength=" . intval($info["strength_weight"]) . " where id={$info["id"]}");
     }
-    if (intval($query['minmoney']) != intval($info["drop_money_range"][0])) {
-      DB::query("UPDATE pm_data set minmoney=" . intval($info["drop_money_range"][0]) . " where id={$info["id"]}");
-    }
-    if (intval($query['maxmoney']) != intval($info["drop_money_range"][1])) {
-      DB::query("UPDATE pm_data set maxmoney=" . intval($info["drop_money_range"][1]) . " where id={$info["id"]}");
+    $old_drop = json_decode($query['drop_money'], true);
+    $new_drop = [intval($info["drop_money_range"][0]), intval($info["drop_money_range"][1])];
+    if ($old_drop != $new_drop) {
+      DB::query("UPDATE pm_data set drop_money='" . addslashes(json_encode($new_drop, JSON_UNESCAPED_UNICODE)) . "' where id={$info["id"]}");
     }
   } else {
     $json_ret = [];
@@ -399,8 +398,7 @@ function insert_pokemon_type($info)
   $met = boolval($info["meet_weight"]) ? 1 : 0;
   $birth = intval($info["birth_order"]);
   $strength = intval($info["strength_weight"]);
-  $minmoney = intval($info["drop_money_range"][0]);
-  $maxmoney = intval($info["drop_money_range"][1]);
+  $drop_money = addslashes(json_encode([intval($info["drop_money_range"][0]), intval($info["drop_money_range"][1])], JSON_UNESCAPED_UNICODE));
 
   $last_id = DB::fetch_first("SELECT id from pm_data order by id desc limit 1");
   $last_id = intval($last_id['id']);
@@ -408,16 +406,16 @@ function insert_pokemon_type($info)
 
   DB::query("INSERT INTO pm_data (
     id, name, description, money, shop, sex,
-    hp, atk, def, spatk, spdef, sd,
+    hp, atk, def, spatk, spdef, speed,
     effort_values,
     xs, xs2, is_legendary, mapid, capture, met,
-    birth, strength, minmoney, maxmoney
+    birth, strength, drop_money
   ) VALUES (
-    $new_id, '$name', '$txt', $money, $shop, $sex,
-    $hp, $atk, $def, $spatk, $spdef, $sd,
+    $new_id, '$name', '$description', $money, $shop, $sex,
+    $hp, $atk, $def, $spatk, $spdef, $speed,
     '$effort_values',
     '$xs', '$xs2', $god, '$mapid', $capture, $met,
-    $birth, $strength, $minmoney, $maxmoney
+    $birth, $strength, '$drop_money'
   )");
 
   return $new_id;
@@ -505,7 +503,7 @@ function filter_pokemon_type($list)
                   intval($query['met']),
                   intval($query['birth']),
                   intval($query['strength']),
-                  [intval($query['minmoney']), intval($query['maxmoney'])]
+                  json_decode($query['drop_money'], true)
                 );
 
                 $item["_TYPE"] = "pokemon_type";
@@ -599,7 +597,7 @@ function filter_pokemon_type($list)
         intval($query['met']),
         intval($query['birth']),
         intval($query['strength']),
-        [intval($query['minmoney']), intval($query['maxmoney'])]
+        json_decode($query['drop_money'], true)
       );
 
       $item["_TYPE"] = "pokemon_type";

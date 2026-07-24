@@ -148,7 +148,7 @@ function api_start_battle()
     $mypokemon = api_my_pokemon($_G['username']);
 
     // 检查是否有出战宠物
-    if (!$mypokemon || !is_array($mypokemon) || $mypokemon['pmno'] <= 0) {
+    if (!$mypokemon || !is_array($mypokemon) || $mypokemon['species_id'] <= 0) {
         api_error('No active pokemon found. Please select a pokemon first.', 400);
     }
 
@@ -283,7 +283,7 @@ function api_use_skill()
     $npc = pm_data($npcid);
 
     // 获取我方宠物基础数据
-    $mydata = pm_data($mypokemon['pmno']);
+    $mydata = pm_data($mypokemon['species_id']);
 
     // 计算属性（已包含装备加成）
     list($mpmhp, $matk, $mdef, $mspatk, $mspdef, $msd) = battle_calc_my_stats($mydata, $mypokemon);
@@ -346,11 +346,11 @@ function api_use_skill()
 
         // 检查闪避
         if (($npcsd - $msd) >= 10 && rand(1, 20) <= 4) {
-            $damage_log[] = "{$npc['name']}避开了{$mypokemon['nowname']}的攻击！";
+            $damage_log[] = "{$npc['name']}避开了{$mypokemon['nickname']}的攻击！";
         } else {
             $npc_hp -= $damage;
             if ($npc_hp < 0) $npc_hp = 0;
-            $damage_log[] = "{$mypokemon['nowname']}使用了{$skillname}，对{$npc['name']}造成了{$damage}点伤害！";
+            $damage_log[] = "{$mypokemon['nickname']}使用了{$skillname}，对{$npc['name']}造成了{$damage}点伤害！";
 
             // 扣除PP
             if ($skill_id > 0 && $myskill && $skilldata['num'] != 0) {
@@ -404,7 +404,7 @@ function api_use_skill()
 
             if ($level_up_info && $level_up_info['level_up']) {
                 $battle['level_up'] = $level_up_info;
-                $pokemon_name = $mypokemon['nowname'] ?: $mypokemon['petname'];
+                $pokemon_name = $mypokemon['nickname'] ?: $mypokemon['petname'];
                 $battle['message'] .= "\n🎉 {$pokemon_name}升级了！Lv.{$level_up_info['old_level']} → Lv.{$level_up_info['new_level']}";
             }
 
@@ -429,7 +429,7 @@ function api_use_skill()
             $my_hp = $mypokemon['hp'] - $counter_damage;
             if ($my_hp < 0) $my_hp = 0;
 
-            $damage_log[] = "{$npc['name']}攻击了{$mypokemon['nowname']}，造成了{$counter_damage}点伤害！";
+            $damage_log[] = "{$npc['name']}攻击了{$mypokemon['nickname']}，造成了{$counter_damage}点伤害！";
 
             // 验证并纠正 HP（确保 HP 在 [0, max_hp] 范围内）
             $mypokemon['hp'] = strval($my_hp);
@@ -446,7 +446,7 @@ function api_use_skill()
 
             if ($my_hp <= 0) {
                 $battle_status = 'defeat';
-                $damage_log[] = "{$mypokemon['nowname']}倒下了...";
+                $damage_log[] = "{$mypokemon['nickname']}倒下了...";
 
                 // 检查是否还有可用的替补宠物
                 $available_count = DB::result_first(pm_sql(
@@ -478,11 +478,11 @@ function api_use_skill()
             );
 
             if (($npcsd - $msd) >= 10 && rand(1, 20) <= 4) {
-                $damage_log[] = "{$npc['name']}避开了{$mypokemon['nowname']}的攻击！";
+                $damage_log[] = "{$npc['name']}避开了{$mypokemon['nickname']}的攻击！";
             } else {
                 $npc_hp -= $damage;
                 if ($npc_hp < 0) $npc_hp = 0;
-                $damage_log[] = "{$mypokemon['nowname']}使用了{$skillname}，对{$npc['name']}造成了{$damage}点伤害！";
+                $damage_log[] = "{$mypokemon['nickname']}使用了{$skillname}，对{$npc['name']}造成了{$damage}点伤害！";
 
                 if ($skill_id > 0 && $myskill && $skilldata['num'] != 0) {
                     DB::query(pm_sql("UPDATE " . pm_table('pm_myskill') . "
@@ -529,7 +529,7 @@ function api_use_skill()
 
                 if ($level_up_info && $level_up_info['level_up']) {
                     $battle['level_up'] = $level_up_info;
-                    $pokemon_name = $mypokemon['nowname'] ?: $mypokemon['petname'];
+                    $pokemon_name = $mypokemon['nickname'] ?: $mypokemon['petname'];
                     $battle['message'] .= "\n🎉 {$pokemon_name}升级了！Lv.{$level_up_info['old_level']} → Lv.{$level_up_info['new_level']}";
                 }
 
@@ -552,7 +552,7 @@ function api_use_skill()
             $my_hp = $mypokemon['hp'] - $counter_damage;
             if ($my_hp < 0) $my_hp = 0;
 
-            $damage_log[] = "{$npc['name']}攻击了{$mypokemon['nowname']}，造成了{$counter_damage}点伤害！";
+            $damage_log[] = "{$npc['name']}攻击了{$mypokemon['nickname']}，造成了{$counter_damage}点伤害！";
 
             // 验证并纠正 HP（确保 HP 在 [0, max_hp] 范围内）
             $mypokemon['hp'] = strval($my_hp);
@@ -568,7 +568,7 @@ function api_use_skill()
 
             if ($my_hp <= 0) {
                 $battle_status = 'defeat';
-                $damage_log[] = "{$mypokemon['nowname']}倒下了...";
+                $damage_log[] = "{$mypokemon['nickname']}倒下了...";
 
                 // 检查是否还有可用的替补宠物
                 $available_count = DB::result_first(pm_sql(
@@ -627,7 +627,7 @@ function api_use_skill()
 
     if ($level_up_info && $level_up_info['level_up']) {
         $battle['level_up'] = $level_up_info;
-        $pokemon_name = $mypokemon['nowname'] ?: $mypokemon['petname'];
+        $pokemon_name = $mypokemon['nickname'] ?: $mypokemon['petname'];
         $battle['message'] .= "\n🎉 {$pokemon_name}升级了！Lv.{$level_up_info['old_level']} → Lv.{$level_up_info['new_level']}";
     }
 
@@ -699,7 +699,7 @@ function api_flee()
             $myusersdata['strength'] * $npc['strength']
         );
 
-        $mydata = pm_data($mypokemon['pmno']);
+        $mydata = pm_data($mypokemon['species_id']);
         list(, $matk, $mdef, $mspatk, $mspdef, $msd) = battle_calc_my_stats($mydata, $mypokemon);
 
         $counter_damage = calculate_counter_damage_legacy(
@@ -726,11 +726,11 @@ function api_flee()
             intval($mypokemon['id'])
         ));
 
-        $message .= "\n{$npc['name']}攻击了{$mypokemon['nowname']}，造成了{$counter_damage}点伤害！";
+        $message .= "\n{$npc['name']}攻击了{$mypokemon['nickname']}，造成了{$counter_damage}点伤害！";
 
         if ($my_hp <= 0) {
             $status = 'defeat';
-            $message .= "\n{$mypokemon['nowname']}倒下了...";
+            $message .= "\n{$mypokemon['nickname']}倒下了...";
 
             // 保存野怪信息，用于失败响应
             $defeat_npc_id = $myusersdata['npcid'];
@@ -912,7 +912,7 @@ function calculate_counter_damage_legacy($level, $atk, $def, $spatk, $spdef, $np
 function battle_calc_my_stats($data, $pokemon)
 {
     $level = intval($pokemon['level']);
-    $flash = intval($pokemon['sg']);
+    $flash = intval($pokemon['is_shiny']);
     $s = intval($pokemon['state']);
     $stats = [];
     foreach (['hp', 'atk', 'def', 'spatk', 'spdef', 'sd'] as $stat) {
@@ -1090,7 +1090,7 @@ function apply_rewards($uid, $mypokemon, $rewards)
 
     $new_exp = intval($mypokemon['exp']) + $rewards['exp'];
     $old_level = intval($mypokemon['level']);
-    $pmno = intval($mypokemon['pmno']);
+    $pmno = intval($mypokemon['species_id']);
 
     $new_level = api_get_pet_exp_level($pmno, $new_exp);
     $level_up = false;
@@ -1201,9 +1201,9 @@ function build_battle_response($myusersdata, $mypokemon, $map = null, $is_boss =
         'turn' => $is_in_battle ? 1 : 0,
         'status' => $is_in_battle ? 'active' : 'idle',
         'my_pokemon' => [
-            'id' => (int)$mypokemon['pmno'],
+            'id' => (int)$mypokemon['species_id'],
             'instance_id' => (int)$mypokemon['id'],  // 数据库唯一 ID
-            'name' => $mypokemon['nowname'] ?: $mypokemon['petname'],
+            'name' => $mypokemon['nickname'] ?: $mypokemon['petname'],
             'level' => (int)$mypokemon['level'],
             'hp' => (int)$mypokemon['hp'],
             'max_hp' => $my_max_hp,
@@ -1303,7 +1303,7 @@ function api_recover_battle()
     // 获取用户当前的宝可梦
     $mypokemon = api_my_pokemon($_G['username']);
 
-    if (!$mypokemon || $mypokemon['pmno'] <= 0) {
+    if (!$mypokemon || $mypokemon['species_id'] <= 0) {
         api_error('Pokemon not found', 404);
     }
 
@@ -1790,7 +1790,7 @@ function api_capture_pokemon()
             $myusersdata['strength'] * $npc['strength']
         );
 
-        $mydata = pm_data($mypokemon['pmno']);
+        $mydata = pm_data($mypokemon['species_id']);
         list(,, $mdef,, $mspdef, $msd) = battle_calc_my_stats($mydata, $mypokemon);
 
         $counter_damage = calculate_counter_damage_legacy(
@@ -1817,11 +1817,11 @@ function api_capture_pokemon()
             intval($mypokemon['id'])
         ));
 
-        $message .= "\n{$npc['name']}攻击了{$mypokemon['nowname']}，造成了{$counter_damage}点伤害！";
+        $message .= "\n{$npc['name']}攻击了{$mypokemon['nickname']}，造成了{$counter_damage}点伤害！";
 
         if ($my_hp <= 0) {
             $status = 'defeat';
-            $message .= "\n{$mypokemon['nowname']}倒下了...";
+            $message .= "\n{$mypokemon['nickname']}倒下了...";
             clear_battle_state($_G['uid']);
         }
     }
@@ -1892,7 +1892,7 @@ function api_use_item_in_battle()
             $current_hp = intval($mypokemon['hp']);
 
             if ($current_hp >= $max_hp && $addhp > 0) {
-                api_error("{$mypokemon['nowname']}不需要回复HP", 400);
+                api_error("{$mypokemon['nickname']}不需要回复HP", 400);
             }
 
             $new_hp = min($max_hp, $current_hp + $addhp);
@@ -1908,7 +1908,7 @@ function api_use_item_in_battle()
                 intval($mypokemon['id'])
             ));
 
-            $message = "成功对{$mypokemon['nowname']}使用了{$item_data['name']}，恢复了{$addhp}点HP！";
+            $message = "成功对{$mypokemon['nickname']}使用了{$item_data['name']}，恢复了{$addhp}点HP！";
             break;
 
         case '2': // 精灵球
@@ -1977,7 +1977,7 @@ function api_use_item_in_battle()
         $myusersdata['strength'] * $npc['strength']
     );
 
-    $mydata = pm_data($mypokemon['pmno']);
+    $mydata = pm_data($mypokemon['species_id']);
     list(,, $mdef,, $mspdef,) = battle_calc_my_stats($mydata, $mypokemon);
 
     $counter_damage = calculate_counter_damage_legacy(
@@ -2004,11 +2004,11 @@ function api_use_item_in_battle()
         intval($mypokemon['id'])
     ));
 
-    $message .= "\n{$npc['name']}攻击了{$mypokemon['nowname']}，造成了{$counter_damage}点伤害！";
+    $message .= "\n{$npc['name']}攻击了{$mypokemon['nickname']}，造成了{$counter_damage}点伤害！";
 
     if ($my_hp <= 0) {
         $status = 'defeat';
-        $message .= "\n{$mypokemon['nowname']}倒下了...";
+        $message .= "\n{$mypokemon['nickname']}倒下了...";
         clear_battle_state($_G['uid']);
     }
 
@@ -2130,7 +2130,7 @@ function api_use_item_on_skill_in_battle()
         $myusersdata['strength'] * $npc['strength']
     );
 
-    $mydata = pm_data($mypokemon['pmno']);
+    $mydata = pm_data($mypokemon['species_id']);
     list(,, $mdef,, $mspdef,) = battle_calc_my_stats($mydata, $mypokemon);
 
     $counter_damage = calculate_counter_damage_legacy(
@@ -2157,12 +2157,12 @@ function api_use_item_on_skill_in_battle()
         intval($mypokemon['id'])
     ));
 
-    $message = "成功使用{$item_data['name']}，恢复了{$restore_amount}点PP！\n{$npc['name']}攻击了{$mypokemon['nowname']}，造成了{$counter_damage}点伤害！";
+    $message = "成功使用{$item_data['name']}，恢复了{$restore_amount}点PP！\n{$npc['name']}攻击了{$mypokemon['nickname']}，造成了{$counter_damage}点伤害！";
     $status = 'active';
 
     if ($my_hp <= 0) {
         $status = 'defeat';
-        $message .= "\n{$mypokemon['nowname']}倒下了...";
+        $message .= "\n{$mypokemon['nickname']}倒下了...";
         clear_battle_state($_G['uid']);
     }
 
@@ -2327,7 +2327,7 @@ function api_switch_pokemon()
         );
 
         // 使用新宠物的数据计算防御（而不是旧宠物）
-        $next_pokemon_data = pm_data($next_pokemon['pmno']);
+        $next_pokemon_data = pm_data($next_pokemon['species_id']);
         list(, $next_hp,, $next_mdef,, $next_mspdef,) = battle_calc_my_stats($next_pokemon_data, $next_pokemon);
 
         $counter_damage = calculate_counter_damage_legacy(
@@ -2355,7 +2355,7 @@ function api_switch_pokemon()
             intval($next_pokemon['id'])
         ));
 
-        $counter_message = "\n野怪抓住了机会！{$npc['name']}攻击了{$next_pokemon['nowname']}，造成了{$counter_damage}点伤害！";
+        $counter_message = "\n野怪抓住了机会！{$npc['name']}攻击了{$next_pokemon['nickname']}，造成了{$counter_damage}点伤害！";
 
         if ($my_hp <= 0) {
             // 新宠物倒下，但不立即结束战斗
@@ -2373,7 +2373,7 @@ function api_switch_pokemon()
                 $new_mypokemon = api_my_pokemon($_G['username']);
                 $battle = build_battle_response($myusersdata, $new_mypokemon);
                 $battle['status'] = 'active';
-                $battle['message'] = "成功切换为 {$next_pokemon['nowname']}！" . $counter_message . "\n{$next_pokemon['nowname']}倒下了...";
+                $battle['message'] = "成功切换为 {$next_pokemon['nickname']}！" . $counter_message . "\n{$next_pokemon['nickname']}倒下了...";
                 $battle['turn'] = 0;
 
                 api_success($battle);
@@ -2399,7 +2399,7 @@ function api_switch_pokemon()
 
                 $battle = build_battle_response($new_myusersdata, $new_mypokemon);
                 $battle['status'] = 'defeat';
-                $battle['message'] = "成功切换为 {$next_pokemon['nowname']}！" . $counter_message . "\n{$next_pokemon['nowname']}倒下了...";
+                $battle['message'] = "成功切换为 {$next_pokemon['nickname']}！" . $counter_message . "\n{$next_pokemon['nickname']}倒下了...";
                 $battle['turn'] = 0;
 
                 api_success($battle);
@@ -2413,7 +2413,7 @@ function api_switch_pokemon()
     $new_mypokemon = api_my_pokemon($_G['username']);
     $battle = build_battle_response($myusersdata, $new_mypokemon);
     $battle['status'] = 'active';
-    $battle['message'] = "成功切换为 {$next_pokemon['nowname']}！" . $counter_message;
+    $battle['message'] = "成功切换为 {$next_pokemon['nickname']}！" . $counter_message;
     $battle['turn'] = 0;
 
     api_success($battle);
@@ -2500,7 +2500,7 @@ function api_replace_pokemon()
     $new_mypokemon = api_my_pokemon($_G['username']);
     $battle = build_battle_response($myusersdata, $new_mypokemon);
     $battle['status'] = 'active';
-    $battle['message'] = "成功切换为 {$next_pokemon['nowname']}！";
+    $battle['message'] = "成功切换为 {$next_pokemon['nickname']}！";
     $battle['turn'] = 0;
 
     api_success($battle);

@@ -27,9 +27,8 @@ CREATE TABLE IF NOT EXISTS `pm_data` (
     `shop` tinyint(1) NOT NULL DEFAULT 0,
     `birth` tinyint(1) NOT NULL DEFAULT 0,
     `is_legendary` tinyint(1) NOT NULL DEFAULT 0,
-    `minmoney` int(1) NOT NULL DEFAULT 0,
-    `maxmoney` int(5) NOT NULL DEFAULT 0,
     `strength` tinyint(3) NOT NULL DEFAULT 0,
+    drop_money text NOT NULL DEFAULT '[0,0]',
     PRIMARY KEY (`id`)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci;
 
@@ -111,6 +110,7 @@ CREATE TABLE IF NOT EXISTS `pm_usersdata` (
     `fullexp` bigint(20) NOT NULL DEFAULT 0,
     `boxnum` smallint(8) NOT NULL DEFAULT 0,
     `strength` tinyint(3) NOT NULL DEFAULT 0,
+    drop_money text NOT NULL DEFAULT '[0,0]',
     `str` int(10) NOT NULL DEFAULT 0,
     `money` bigint(20) NOT NULL DEFAULT 0,
     PRIMARY KEY (`uid`)
@@ -119,15 +119,14 @@ CREATE TABLE IF NOT EXISTS `pm_usersdata` (
 -- User's owned Pokemon
 CREATE TABLE IF NOT EXISTS `pm_mypm` (
     `id` mediumint(8) unsigned NOT NULL AUTO_INCREMENT,
-    `pctime` int(10) NOT NULL DEFAULT 0,
+    `created_at` int(10) NOT NULL DEFAULT 0,
     `uid` mediumint(9) NOT NULL DEFAULT 0,
     `pmname` varchar(10) NOT NULL DEFAULT '',
-    `nowname` varchar(10) NOT NULL DEFAULT '',
-    `pmno` smallint(8) unsigned NOT NULL DEFAULT 0,
+    `nickname` varchar(10) NOT NULL DEFAULT '',
+    `species_id` smallint(8) unsigned NOT NULL DEFAULT 0,
     `level` tinyint(5) unsigned NOT NULL DEFAULT 1,
     `experience` int(10) unsigned NOT NULL DEFAULT 0,
     `sex` tinyint(1) NOT NULL DEFAULT 0,
-    `sx` varchar(10) NOT NULL DEFAULT '',
     `hp` int(10) unsigned NOT NULL DEFAULT 0,
     `good` tinyint(3) unsigned NOT NULL DEFAULT 0,
     `itemevolve` tinyint(2) unsigned NOT NULL DEFAULT 0,
@@ -138,7 +137,7 @@ CREATE TABLE IF NOT EXISTS `pm_mypm` (
     `gduptime` int(10) unsigned NOT NULL DEFAULT 0,
     `initialuid` mediumint(9) NOT NULL DEFAULT 0,
     `swap` tinyint(1) NOT NULL DEFAULT 0,
-    `sg` tinyint(1) NOT NULL DEFAULT 0,
+    `is_shiny` tinyint(1) NOT NULL DEFAULT 0,
     `equipmentid1` mediumint(8) NOT NULL DEFAULT 0,
     `equipmentid2` mediumint(8) NOT NULL DEFAULT 0,
     `equipmentid3` mediumint(8) NOT NULL DEFAULT 0,
