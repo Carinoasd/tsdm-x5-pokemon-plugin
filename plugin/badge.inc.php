@@ -28,7 +28,7 @@ if (!$pet) {
 
 $imgDir = dirname(__DIR__) . '/images/spm';
 foreach (['gif','png'] as $ext) {
-    $f = "$imgDir/{$pet['species_id']}.$ext";
+    $f = "$imgDir/{$pet['pmno']}.$ext";
     if (file_exists($f)) {
         header('Content-Type: image/' . ($ext === 'png' ? 'png' : 'gif'));
         header('Cache-Control: public, max-age=300');

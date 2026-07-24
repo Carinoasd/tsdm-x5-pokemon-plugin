@@ -152,7 +152,7 @@ function api_test_create_pokemon()
 
     $input = get_json_input();
 
-    $pmno = isset($input['species_id']) ? validate_id($input['species_id'], 'pmno') : null;
+    $pmno = isset($input['pmno']) ? validate_id($input['pmno'], 'pmno') : null;
     if (!$pmno) {
         $pmno = rand(1, 151);
     }
@@ -204,10 +204,10 @@ function api_test_create_pokemon()
     $current_time = time();
 
     DB::query(pm_sql("INSERT INTO " . pm_table('pm_mypm') . "
-        (uid, pmno, pmname, nowname, level, exp, sex, sx, hp, iv_values, ev_values, site, pctime, good, ballid, state, statetime, gduptime, initialuid, swap, sg)
+        (uid, pmno, pmname, nowname, level, exp, sex, sx, hp, hpg, atkg, defg, spatkg, spdefg, sdg, site, pctime, good, ballid, state, statetime, gduptime, initialuid, swap, sg)
         VALUES
         (%d, %d, %s, %s, %d, %d, %d,
-         %s, %d, '{}', '{}', %d,
+         %s, %d, 0, 0, 0, 0, 0, 0, %d,
          %d, 0, 0, 0, 0, %d, %d, 1, %d)",
         $uid, $pmno, $pmname, $pmname, $level, $exp_for_level, $sex,
          $xs, $current_hp, $site,
@@ -407,15 +407,15 @@ function api_test_get_state()
 
         $pokemons_response[] = [
             'id' => (int) $p['id'],
-            'pmno' => (int) $p['species_id'],
-            'name' => $p['pmname'] ?: $p['nickname'],
-            'nickname' => $p['nickname'],
+            'pmno' => (int) $p['pmno'],
+            'name' => $p['pmname'] ?: $p['nowname'],
+            'nickname' => $p['nowname'],
             'level' => (int) $p['level'],
             'exp' => (int) $p['exp'],
             'hp' => (int) $p['hp'],
             'max_hp' => api_calculate_pokemon_max_hp($p),
             'is_zd' => (int)($p['site'] == 1),
-            'is_shiny' => (int) $p['is_shiny'],
+            'is_shiny' => (int) $p['sg'],
             'type1' => $p['type1'],
             'type2' => $p['type2'],
             'skills' => $skills_response

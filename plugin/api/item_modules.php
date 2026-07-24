@@ -612,7 +612,7 @@ function _evolution_stone($petid, $itemname, $itemid = 0)
     $evolution = DB::fetch_first(pm_sql(
         "SELECT * FROM " . pm_table('pm_up') . "
         WHERE pmid = %d AND cond = 'item' AND val = %d",
-        $pet['species_id'],
+        $pet['pmno'],
         $itemid
     ));
 
@@ -724,7 +724,7 @@ function jup($petid, $itemname)
     // 查找任何进化路线
     $evolution = DB::fetch_first(pm_sql(
         "SELECT * FROM " . pm_table('pm_up') . " WHERE pmid = %d LIMIT 1",
-        $pet['species_id']
+        $pet['pmno']
     ));
 
     if (!$evolution) {

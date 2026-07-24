@@ -317,7 +317,7 @@ function calculate_pokemon_full_stats($pm, $pm_data = null)
 {
     global $statehp, $stateatk, $statedef, $statespatk, $statespdef, $statespeed;
 
-    $pmno = (int) $pm['species_id'];
+    $pmno = (int) $pm['pmno'];
     $level = (int) $pm['level'];
 
     if ($pm_data === null) {
@@ -351,11 +351,26 @@ function calculate_pokemon_full_stats($pm, $pm_data = null)
 
     // 状态修正系数已在 utils.php 中定义（全局变量）
 
-    $iv = json_decode($pm['iv_values'], true);
-    $ev = json_decode($pm['ev_values'], true);
+    $iv = [
+        'hp' => (int) $pm['hpg'],
+        'atk' => (int) $pm['atkg'],
+        'def' => (int) $pm['defg'],
+        'spatk' => (int) $pm['spatkg'],
+        'spdef' => (int) $pm['spdefg'],
+        'speed' => (int) $pm['sdg'],
+    ];
+
+    $ev = [
+        'hp' => (int) $pm['hpn'],
+        'atk' => (int) $pm['atkn'],
+        'def' => (int) $pm['defn'],
+        'spatk' => (int) $pm['spatkn'],
+        'spdef' => (int) $pm['spdefn'],
+        'speed' => (int) $pm['sdn'],
+    ];
 
     $state = (int) $pm['state'];
-    $sg = (int) $pm['is_shiny'];
+    $sg = (int) $pm['sg'];
     $flash_boost = ($sg == 1) ? 2 : 1;
 
     $stats_config = [
@@ -461,7 +476,7 @@ function api_get_pokemon_list()
     $pokemons = [];
 
     foreach ($pm_rows as $pm) {
-        $pmno = (int) $pm['species_id'];
+        $pmno = (int) $pm['pmno'];
         $petid = (int) $pm['id'];
 
         // 检查并更新濒危状态
@@ -536,7 +551,7 @@ function api_get_pokemon_list()
         $pokemons[] = [
             'id' => $petid,
             'name' => $info ? $info['name'] : '???',
-            'nickname' => $pm['nickname'] ? $pm['nickname'] : null,
+            'nickname' => $pm['nowname'] ? $pm['nowname'] : null,
             'type_id' => $pmno,
             'level' => $level,
             'exp' => (int) $pm['exp'],
@@ -546,7 +561,7 @@ function api_get_pokemon_list()
             'hp' => (int) $pm['hp'],
             'max_hp' => $max_hp,
             'gender' => (int) $pm['sex'],
-            'is_shiny' => ((int) $pm['is_shiny']) === 1,
+            'is_shiny' => ((int) $pm['sg']) === 1,
             'site' => (int) $pm['site'],
             'state' => $pm_state,
             'state_text' => get_pokemon_state_text($pm_state),
@@ -603,7 +618,7 @@ function api_get_pokemon_detail()
         api_error('Pokemon not found', 404);
     }
 
-    $pmno = (int) $pm['species_id'];
+    $pmno = (int) $pm['pmno'];
 
     // 查询基础信息
     $info = DB::fetch_first(pm_sql("SELECT * FROM " . pm_table('pm_data') . " WHERE id = %d", $pmno));
@@ -672,7 +687,7 @@ function api_get_pokemon_detail()
     api_success([
         'id' => (int) $pm['id'],
         'name' => $info ? $info['name'] : '???',
-        'nickname' => $pm['nickname'] ? $pm['nickname'] : null,
+        'nickname' => $pm['nowname'] ? $pm['nowname'] : null,
         'type_id' => $pmno,
         'level' => $level,
         'exp' => (int) $pm['exp'],
@@ -682,7 +697,7 @@ function api_get_pokemon_detail()
         'hp' => (int) $pm['hp'],
         'max_hp' => $max_hp,
         'gender' => (int) $pm['sex'],
-        'is_shiny' => ((int) $pm['is_shiny']) === 1,
+        'is_shiny' => ((int) $pm['sg']) === 1,
         'state' => $pm_state,
         'state_text' => get_pokemon_state_text($pm_state),
         'state_class' => get_pokemon_state_class($pm_state),
@@ -825,31 +840,28 @@ function calculate_stats($pm, $info)
 
     $level = (int) $pm['level'];
     $state = (int) $pm['state'];
-    $sg = (int) $pm['is_shiny'];
+    $sg = (int) $pm['sg'];
     $flash_boost = ($sg == 1) ? 2 : 1;
 
     $stat_map = [
-        'hp'     => ['base' => 'hp',     'json_key' => 'hp',    'state' => $statehp],
-        'attack' => ['base' => 'atk',    'json_key' => 'atk',   'state' => $stateatk],
-        'defense'=> ['base' => 'def',    'json_key' => 'def',   'state' => $statedef],
-        'sp_attack' => ['base' => 'spatk','json_key' => 'spatk', 'state' => $statespatk],
-        'sp_defense'=>['base' => 'spdef', 'json_key' => 'spdef', 'state' => $statespdef],
-        'speed'  => ['base' => 'speed',   'json_key' => 'spd',   'state' => $statespeed],
+        'hp'     => ['base' => 'hp',     'iv' => 'hpg',   'ev' => 'hpn',   'state' => $statehp],
+        'attack' => ['base' => 'atk',    'iv' => 'atkg',  'ev' => 'atkn',  'state' => $stateatk],
+        'defense'=> ['base' => 'def',    'iv' => 'defg',  'ev' => 'defn',  'state' => $statedef],
+        'sp_attack' => ['base' => 'spatk','iv' => 'spatkg','ev' => 'spatkn','state' => $statespatk],
+        'sp_defense'=>['base' => 'spdef', 'iv' => 'spdefg','ev' => 'spdefn','state' => $statespdef],
+        'speed'  => ['base' => 'sd',     'iv' => 'sdg',   'ev' => 'sdn',   'state' => $statespeed],
     ];
-
-    $iv = json_decode($pm['iv_values'], true);
-    $ev = json_decode($pm['ev_values'], true);
 
     $result = [];
     foreach ($stat_map as $key => $cfg) {
         $base = (int) $info[$cfg['base']];
-        $iv_val = (int) ($iv[$cfg['json_key']] ?? 0);
-        $ev_val = (int) ($ev[$cfg['json_key']] ?? 0);
+        $iv = (int) $pm[$cfg['iv']];
+        $ev = (int) $pm[$cfg['ev']];
         $is_hp = ($key === 'hp');
         $boost = $is_hp ? (10 + $level) : 5;
         $boost *= $flash_boost;
         $state_multiplier = isset($cfg['state'][$state]) ? (float)$cfg['state'][$state] : 1.0;
-        $result[$key] = (int) floor(((2 * $base + $iv_val + $ev_val / 4) * $level / 100 + $boost) * $state_multiplier);
+        $result[$key] = (int) floor(((2 * $base + $iv + $ev / 4) * $level / 100 + $boost) * $state_multiplier);
     }
 
     $equipment_bonuses = api_parse_pet_wear_items($pm, false, $result['hp']);
@@ -899,7 +911,7 @@ function api_get_learnable_skills()
         api_error('Pokemon not found', 404);
     }
 
-    $pmno = (int) $pm['species_id'];
+    $pmno = (int) $pm['pmno'];
     $pet_level = (int) $pm['level'];
 
     // 获取宠物基础信息（包含属性）
@@ -1119,7 +1131,7 @@ function api_learn_skill()
     }
 
     $pet_level = (int) $pm['level'];
-    $pmno = (int) $pm['species_id'];
+    $pmno = (int) $pm['pmno'];
 
     // 检查技能是否存在
     $skill = DB::fetch_first(pm_sql(
@@ -1437,7 +1449,7 @@ WHERE (equipmentid1=%d OR equipmentid2=%d OR equipmentid3=%d OR equipmentid4=%d)
     ));
 
     if ($equipped_on) {
-        api_error("该装备已被 {$equipped_on['nickname']} 使用", 400);
+        api_error("该装备已被 {$equipped_on['nowname']} 使用", 400);
     }
 
     // 确定槽位
@@ -1487,7 +1499,7 @@ SET $slot_field=%d WHERE id=%d AND uid=%d",
         $uid
     ));
 
-    $pmno = (int) $pm['species_id'];
+    $pmno = (int) $pm['pmno'];
     $pm_data = DB::fetch_first(pm_sql("SELECT * FROM " . pm_table('pm_data') . " WHERE id = %d", $pmno));
     $full_stats = calculate_pokemon_full_stats($pm, $pm_data);
 
@@ -1610,7 +1622,7 @@ SET $slot_field=0 WHERE id=%d AND uid=%d",
         $uid
     ));
 
-    $pmno = (int) $pm['species_id'];
+    $pmno = (int) $pm['pmno'];
     $pm_data = DB::fetch_first(pm_sql("SELECT * FROM " . pm_table('pm_data') . " WHERE id = %d", $pmno));
     $full_stats = calculate_pokemon_full_stats($pm, $pm_data);
 
@@ -1681,7 +1693,7 @@ function api_update_pokemon_state()
 
     $pet_id = (int) $pm['id'];
     $current_state = (int) $pm['state'];
-    $pmno = (int) $pm['species_id'];
+    $pmno = (int) $pm['pmno'];
 
     // 可随机触发的基础状态列表
     $base_states = [
