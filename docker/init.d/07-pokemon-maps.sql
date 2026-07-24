@@ -1,5 +1,5 @@
 SET sql_mode = '';
-INSERT IGNORE INTO `pm_map` (`id`, `name`, `is_enabled`, `minlevel`, `maxlevel`, `exp`, `site`, `expn`, `region`, `pos_x`, `pos_y`) VALUES
+INSERT IGNORE INTO `pm_map` (`id`, `name`, `is_enabled`, `min_level`, `max_level`, `experience`, `site`, `boss_config`, `region`, `pos_x`, `pos_y`) VALUES
 (102, '101道路', 1, 4, 5, 0, 'b', 0, '', 50, 50),
 (103, '102道路', 1, 4, 5, 0, 'l', 0, '', 50, 50),
 (104, '102道池', 1, 4, 5, 0, 'l', 0, '', 50, 50),
@@ -103,4 +103,5 @@ INSERT IGNORE INTO `pm_map` (`id`, `name`, `is_enabled`, `minlevel`, `maxlevel`,
 (205, '试炼塔三', 0, 100, 100, 0, 'n', 0, '', 50, 50),
 (209, '收集之路', 1, 5, 5, 0, 'g', 1, '', 50, 50),
 (210, '怪兽之王', 0, 200, 200, 0, 'f', 1, '', 50, 50);
+
 

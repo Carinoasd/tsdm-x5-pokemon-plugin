@@ -1,5 +1,5 @@
 SET sql_mode = '';
-INSERT IGNORE INTO `pm_itemdata` (`id`,`name`,`tpname`,`shop`,`money`,`txt`,`type`,`lvask`,`xsask`,`addhp`,`addexp`,`addlv`,`addgood`,`ballid`,`upitem`,`captmax`,`sitemname`,`zbtype`,`equipment_hp`,`equipment_atk`,`equipment_def`,`equipment_spatk`,`equipment_spdef`,`equipment_sd`) VALUES (2,'奇异糖果','lvupitem',0,5000,'精灵等级上升一级。',4,0,'',0,0,1,0,0,0,0,'',0,0,0,0,0,0,0),
+INSERT IGNORE INTO `pm_itemdata` (`id`,`name`,`tpname`,`shop`,`money`,`description`,`type`,`lvask`,`xsask`,`addhp`,`addexp`,`addlv`,`addgood`,`ballid`,`upitem`,`captmax`,`sitemname`,`zbtype`,`equipment_hp`,`equipment_atk`,`equipment_def`,`equipment_spatk`,`equipment_spdef`,`equipment_sd`) VALUES (2,'奇异糖果','lvupitem',0,5000,'精灵等级上升一级。',4,0,'',0,0,1,0,0,0,0,'',0,0,0,0,0,0,0),
 (3,'水之石','szs',1,250,'充满水系能量的石头，使一些精灵进化。',3,0,'',0,0,0,0,0,1,0,'',0,0,0,0,0,0,0),
 (4,'叶之石','czs',1,250,'充满草系能量的石头，使一些精灵进化。',3,0,'',0,0,0,0,0,2,0,'',0,0,0,0,0,0,0),
 (5,'火之石','hzs',1,250,'充满火系能量的石头，使一些精灵进化。',3,0,'',0,0,0,0,0,3,0,'',0,0,0,0,0,0,0),
