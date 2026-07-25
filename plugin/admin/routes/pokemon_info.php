@@ -22,34 +22,36 @@ function list_pokemon_info($uid, $from, $count)
           array_push($skills, new_pokemon_skill_info($query_skill['skillid'], $query_skill['skillnum']));
         }
 
+      $iv = json_decode($query['iv_values'], true);
+      $ev = json_decode($query['ev_values'], true);
       $item = new_pokemon_info(
         $pokemon_id,
-        intval($query['pmno']),
+        intval($query['species_id']),
         $uid,
-        $query['nowname'],
+        $query['nickname'],
         translate_pokemon_site_id_to_label(intval($query['site'])),
         intval($query['level']),
         intval($query['exp']),
         intval($query['good']),
         intval($query['ballid']),
-        intval($query['sg']) == 1,
+        intval($query['is_shiny']) == 1,
         translate_pokemon_status_id_to_label(normalize_pokemon_status($query['state'], $pokemon_id)),
         translate_pokemon_sex_id_to_label(intval($query['sex'])),
         new_pokemon_attributes(
-          intval($query['hpg']),
-          intval($query['atkg']),
-          intval($query['defg']),
-          intval($query['spatkg']),
-          intval($query['spdefg']),
-          intval($query['sdg'])
+          intval($iv['hp'] ?? 0),
+          intval($iv['atk'] ?? 0),
+          intval($iv['def'] ?? 0),
+          intval($iv['spatk'] ?? 0),
+          intval($iv['spdef'] ?? 0),
+          intval($iv['speed'] ?? 0)
         ),
         new_pokemon_attributes(
-          intval($query['hpn']),
-          intval($query['atkn']),
-          intval($query['defn']),
-          intval($query['spatkn']),
-          intval($query['spdefn']),
-          intval($query['sdn'])
+          intval($ev['hp'] ?? 0),
+          intval($ev['atk'] ?? 0),
+          intval($ev['def'] ?? 0),
+          intval($ev['spatk'] ?? 0),
+          intval($ev['spdef'] ?? 0),
+          intval($ev['speed'] ?? 0)
         ),
         $skills,
         [
@@ -79,35 +81,37 @@ function get_pokemon_info($id)
         array_push($skills, new_pokemon_skill_info($query_skill['skillid'], $query_skill['skillnum']));
       }
 
+      $iv = json_decode($query['iv_values'], true);
+      $ev = json_decode($query['ev_values'], true);
     array_push($ret, new_pokemon_info(
       $pokemon_id,
-      intval($query['pmno']),
+      intval($query['species_id']),
       $uid,
-      $query['nowname'],
+      $query['nickname'],
       translate_pokemon_site_id_to_label(intval($query['site'])),
       intval($query['level']),
       intval($query['exp']),
       intval($query['good']),
       intval($query['ballid']),
-      intval($query['sg']) == 1,
+      intval($query['is_shiny']) == 1,
       translate_pokemon_status_id_to_label(normalize_pokemon_status($query['state'], $pokemon_id)),
       translate_pokemon_sex_id_to_label(intval($query['sex'])),
 
       new_pokemon_attributes(
-        intval($query['hpg']),
-        intval($query['atkg']),
-        intval($query['defg']),
-        intval($query['spatkg']),
-        intval($query['spdefg']),
-        intval($query['sdg'])
+        intval($iv['hp'] ?? 0),
+        intval($iv['atk'] ?? 0),
+        intval($iv['def'] ?? 0),
+        intval($iv['spatk'] ?? 0),
+        intval($iv['spdef'] ?? 0),
+        intval($iv['speed'] ?? 0)
       ),
       new_pokemon_attributes(
-        intval($query['hpn']),
-        intval($query['atkn']),
-        intval($query['defn']),
-        intval($query['spatkn']),
-        intval($query['spdefn']),
-        intval($query['sdn'])
+        intval($ev['hp'] ?? 0),
+        intval($ev['atk'] ?? 0),
+        intval($ev['def'] ?? 0),
+        intval($ev['spatk'] ?? 0),
+        intval($ev['spdef'] ?? 0),
+        intval($ev['speed'] ?? 0)
       ),
       $skills,
       [
@@ -139,89 +143,77 @@ function set_pokemon_info($info)
       exit(json_encode($json_ret, JSON_UNESCAPED_UNICODE));
     }
 
-    if ($query['nowname'] != $info["name"]) {
-      DB::query("UPDATE pm_mypm set `nowname`='{$info["name"]}' where `id`='$id'");
+    if ($query['nickname'] != ($info["name"] ?? $query['nickname'])) {
+      DB::query("UPDATE pm_mypm set `nickname`='" . addslashes($info["name"] ?? $query['nickname']) . "' where `id`='$id'");
     }
-    if (intval($query['site']) != translate_pokemon_site_label_to_id($info["site"])) {
-      DB::query("UPDATE pm_mypm set `site`='" . translate_pokemon_site_label_to_id($info["site"]) . "' where `id`='$id'");
-    }
-
-    if (intval($query['level']) != intval($info["level"])) {
-      DB::query("UPDATE pm_mypm set `level`='" . intval($info["level"]) . "' where `id`='$id'");
-    }
-    if (intval($query['exp']) != intval($info["experience"])) {
-      DB::query("UPDATE pm_mypm set `exp`='" . intval($info["exp"]) . "' where `id`='$id'");
-    }
-    if (intval($query['good']) != intval($info["intimacy"])) {
-      DB::query("UPDATE pm_mypm set `good`='" . intval($info["good"]) . "' where `id`='$id'");
-    }
-    if (intval($query['ballid']) != intval($info["using_ball_id"])) {
-      DB::query("UPDATE pm_mypm set `ballid`='" . intval($info["ballid"]) . "' where `id`='$id'");
-    }
-    if (boolval($query['sg']) != boolval($info["is_shiny"])) {
-      DB::query("UPDATE pm_mypm set `sg`='" . boolval($info["sg"]) ? 1 : 0 . "' where `id`='$id'");
-    }
-    if ($query['state'] != translate_pokemon_status_label_to_id($info["status"])) {
-      DB::query("UPDATE pm_mypm set `state`='" . translate_pokemon_status_label_to_id($info["state"]) . "' where `id`='$id'");
-    }
-    if ($query['sex'] != translate_pokemon_sex_label_to_id($info["sex"])) {
-      DB::query("UPDATE pm_mypm set `sex` ='" . translate_pokemon_sex_label_to_id($info["sex"]) . "' where `id`='$id'");
+    if (intval($query['site']) != translate_pokemon_site_label_to_id($info["site"] ?? "header")) {
+      DB::query("UPDATE pm_mypm set `site`='" . translate_pokemon_site_label_to_id($info["site"] ?? "header") . "' where `id`='$id'");
     }
 
-    if (intval($query['hpg']) != intval($info["statistic"]["hit_points"])) {
-      DB::query("UPDATE pm_mypm set `hpg`='" . intval($info["statistic"]["hit_points"]) . "' where `id`='$id'");
+    if (intval($query['level']) != intval($info["level"] ?? $query['level'])) {
+      DB::query("UPDATE pm_mypm set `level`='" . intval($info["level"] ?? $query['level']) . "' where `id`='$id'");
     }
-    if (intval($query['atkg']) != intval($info["statistic"]["attack"])) {
-      DB::query("UPDATE pm_mypm set `atkg`='" . intval($info["statistic"]["attack"]) . "' where `id`='$id'");
+    if (intval($query['exp']) != intval($info["experience"] ?? $query['exp'])) {
+      DB::query("UPDATE pm_mypm set `exp`='" . intval($info["experience"] ?? $query['exp']) . "' where `id`='$id'");
     }
-    if (intval($query['defg']) != intval($info["statistic"]["defense"])) {
-      DB::query("UPDATE pm_mypm set `defg`='" . intval($info["statistic"]["defense"]) . "' where `id`='$id'");
+    if (intval($query['good']) != intval($info["intimacy"] ?? $query['good'])) {
+      DB::query("UPDATE pm_mypm set `good`='" . intval($info["intimacy"] ?? $query['good']) . "' where `id`='$id'");
     }
-    if (intval($query['spatkg']) != intval($info["statistic"]["special_attack"])) {
-      DB::query("UPDATE pm_mypm set `spatkg`='" . intval($info["statistic"]["special_attack"]) . "' where `id`='$id'");
+    if (intval($query['ballid']) != intval($info["using_ball_id"] ?? $query['ballid'])) {
+      DB::query("UPDATE pm_mypm set `ballid`='" . intval($info["using_ball_id"] ?? $query['ballid']) . "' where `id`='$id'");
     }
-    if (intval($query['spdefg']) != intval($info["statistic"]["special_defense"])) {
-      DB::query("UPDATE pm_mypm set `spdefg`='" . intval($info["statistic"]["special_defense"]) . "' where `id`='$id'");
+    if (boolval($query['is_shiny']) != boolval($info["is_shiny"] ?? false)) {
+      DB::query("UPDATE pm_mypm set `is_shiny`='" . (boolval($info["is_shiny"] ?? false) ? 1 : 0) . "' where `id`='$id'");
     }
-    if (intval($query['sdg']) != intval($info["statistic"]["speed"])) {
-      DB::query("UPDATE pm_mypm set `sdg`='" . intval($info["statistic"]["speed"]) . "' where `id`='$id'");
+    if ($query['state'] != translate_pokemon_status_label_to_id($info["status"] ?? "normal")) {
+      DB::query("UPDATE pm_mypm set `state`='" . translate_pokemon_status_label_to_id($info["status"] ?? "normal") . "' where `id`='$id'");
     }
-
-    if (intval($query['hpn']) != intval($info["base_points"]["hit_points"])) {
-      DB::query("UPDATE pm_mypm set `hpn`='" . intval($info["base_points"]["hit_points"]) . "' where `id`='$id'");
-    }
-    if (intval($query['atkn']) != intval($info["base_points"]["attack"])) {
-      DB::query("UPDATE pm_mypm set `atkn`='" . intval($info["base_points"]["attack"]) . "' where `id`='$id'");
-    }
-    if (intval($query['defn']) != intval($info["base_points"]["defense"])) {
-      DB::query("UPDATE pm_mypm set `defn`='" . intval($info["base_points"]["defense"]) . "' where `id`='$id'");
-    }
-    if (intval($query['spatkn']) != intval($info["base_points"]["special_attack"])) {
-      DB::query("UPDATE pm_mypm set `spatkn`='" . intval($info["base_points"]["special_attack"]) . "' where `id`='$id'");
-    }
-    if (intval($query['spdefn']) != intval($info["base_points"]["special_defense"])) {
-      DB::query("UPDATE pm_mypm set `spdefn`='" . intval($info["base_points"]["special_defense"]) . "' where `id`='$id'");
-    }
-    if (intval($query['sdn']) != intval($info["base_points"]["speed"])) {
-      DB::query("UPDATE pm_mypm set `sdn`='" . intval($info["base_points"]["speed"]) . "' where `id`='$id'");
+    if ($query['sex'] != translate_pokemon_sex_label_to_id($info["sex"] ?? "male")) {
+      DB::query("UPDATE pm_mypm set `sex` ='" . translate_pokemon_sex_label_to_id($info["sex"] ?? "male") . "' where `id`='$id'");
     }
 
-    if (intval($query['equipmentid1']) != intval($info["armor_slots_id"][0])) {
-      DB::query("UPDATE pm_mypm set `equipmentid1`='" . intval($info["armor_slots_id"][0]) . "' where `id`='$id'");
+    $old_iv = json_decode($query['iv_values'], true);
+    $new_iv = [
+      'hp' => intval($info["statistic"]["hit_points"]),
+      'atk' => intval($info["statistic"]["attack"]),
+      'def' => intval($info["statistic"]["defense"]),
+      'spatk' => intval($info["statistic"]["special_attack"]),
+      'spdef' => intval($info["statistic"]["special_defense"]),
+      'speed' => intval($info["statistic"]["speed"]),
+    ];
+    if ($old_iv != $new_iv) {
+      DB::query("UPDATE pm_mypm set iv_values='" . addslashes(json_encode($new_iv, JSON_UNESCAPED_UNICODE)) . "' where id='$id'");
     }
-    if (intval($query['equipmentid2']) != intval($info["armor_slots_id"][1])) {
-      DB::query("UPDATE pm_mypm set `equipmentid2`='" . intval($info["armor_slots_id"][1]) . "' where `id`='$id'");
+    $old_ev = json_decode($query['ev_values'], true);
+    $new_ev = [
+      'hp' => intval($info["base_points"]["hit_points"]),
+      'atk' => intval($info["base_points"]["attack"]),
+      'def' => intval($info["base_points"]["defense"]),
+      'spatk' => intval($info["base_points"]["special_attack"]),
+      'spdef' => intval($info["base_points"]["special_defense"]),
+      'speed' => intval($info["base_points"]["speed"]),
+    ];
+    if ($old_ev != $new_ev) {
+      DB::query("UPDATE pm_mypm set ev_values='" . addslashes(json_encode($new_ev, JSON_UNESCAPED_UNICODE)) . "' where id='$id'");
     }
-    if (intval($query['equipmentid3']) != intval($info["armor_slots_id"][2])) {
-      DB::query("UPDATE pm_mypm set `equipmentid3`='" . intval($info["armor_slots_id"][2]) . "' where `id`='$id'");
+
+    if (intval($query['equipmentid1']) != intval($info["armor_slots_id"][0] ?? 0)) {
+      DB::query("UPDATE pm_mypm set `equipmentid1`='" . intval($info["armor_slots_id"][0] ?? 0) . "' where `id`='$id'");
     }
-    if (intval($query['equipmentid4']) != intval($info["armor_slots_id"][3])) {
-      DB::query("UPDATE pm_mypm set `equipmentid4`='" . intval($info["armor_slots_id"][3]) . "' where `id`='$id'");
+    if (intval($query['equipmentid2']) != intval($info["armor_slots_id"][1] ?? 0)) {
+      DB::query("UPDATE pm_mypm set `equipmentid2`='" . intval($info["armor_slots_id"][1] ?? 0) . "' where `id`='$id'");
+    }
+    if (intval($query['equipmentid3']) != intval($info["armor_slots_id"][2] ?? 0)) {
+      DB::query("UPDATE pm_mypm set `equipmentid3`='" . intval($info["armor_slots_id"][2] ?? 0) . "' where `id`='$id'");
+    }
+    if (intval($query['equipmentid4']) != intval($info["armor_slots_id"][3] ?? 0)) {
+      DB::query("UPDATE pm_mypm set `equipmentid4`='" . intval($info["armor_slots_id"][3] ?? 0) . "' where `id`='$id'");
     }
 
     // 额外更新技能数据表
+    if (!empty($info["skills"])) {
     foreach ($info["skills"] as $skill) {
-      $uid = intval($info["uid"]);
+      $uid = intval($info["owner"] ?? $query['uid']);
       $petid = intval($id);
       $skillid = intval($skill["type_id"]);
       $skillnum = intval($skill["count"]);

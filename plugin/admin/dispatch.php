@@ -49,7 +49,12 @@ function admin_dispatch($action, $params) {
             if (!function_exists($fn)) { echo json_encode(["success"=>true,"data"=>[]]); exit; }
             $from = intval($params["from"] ?? 0);
             $count = intval($params["count"] ?? 100);
-            $result = function_exists("list_" . $entity) ? call_user_func($fn, $from, $count) : call_user_func($fn);
+            if (in_array($entity, ["pokemon_info", "item_info"])) {
+                $uid = intval($params["uid"] ?? 0);
+                $result = function_exists("list_" . $entity) ? call_user_func($fn, $uid, $from, $count) : call_user_func($fn, $uid);
+            } else {
+                $result = function_exists("list_" . $entity) ? call_user_func($fn, $from, $count) : call_user_func($fn);
+            }
             break;
         case "get":
             $fn = "get_" . $entity;
