@@ -36,10 +36,11 @@ function list_pokemon_type($from, $count)
         array_push($evolution_info_ids, intval($query_evolution_info['id']));
       }
 
+      $effort = json_decode($query['effort_values'], true);
       $item = new_pokemon_type(
         intval($query['id']),
         $query['name'],
-        $query['txt'],
+        $query['description'],
 
         intval($query['money']),
         intval($query['shop']) != 0,
@@ -53,18 +54,18 @@ function list_pokemon_type($from, $count)
           intval($query['def']),
           intval($query['spatk']),
           intval($query['spdef']),
-          intval($query['sd'])
+          intval($query['speed'])
         ),
         new_pokemon_attributes(
-          intval($query['hpn']),
-          intval($query['atkn']),
-          intval($query['defn']),
-          intval($query['spatkn']),
-          intval($query['spdefn']),
-          intval($query['sdn'])
+          intval($effort['hp'] ?? 0),
+          intval($effort['atk'] ?? 0),
+          intval($effort['def'] ?? 0),
+          intval($effort['spatk'] ?? 0),
+          intval($effort['spdef'] ?? 0),
+          intval($effort['spd'] ?? 0)
         ),
         [translate_chinese_kind_to_kind_id($query['xs']), translate_chinese_kind_to_kind_id($query['xs2'])],
-        intval($query['god']) != 0,
+        intval($query['is_legendary']) != 0,
 
 
         $map_ids,
@@ -118,10 +119,11 @@ function get_pokemon_type($id, $depth = 0)
     }
     $evolution_target_ids = array_unique($evolution_target_ids);
 
-    $item = new_pokemon_type(
-      intval($query['id']),
-      $query['name'],
-      $query['txt'],
+      $effort = json_decode($query['effort_values'], true);
+      $item = new_pokemon_type(
+        intval($query['id']),
+        $query['name'],
+      $query['description'],
 
       intval($query['money']),
       intval($query['shop']) != 0,
@@ -135,18 +137,18 @@ function get_pokemon_type($id, $depth = 0)
         intval($query['def']),
         intval($query['spatk']),
         intval($query['spdef']),
-        intval($query['sd'])
+        intval($query['speed'])
       ),
       new_pokemon_attributes(
-        intval($query['hpn']),
-        intval($query['atkn']),
-        intval($query['defn']),
-        intval($query['spatkn']),
-        intval($query['spdefn']),
-        intval($query['sdn'])
+        intval($effort['hp'] ?? 0),
+        intval($effort['atk'] ?? 0),
+        intval($effort['def'] ?? 0),
+        intval($effort['spatk'] ?? 0),
+        intval($effort['spdef'] ?? 0),
+        intval($effort['spd'] ?? 0)
       ),
       [translate_chinese_kind_to_kind_id($query['xs']), translate_chinese_kind_to_kind_id($query['xs2'])],
-      intval($query['god']) != 0,
+      intval($query['is_legendary']) != 0,
 
       $map_ids,
       $evolution_info_ids,
@@ -220,7 +222,7 @@ function set_pokemon_type($info)
     if ($query['name'] != $info["name"]) {
       DB::query("UPDATE pm_data set name='" . addslashes($info['name']) . "' where id={$info["id"]}");
     }
-    if ($query['txt'] != $info["description"]) {
+    if ($query['description'] != $info["description"]) {
       DB::query("UPDATE pm_data set txt='" . addslashes($info['description']) . "' where id={$info["id"]}");
     }
 
@@ -254,26 +256,26 @@ function set_pokemon_type($info)
     if (intval($query['spdef']) != intval($info["initial_statistic"]["special_defense"])) {
       DB::query("UPDATE pm_data set spdef=" . intval($info["initial_statistic"]["special_defense"]) . " where id={$info["id"]}");
     }
-    if (intval($query['sd']) != intval($info["initial_statistic"]["speed"])) {
+    if (intval($query['speed']) != intval($info["initial_statistic"]["speed"])) {
       DB::query("UPDATE pm_data set sd=" . intval($info["initial_statistic"]["speed"]) . " where id={$info["id"]}");
     }
 
-    if (intval($query['hpn']) != intval($info["initial_base_points"]["hit_points"])) {
+    if (intval($effort['hp'] ?? 0) != intval($info["initial_base_points"]["hit_points"])) {
       DB::query("UPDATE pm_data set hpn=" . intval($info["initial_base_points"]["hit_points"]) . " where id={$info["id"]}");
     }
-    if (intval($query['atkn']) != intval($info["initial_base_points"]["attack"])) {
+    if (intval($effort['atk'] ?? 0) != intval($info["initial_base_points"]["attack"])) {
       DB::query("UPDATE pm_data set atkn=" . intval($info["initial_base_points"]["attack"]) . " where id={$info["id"]}");
     }
-    if (intval($query['defn']) != intval($info["initial_base_points"]["defense"])) {
+    if (intval($effort['def'] ?? 0) != intval($info["initial_base_points"]["defense"])) {
       DB::query("UPDATE pm_data set defn=" . intval($info["initial_base_points"]["defense"]) . " where id={$info["id"]}");
     }
-    if (intval($query['spatkn']) != intval($info["initial_base_points"]["special_attack"])) {
+    if (intval($effort['spatk'] ?? 0) != intval($info["initial_base_points"]["special_attack"])) {
       DB::query("UPDATE pm_data set spatkn=" . intval($info["initial_base_points"]["special_attack"]) . " where id={$info["id"]}");
     }
-    if (intval($query['spdefn']) != intval($info["initial_base_points"]["special_defense"])) {
+    if (intval($effort['spdef'] ?? 0) != intval($info["initial_base_points"]["special_defense"])) {
       DB::query("UPDATE pm_data set spdefn=" . intval($info["initial_base_points"]["special_defense"]) . " where id={$info["id"]}");
     }
-    if (intval($query['sdn']) != intval($info["initial_base_points"]["speed"])) {
+    if (intval($effort['spd'] ?? 0) != intval($info["initial_base_points"]["speed"])) {
       DB::query("UPDATE pm_data set sdn=" . intval($info["initial_base_points"]["speed"]) . " where id={$info["id"]}");
     }
 
@@ -285,7 +287,7 @@ function set_pokemon_type($info)
     ) {
       DB::query("UPDATE pm_data set xs2='" . translate_kind_id_to_chinese_kind($info["kind"][1]) . "' where id={$info["id"]}");
     }
-    if (boolval($query['god']) != boolval($info["is_legendary"])) {
+    if (boolval($query['is_legendary']) != boolval($info["is_legendary"])) {
       DB::query("UPDATE pm_data set god=" . (boolval($info["is_legendary"]) ? 1 : 0) . " where id={$info["id"]}");
     }
 
@@ -468,10 +470,11 @@ function filter_pokemon_type($list)
                   array_push($evolution_info_ids, intval($query_evolution_info['id']));
                 }
 
-                $item = new_pokemon_type(
+                $effort = json_decode($query['effort_values'], true);
+      $item = new_pokemon_type(
                   intval($query['id']),
                   $query['name'],
-                  $query['txt'],
+                  $query['description'],
 
                   intval($query['money']),
                   intval($query['shop']) != 0,
@@ -485,18 +488,18 @@ function filter_pokemon_type($list)
                     intval($query['def']),
                     intval($query['spatk']),
                     intval($query['spdef']),
-                    intval($query['sd'])
+                    intval($query['speed'])
                   ),
                   new_pokemon_attributes(
-                    intval($query['hpn']),
-                    intval($query['atkn']),
-                    intval($query['defn']),
-                    intval($query['spatkn']),
-                    intval($query['spdefn']),
-                    intval($query['sdn'])
+                    intval($effort['hp'] ?? 0),
+                    intval($effort['atk'] ?? 0),
+                    intval($effort['def'] ?? 0),
+                    intval($effort['spatk'] ?? 0),
+                    intval($effort['spdef'] ?? 0),
+                    intval($effort['spd'] ?? 0)
                   ),
                   [translate_chinese_kind_to_kind_id($query['xs']), translate_chinese_kind_to_kind_id($query['xs2'])],
-                  intval($query['god']) != 0,
+                  intval($query['is_legendary']) != 0,
 
                   $map_ids,
                   $evolution_info_ids,
@@ -562,10 +565,11 @@ function filter_pokemon_type($list)
         array_push($evolution_info_ids, intval($query_evolution_info['id']));
       }
 
+      $effort = json_decode($query['effort_values'], true);
       $item = new_pokemon_type(
         intval($query['id']),
         $query['name'],
-        $query['txt'],
+        $query['description'],
 
         intval($query['money']),
         intval($query['shop']) != 0,
@@ -579,18 +583,18 @@ function filter_pokemon_type($list)
           intval($query['def']),
           intval($query['spatk']),
           intval($query['spdef']),
-          intval($query['sd'])
+          intval($query['speed'])
         ),
         new_pokemon_attributes(
-          intval($query['hpn']),
-          intval($query['atkn']),
-          intval($query['defn']),
-          intval($query['spatkn']),
-          intval($query['spdefn']),
-          intval($query['sdn'])
+          intval($effort['hp'] ?? 0),
+          intval($effort['atk'] ?? 0),
+          intval($effort['def'] ?? 0),
+          intval($effort['spatk'] ?? 0),
+          intval($effort['spdef'] ?? 0),
+          intval($effort['spd'] ?? 0)
         ),
         [translate_chinese_kind_to_kind_id($query['xs']), translate_chinese_kind_to_kind_id($query['xs2'])],
-        intval($query['god']) != 0,
+        intval($query['is_legendary']) != 0,
 
         $map_ids,
         $evolution_info_ids,
