@@ -229,6 +229,7 @@ function set_pokemon_info($info)
         exit(json_encode($json_ret, JSON_UNESCAPED_UNICODE));
       }
     }
+    }
   } else {
     $json_ret = [];
     $json_ret["success"] = false;
