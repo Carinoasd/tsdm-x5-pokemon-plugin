@@ -223,7 +223,7 @@ function api_test_create_pokemon()
                 $skill_id
             ));
             if ($skill_data) {
-                $max_pp = (int) $skill_data['num'];
+                $max_pp = (int) $skill_data['max_uses'];
                 DB::query(pm_sql("INSERT INTO " . pm_table('pm_myskill') . "
                     (uid, petid, skillid, skillnum)
                     VALUES (%d, %d, %d, %d)",
@@ -231,10 +231,10 @@ function api_test_create_pokemon()
             }
         }
     } else {
-        $auto_skills = DB::fetch_all(pm_sql("SELECT id, num FROM " . pm_table('pm_skill') . "
-            WHERE FIND_IN_SET(%d, REPLACE(pmid, '|', ',')) > 0
-            AND lv <= %d
-            ORDER BY lv DESC LIMIT 4",
+        $auto_skills = DB::fetch_all(pm_sql("SELECT id, max_uses FROM " . pm_table('pm_skill') . "
+            WHERE FIND_IN_SET(%d, REPLACE(available_pokemons, '|', ',')) > 0
+            AND level_required <= %d
+            ORDER BY level_required DESC LIMIT 4",
             $pmno, $level));
 
         foreach ($auto_skills as $skill) {
@@ -304,16 +304,16 @@ function api_test_add_item()
     ));
 
     if ($existing) {
-        $new_quantity = (int) $existing['num'] + $quantity;
+        $new_quantity = (int) $existing['nums'] + $quantity;
         DB::query(pm_sql("UPDATE " . pm_table('pm_myitem') . "
-            SET num = %d
+            SET nums = %d
             WHERE id = %d",
             $new_quantity, (int) $existing['id']));
         $inventory_id = (int) $existing['id'];
         $final_quantity = $new_quantity;
     } else {
         DB::query(pm_sql("INSERT INTO " . pm_table('pm_myitem') . "
-            (uid, itemid, num)
+            (uid, itemid, nums)
             VALUES (%d, %s, %d)",
             $uid, strval($item_id), $quantity));
         $inventory_id = DB::insert_id();
@@ -423,7 +423,7 @@ function api_test_get_state()
     }
 
     $items_response = [];
-    $item_rows = DB::fetch_all(pm_sql("SELECT m.id, m.itemid, m.num, d.name, d.type as item_type, d.id as itemdata_id
+    $item_rows = DB::fetch_all(pm_sql("SELECT m.id, m.itemid, m.nums, d.name, d.type as item_type, d.id as itemdata_id
         FROM " . pm_table('pm_myitem') . " m
         LEFT JOIN " . pm_table('pm_itemdata') . " d ON m.itemid = d.id
         WHERE m.uid = %d
@@ -435,7 +435,7 @@ function api_test_get_state()
             'id' => (int) $i['id'],
             'type_id' => (int) $i['itemdata_id'],
             'name' => $i['name'] ?: '未知物品',
-            'quantity' => (int) $i['num'],
+            'quantity' => (int) $i['nums'],
             'item_type' => (int) $i['item_type']
         ];
     }

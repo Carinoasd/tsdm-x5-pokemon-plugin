@@ -503,10 +503,10 @@ function api_get_pokemon_list()
                 'type_id' => (int) $sk['skillid'],
                 'pp' => (int) $sk['skillnum'],
                 'name' => $sk['skill_name'] ? $sk['skill_name'] : '',
-                'skill_type' => $sk['tn'] ? $sk['tn'] : '',
+                'skill_type' => $sk['element'] ? $sk['element'] : '',
                 'category' => $sk['category'] ? $sk['category'] : '',
-                'level' => (int) $sk['lv'],
-                'power' => (int) $sk['powr'],
+                'level' => (int) $sk['level_required'],
+                'power' => (int) $sk['power'],
                 'max_pp' => (int) $sk['max_pp'],
             ];
         }
@@ -641,10 +641,10 @@ function api_get_pokemon_detail()
             'type_id' => (int) $sk['skillid'],
             'pp' => (int) $sk['skillnum'],
             'name' => $sk['skill_name'] ? $sk['skill_name'] : '',
-            'skill_type' => $sk['tn'] ? $sk['tn'] : '',
+            'skill_type' => $sk['element'] ? $sk['element'] : '',
             'category' => $sk['category'] ? $sk['category'] : '',
-            'level' => (int) $sk['lv'],
-            'power' => (int) $sk['powr'],
+            'level' => (int) $sk['level_required'],
+            'power' => (int) $sk['power'],
             'max_pp' => (int) $sk['max_pp'],
         ];
     }
@@ -1067,8 +1067,8 @@ WHERE petid=%d AND skillid=%d",
 
     // 检查 PP 值是否已满（必须满 PP 才能遗忘）
     $current_pp = (int) $myskill['skillnum'];
-    $skill_info = DB::fetch_first(pm_sql("SELECT num FROM " . pm_table('pm_skill') . " WHERE id = %d", $skill_id));
-    $max_pp = $skill_info ? (int) $skill_info['num'] : 0;
+    $skill_info = DB::fetch_first(pm_sql("SELECT max_uses FROM " . pm_table('pm_skill') . " WHERE id = %d", $skill_id));
+    $max_pp = $skill_info ? (int) $skill_info['max_uses'] : 0;
 
     if ($current_pp < $max_pp) {
         api_error('Cannot forget skill with PP not full. Current PP: ' . $current_pp . '/' . $max_pp, 400);
@@ -1283,8 +1283,8 @@ LEFT JOIN " . pm_table('pm_itemdata') . " i ON m.itemid=i.id WHERE m.id=%d",
     // 获取用户拥有的所有装备道具 (type=5)
     $owned_items = [];
     $owned_rows = DB::fetch_all(pm_sql(
-        "SELECT m.id as myitem_id, m.itemid, m.num, i.* FROM " . pm_table('pm_myitem') . " m
-LEFT JOIN " . pm_table('pm_itemdata') . " i ON m.itemid=i.id WHERE m.uid=%d AND i.type=5 AND m.num > 0",
+        "SELECT m.id as myitem_id, m.itemid, m.nums, i.* FROM " . pm_table('pm_myitem') . " m
+LEFT JOIN " . pm_table('pm_itemdata') . " i ON m.itemid=i.id WHERE m.uid=%d AND i.type=5 AND m.nums > 0",
         $uid
     ));
 
@@ -1320,9 +1320,9 @@ LEFT JOIN " . pm_table('pm_itemdata') . " i ON m.itemid=i.id WHERE m.uid=%d AND 
             'name' => $row['name'],
             'description' => $row['description'] ?: '',
             'image' => $row['tpname'] ?: '',
-            'quantity' => (int) $row['num'],
+            'quantity' => (int) $row['nums'],
             'equipped_count' => $equipped_count,
-            'available_count' => max(0, (int) $row['num'] - $equipped_count),
+            'available_count' => max(0, (int) $row['nums'] - $equipped_count),
             'is_equipped' => $is_equipped_by_current,
             'zbtype' => (int) $row['zbtype'],
             'equipment_hp' => (int) $row['equipment_hp'],
@@ -1437,7 +1437,7 @@ i.equipment_spatk, i.equipment_spdef, i.equipment_sd FROM " . pm_table('pm_myite
         api_error('This item is not an equipment', 400);
     }
 
-    if ((int) $myitem['num'] <= 0) {
+    if ((int) $myitem['nums'] <= 0) {
         api_error('No items available', 400);
     }
 

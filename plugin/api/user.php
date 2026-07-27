@@ -236,9 +236,9 @@ function api_get_inventory()
             'name' => isset($row['item_name']) && $row['item_name'] ? $row['item_name'] : '未知',
             'description' => isset($row['item_desc']) ? $row['item_desc'] : '',
             'image' => isset($row['item_image']) ? $row['item_image'] : '',
-            'quantity' => (int) $row['num'],
+            'quantity' => (int) $row['nums'],
             'type_name' => get_item_type_name($item_type_from_item),
-            'can_use' => $row['num'] > 0,
+            'can_use' => $row['nums'] > 0,
         ];
     }
 
@@ -370,7 +370,7 @@ function api_get_inventory_stats()
             : 0;
 
         if ($type_id > 0 && isset($result[$type_id])) {
-            $result[$type_id] += (int) $row['num'];
+            $result[$type_id] += (int) $row['nums'];
         }
     }
 
@@ -834,7 +834,7 @@ function api_use_item()
         strval($item_id)
     ));
 
-    if (!$my_item || $my_item['num'] <= 0) {
+    if (!$my_item || $my_item['nums'] <= 0) {
         api_error('您没有该物品', 400);
     }
 
@@ -1025,7 +1025,7 @@ function api_use_item()
 
     if ($success) {
         // 扣除物品
-        $new_num = $my_item['num'] - 1;
+        $new_num = $my_item['nums'] - 1;
 
         if ($new_num <= 0) {
             DB::query(pm_sql(
@@ -1035,7 +1035,7 @@ function api_use_item()
             $item_remaining = 0;
         } else {
             DB::query(pm_sql(
-                "UPDATE " . pm_table('pm_myitem') . " SET num = %d WHERE id = %d",
+                "UPDATE " . pm_table('pm_myitem') . " SET nums = %d WHERE id = %d",
                 $new_num,
                 intval($my_item['id'])
             ));
@@ -1082,7 +1082,7 @@ function api_get_usable_pokemon()
         strval($item_id)
     ));
 
-    if (!$my_item || $my_item['num'] <= 0) {
+    if (!$my_item || $my_item['nums'] <= 0) {
         api_error('您没有该物品', 400);
     }
 

@@ -610,8 +610,8 @@ function _evolution_stone($petid, $itemname, $itemid = 0)
 
     // 查找对应的进化条件
     $evolution = DB::fetch_first(pm_sql(
-        "SELECT * FROM " . pm_table('pm_up') . "
-        WHERE pmid = %d AND cond = 'item' AND val = %d",
+        "SELECT * FROM " . pm_table('pm_evolution') . "
+        WHERE from_id = %d AND method = 'item' AND condition_value = %d",
         $pet['species_id'],
         $itemid
     ));
@@ -621,7 +621,7 @@ function _evolution_stone($petid, $itemname, $itemid = 0)
     }
 
     // 执行进化
-    $new_type_id = $evolution['targetpmid'];
+    $new_type_id = $evolution['to_id'];
     $new_base_info = DB::fetch_first(pm_sql(
         "SELECT * FROM " . pm_table('pm_data') . " WHERE id = %d",
         $new_type_id
@@ -723,7 +723,7 @@ function jup($petid, $itemname)
 
     // 查找任何进化路线
     $evolution = DB::fetch_first(pm_sql(
-        "SELECT * FROM " . pm_table('pm_up') . " WHERE pmid = %d LIMIT 1",
+        "SELECT * FROM " . pm_table('pm_evolution') . " WHERE from_id = %d LIMIT 1",
         $pet['species_id']
     ));
 
@@ -732,7 +732,7 @@ function jup($petid, $itemname)
     }
 
     // 执行进化
-    $new_type_id = $evolution['targetpmid'];
+    $new_type_id = $evolution['to_id'];
     $new_base_info = DB::fetch_first(pm_sql(
         "SELECT * FROM " . pm_table('pm_data') . " WHERE id = %d",
         $new_type_id

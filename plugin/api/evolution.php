@@ -71,7 +71,7 @@ function api_check_evolution()
     // 获取宠物的进化信息
     $evolution_info = DB::fetch_first(pm_sql(
         "SELECT * FROM " . pm_table('pm_evolution') . "
-        WHERE pmid = %d",
+        WHERE from_id = %d",
         $pet['species_id']
     ));
 
@@ -90,9 +90,9 @@ function api_check_evolution()
         'can_evolve' => $conditions['can_evolve'],
         'pokemon_id' => $pet_id,
         'current_form' => (int) $pet['species_id'],
-        'target_form' => (int) $evolution_info['targetpmid'],
+        'target_form' => (int) $evolution_info['to_id'],
         'conditions' => $conditions,
-        'evolution_method' => $evolution_info['type'],
+        'evolution_method' => $evolution_info['method'],
     ]);
 }
 
@@ -126,7 +126,7 @@ function api_evolve_pokemon()
     // 获取进化信息
     $evolution_info = DB::fetch_first(pm_sql(
         "SELECT * FROM " . pm_table('pm_evolution') . "
-        WHERE pmid = %d",
+        WHERE from_id = %d",
         $pet['species_id']
     ));
 
@@ -141,7 +141,7 @@ function api_evolve_pokemon()
     }
 
     // 执行进化
-    $new_type_id = $evolution_info['targetpmid'];
+    $new_type_id = $evolution_info['to_id'];
 
     // 获取新形态的基础信息
     $new_base_info = DB::fetch_first(pm_sql(
@@ -205,7 +205,7 @@ function api_get_available_evolutions()
     // 获取所有可能的进化路线
     $rows = DB::fetch_all(pm_sql(
         "SELECT * FROM " . pm_table('pm_evolution') . "
-        WHERE pmid = %d",
+        WHERE from_id = %d",
         $pet['species_id']
     ));
 
@@ -222,7 +222,7 @@ function api_get_available_evolutions()
             'from_id' => (int) $pet['species_id'],
             'to_id' => (int) $row['to_id'],
             'to_name' => $target_info ? $target_info['name'] : 'Unknown',
-            'evolution_type' => $row['cond'],
+            'evolution_type' => $row['method'],
             'can_evolve' => $conditions['can_evolve'],
             'conditions' => $conditions,
         ];
@@ -243,8 +243,8 @@ function check_evolution_conditions($pet, $evolution_info)
     $can_evolve = true;
     $unmet_reasons = [];
 
-    $cond_type = isset($evolution_info['cond']) ? $evolution_info['cond'] : '';
-    $cond_value = isset($evolution_info['val']) ? $evolution_info['val'] : '';
+    $cond_type = isset($evolution_info['method']) ? $evolution_info['method'] : '';
+    $cond_value = isset($evolution_info['condition_value']) ? $evolution_info['condition_value'] : '';
 
     // 检查等级条件
     if ($cond_type === 'level') {
@@ -296,7 +296,7 @@ function check_user_has_item($uid, $item_id)
 {
     $item = DB::fetch_first(pm_sql(
         "SELECT * FROM " . pm_table('pm_myitem') . "
-        WHERE uid = %d AND itemid = %s AND num > 0",
+        WHERE uid = %d AND itemid = %s AND nums > 0",
         $uid, strval($item_id)
     ));
 
@@ -325,7 +325,7 @@ function api_get_evolution_path()
     }
 
     $pokemon_info = DB::fetch_first(pm_sql(
-        "SELECT name, type1, type2 FROM " . pm_table('pm_data') . " WHERE id = %d",
+        "SELECT name, xs, xs2 FROM " . pm_table('pm_data') . " WHERE id = %d",
         $pmid
     ));
 
@@ -335,7 +335,7 @@ function api_get_evolution_path()
 
     $forward = [];
     $forward_rows = DB::fetch_all(pm_sql(
-        "SELECT u.*, d.name as target_name, d.type1 as target_type1, d.type2 as target_type2
+        "SELECT u.*, d.name as target_name, d.xs as target_type1, d.xs2 as target_type2
         FROM " . pm_table('pm_evolution') . " u
         JOIN " . pm_table('pm_data') . " d ON u.to_id = d.id
         WHERE u.from_id = %d
@@ -344,7 +344,7 @@ function api_get_evolution_path()
     ));
 
     foreach ($forward_rows as $row) {
-        $cond_type = $row['cond'];
+        $cond_type = $row['method'];
         $cond_value = $row['condition_value'];
         $cond_display = _format_evolution_condition($cond_type, $cond_value);
 
@@ -361,7 +361,7 @@ function api_get_evolution_path()
 
     $backward = [];
     $backward_rows = DB::fetch_all(pm_sql(
-        "SELECT u.*, d.name as source_name, d.type1 as source_type1, d.type2 as source_type2
+        "SELECT u.*, d.name as source_name, d.xs as source_type1, d.xs2 as source_type2
         FROM " . pm_table('pm_evolution') . " u
         JOIN " . pm_table('pm_data') . " d ON u.from_id = d.id
         WHERE u.to_id = %d
@@ -370,7 +370,7 @@ function api_get_evolution_path()
     ));
 
     foreach ($backward_rows as $row) {
-        $cond_type = $row['cond'];
+        $cond_type = $row['method'];
         $cond_value = $row['condition_value'];
         $cond_display = _format_evolution_condition($cond_type, $cond_value);
 
@@ -388,8 +388,8 @@ function api_get_evolution_path()
     api_success([
         'pokemon_id' => $pmid,
         'pokemon_name' => $pokemon_info['name'],
-        'pokemon_type1' => $pokemon_info['type1'],
-        'pokemon_type2' => $pokemon_info['type2'] ? $pokemon_info['type2'] : null,
+        'pokemon_type1' => $pokemon_info['xs'],
+        'pokemon_type2' => $pokemon_info['xs2'] ? $pokemon_info['xs2'] : null,
         'forward' => $forward,
         'backward' => $backward,
     ]);
