@@ -131,6 +131,11 @@ CREATE TABLE IF NOT EXISTS `pm_usersdata` (
     
 pcid int(20) NOT NULL DEFAULT 0,
     `npcid` int(20) NOT NULL DEFAULT 0,
+    tkg int(5) NOT NULL DEFAULT 0,
+    spatkg int(5) NOT NULL DEFAULT 0,
+    defg int(5) NOT NULL DEFAULT 0,
+    spdefg int(5) NOT NULL DEFAULT 0,
+    sdg int(5) NOT NULL DEFAULT 0,
     `hpg` int(5) NOT NULL DEFAULT 0,
     `hp` int(10) NOT NULL DEFAULT 0,
     `atkg` int(5) NOT NULL DEFAULT 0,

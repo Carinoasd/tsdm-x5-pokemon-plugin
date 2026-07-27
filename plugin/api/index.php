@@ -1,4 +1,5 @@
 <?php
+define('DEBUG_MODE', true);
 
 /**
  * 纯JSON API - 索引文件
