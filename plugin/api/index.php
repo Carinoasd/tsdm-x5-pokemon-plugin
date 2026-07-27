@@ -1,5 +1,4 @@
 <?php
-define('DEBUG_MODE', true);
 
 /**
  * 纯JSON API - 索引文件
@@ -32,16 +31,7 @@ function api_exception_handler($exception)
 
     // 根据异常类型返回适当的错误码
     $code = 500;
-    $message = 'Internal Server Error';
-
-    // 开发环境可以显示详细错误（生产环境应该关闭）
-    if (defined('DEBUG_MODE') && DEBUG_MODE) {
-        $message = sprintf(
-            "%s: %s",
-            get_class($exception),
-            $exception->getMessage()
-        );
-    }
+    $message = sprintf("%s: %s", get_class($exception), $exception->getMessage());
 
     // 根据异常类型设置HTTP状态码
     if ($exception instanceof InvalidArgumentException) {

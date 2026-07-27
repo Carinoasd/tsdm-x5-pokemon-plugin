@@ -926,7 +926,7 @@ function api_get_learnable_skills()
     // 所以我们查所有技能，然后在PHP中过滤
 
     $all_skills = DB::fetch_all(
-        "SELECT * FROM " . pm_table('pm_skill') . " ORDER BY lv ASC"
+            "SELECT * FROM " . pm_table('pm_skill') . " ORDER BY level_required ASC"
     );
 
     // 获取宠物已学习的技能ID列表（需要加uid过滤）
@@ -949,7 +949,7 @@ function api_get_learnable_skills()
     // pmid = '99999' 是全局技能
     // 数据库格式是 "k,27,28,31,k" 或者可能被损坏成包含SQL语句
     foreach ($all_skills as $skill) {
-        $pmid = isset($skill['pmid']) ? $skill['pmid'] : '';
+        $pmid = isset($skill['available_pokemons']) ? $skill['available_pokemons'] : '';
 
         // 检查是否是全局技能
         $is_global = ($pmid === '99999');
@@ -982,16 +982,16 @@ function api_get_learnable_skills()
         }
 
         $skill_id = (int) $skill['id'];
-        $required_level = (int) $skill['lv'];
+        $required_level = (int) $skill['level_required'];
 
         $skill_info = [
             'id' => $skill_id,
             'name' => $skill['name'],
             'description' => $skill['description'] ?: '',
-            'type' => $skill['tn'] ?: '',
+            'type' => $skill['element'] ?: '',
             'category' => $skill['category'] ?: '',
-            'power' => (int) $skill['powr'],
-            'max_pp' => (int) $skill['num'],
+            'power' => (int) $skill['power'],
+            'max_pp' => (int) $skill['max_uses'],
             'required_level' => $required_level,
             'is_available' => $pet_level >= $required_level,
         ];
