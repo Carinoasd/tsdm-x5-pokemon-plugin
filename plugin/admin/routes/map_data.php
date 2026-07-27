@@ -23,11 +23,11 @@ function list_map_info($from, $count)
         intval($query['id']),
         $query['name'],
         $query['site'],
-        intval($query['kg']) == 1,
-        intval($query['minlevel']),
-        intval($query['maxlevel']),
-        intval($query['exp']),
-        $query['expn']
+        intval($query['is_enabled']) == 1,
+        intval($query['min_level']),
+        intval($query['max_level']),
+        intval($query['experience']),
+        $query['boss_config']
       );
 
       array_push($ret, $item);
@@ -48,11 +48,11 @@ function get_map_info($id)
       intval($query['id']),
       $query['name'],
       $query['site'],
-      intval($query['kg']) == 1,
-      intval($query['minlevel']),
-      intval($query['maxlevel']),
-      intval($query['exp']),
-      $query['expn']
+      intval($query['is_enabled']) == 1,
+      intval($query['min_level']),
+      intval($query['max_level']),
+      intval($query['experience']),
+      $query['boss_config']
     );
 
     array_push($ret, $item);
@@ -105,14 +105,14 @@ function set_map_info($info)
       DB::query("UPDATE pm_map set site='{$info["area_type"]}' where id={$info["id"]}");
     }
 
-    if (boolval($query['kg']) != boolval($info["is_enabled"])) {
+    if (boolval($query['is_enabled']) != boolval($info["is_enabled"])) {
       $is_enabled = boolval($info["is_enabled"]) ? 1 : 0;
       DB::query("UPDATE pm_map set kg={$is_enabled} where id={$info["id"]}");
     }
-    if (intval($query['minlevel']) != intval($info["min_level"])) {
+    if (intval($query['min_level']) != intval($info["min_level"])) {
       DB::query("UPDATE pm_map set minlevel={$info["min_level"]} where id={$info["id"]}");
     }
-    if (intval($query['maxlevel']) != intval($info["max_level"])) {
+    if (intval($query['max_level']) != intval($info["max_level"])) {
       DB::query("UPDATE pm_map set maxlevel={$info["max_level"]} where id={$info["id"]}");
     }
 
@@ -183,7 +183,7 @@ function set_map_info($info)
     }
 
     // 检查是否需要更新 expn
-    $current_expn = $query['expn'];
+    $current_expn = $query['boss_config'];
     if ($current_expn != $new_expn) {
       $new_expn_escaped = addslashes($new_expn);
       DB::query("UPDATE pm_map set expn='{$new_expn_escaped}' where id={$info["id"]}");
@@ -342,11 +342,11 @@ function filter_map_info($list)
                   intval($query['id']),
                   $query['name'],
                   $query['site'],
-                  intval($query['kg']) == 1,
-                  intval($query['minlevel']),
-                  intval($query['maxlevel']),
-                  intval($query['exp']),
-                  $query['expn']
+                  intval($query['is_enabled']) == 1,
+                  intval($query['min_level']),
+                  intval($query['max_level']),
+                  intval($query['experience']),
+                  $query['boss_config']
                 );
 
                 array_push($ret, $item);
@@ -369,10 +369,10 @@ function filter_map_info($list)
         );
         break;
       case '野怪最低等级':
-        array_push($query_sql_list, generate_filter_sql('minlevel', $operator, $value, 'number'));
+        array_push($query_sql_list, generate_filter_sql('min_level', $operator, $value, 'number'));
         break;
       case '野怪最高等级':
-        array_push($query_sql_list, generate_filter_sql('maxlevel', $operator, $value, 'number'));
+        array_push($query_sql_list, generate_filter_sql('max_level', $operator, $value, 'number'));
         break;
       default:
     }
@@ -394,11 +394,11 @@ function filter_map_info($list)
         intval($query['id']),
         $query['name'],
         $query['site'],
-        intval($query['kg']) == 1,
-        intval($query['minlevel']),
-        intval($query['maxlevel']),
-        intval($query['exp']),
-        $query['expn']
+        intval($query['is_enabled']) == 1,
+        intval($query['min_level']),
+        intval($query['max_level']),
+        intval($query['experience']),
+        $query['boss_config']
       );
 
       array_push($ret, $item);

@@ -170,10 +170,10 @@ function api_try_spawn_boss()
  */
 function get_map_boss_config_from_map($map)
 {
-    $expn = isset($map['expn']) ? $map['expn'] : '0';
+    $boss_config = isset($map['boss_config']) ? $map['boss_config'] : '0';
 
     // 尝试解析为 JSON
-    $boss_config = json_decode($expn, true);
+    $boss_config = json_decode($boss_config, true);
 
     if (is_array($boss_config) && isset($boss_config['bosses']) && is_array($boss_config['bosses'])) {
         return $boss_config;

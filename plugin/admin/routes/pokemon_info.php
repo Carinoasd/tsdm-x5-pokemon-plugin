@@ -293,9 +293,9 @@ function insert_pokemon_info($info)
   $new_id = $last_id + 1;
 
   DB::query("INSERT into pm_mypm (
-      `id`, `pmno`, `uid`, `nowname`, `site`,
+      `id`, `species_id`, `uid`, `nickname`, `site`,
       `level`, `exp`, `good`,
-      `ballid`, `sg`, `state`, `sex`,
+      `ballid`, `is_shiny`, `state`, `sex`,
       `hpg`, `atkg`, `defg`, `spatkg`, `spdefg`, `sdg`,
       `hpn`, `atkn`, `defn`, `spatkn`, `spdefn`, `sdn`,
       `equipmentid1`, `equipmentid2`, `equipmentid3`, `equipmentid4`
@@ -311,7 +311,7 @@ function insert_pokemon_info($info)
   // 额外更新血量
 
   $ajax_pokemon = my_pokemon_data($new_id);
-  $pmno = $ajax_pokemon['pmno'];
+  $pmno = $ajax_pokemon['species_id'];
   $pmsdata = pm_data($pmno);
   list($petmaxhp, $petatk, $petdef, $petspatk, $petspdef, $petsd) = get_pet_stats($pmsdata, $ajax_pokemon);
   parse_pet_wear_items($ajax_pokemon, false, $petmaxhp, $petatk, $petdef, $petspatk, $petspdef, $petsd);

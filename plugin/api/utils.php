@@ -433,7 +433,7 @@ function api_calculate_pokemon_max_hp($pm, $pm_data = null, $include_equipment =
 {
     global $statehp;
 
-    $pmno = (int) $pm['pmno'];
+    $pmno = (int) $pm['species_id'];
 
     if ($pm_data === null) {
         $pm_data = DB::fetch_first(pm_sql(
@@ -448,7 +448,7 @@ function api_calculate_pokemon_max_hp($pm, $pm_data = null, $include_equipment =
     $hpg = (int) $pm['hpg'];
     $hpn = (int) $pm['hpn'];
     $state = (int) $pm['state'];
-    $sg = (int) $pm['sg'];
+    $sg = (int) $pm['is_shiny'];
 
     $state_multiplier = isset($statehp[$state]) ? (float)$statehp[$state] : 1.0;
 

@@ -22,19 +22,19 @@ foreach ($rows as $row) {
     $html = '';
     if (!empty($pdata['first'])) {
         $pet = $pdata['first'];
-        $img = "source/plugin/pokemon/images/pm/{$pet['pmno']}.png";
+        $img = "source/plugin/pokemon/images/pm/{$pet['species_id']}.png";
         $html .= '<div style="padding:4px 0">';
         $html .= '<a href="plugin.php?id=pokemon:game" target="_blank">';
         $html .= '<img src="' . $img . '" style="width:auto;height:80px;padding:0 24px" border="0">';
         $html .= '</a>';
-        $html .= '<div style="margin-top:2px;font-size:12px">' . htmlspecialchars($pet['nowname']) . ' Lv.' . $pet['level'] . '</div>';
+        $html .= '<div style="margin-top:2px;font-size:12px">' . htmlspecialchars($pet['nickname']) . ' Lv.' . $pet['level'] . '</div>';
         $html .= '</div>';
     }
     if (!empty($pdata['creeps'])) {
         $html .= '<div style="text-align:center">';
         foreach ($pdata['creeps'] as $creep) {
-            $src = "source/plugin/pokemon/images/spm/{$creep['pmno']}.gif";
-            $title = htmlspecialchars("{$creep['nowname']} Lv:{$creep['level']}");
+            $src = "source/plugin/pokemon/images/spm/{$creep['species_id']}.gif";
+            $title = htmlspecialchars("{$creep['nickname']} Lv:{$creep['level']}");
             $html .= '<img src="' . $src . '" title="' . $title . '" border="0" style="width:32px;height:32px;margin:1px">';
         }
         $html .= '</div>';

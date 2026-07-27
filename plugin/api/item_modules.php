@@ -316,10 +316,10 @@ function _restore_pp($petid, $amount)
 
     // 查找PP未满的技能
     $skill = DB::fetch_first(pm_sql(
-        "SELECT ms.*, s.num as max_pp
+        "SELECT ms.*, s.max_uses as max_pp
          FROM " . pm_table('pm_myskill') . " ms
          LEFT JOIN " . pm_table('pm_skill') . " s ON ms.skillid = s.id
-         WHERE ms.uid = %d AND ms.petid = %d AND ms.skillnum < s.num
+         WHERE ms.uid = %d AND ms.petid = %d AND ms.skillnum < s.max_uses
          LIMIT 1",
         $uid,
         $petid
@@ -612,7 +612,7 @@ function _evolution_stone($petid, $itemname, $itemid = 0)
     $evolution = DB::fetch_first(pm_sql(
         "SELECT * FROM " . pm_table('pm_up') . "
         WHERE pmid = %d AND cond = 'item' AND val = %d",
-        $pet['pmno'],
+        $pet['species_id'],
         $itemid
     ));
 
@@ -635,10 +635,10 @@ function _evolution_stone($petid, $itemname, $itemid = 0)
 
     DB::query(pm_sql(
         "UPDATE " . pm_table('pm_mypm') . " SET
-            pmno = %d,
+            species_id = %d,
             hp = %d,
             pmname = %s,
-            nowname = %s
+            nickname = %s
             WHERE id = %d",
         $new_type_id,
         $new_max_hp,
@@ -724,7 +724,7 @@ function jup($petid, $itemname)
     // 查找任何进化路线
     $evolution = DB::fetch_first(pm_sql(
         "SELECT * FROM " . pm_table('pm_up') . " WHERE pmid = %d LIMIT 1",
-        $pet['pmno']
+        $pet['species_id']
     ));
 
     if (!$evolution) {
@@ -746,10 +746,10 @@ function jup($petid, $itemname)
 
     DB::query(pm_sql(
         "UPDATE " . pm_table('pm_mypm') . " SET
-            pmno = %d,
+            species_id = %d,
             hp = %d,
             pmname = %s,
-            nowname = %s
+            nickname = %s
             WHERE id = %d",
         $new_type_id,
         $new_max_hp,

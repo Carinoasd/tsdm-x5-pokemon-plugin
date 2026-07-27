@@ -43,3 +43,6 @@ node_modules/
 packages/
 
 scripts/e2e/.tmp/
+
+# SQL backups
+scripts/backup/

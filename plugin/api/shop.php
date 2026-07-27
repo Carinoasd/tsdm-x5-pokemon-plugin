@@ -113,21 +113,22 @@ function api_get_shop_items()
     $items = array();
     foreach ($rows as $row) {
         $price = (int) $row['money'];
+        $effects = json_decode($row['effects'], true);
         $items[] = array(
             'id' => (int) $row['id'],
             'name' => $row['name'],
-            'description' => $row['txt'],
+            'description' => $row['description'],
             'type_id' => (int) $row['type'],
             'type_name' => get_item_type_name($row['type']),
             'image' => $row['tpname'],
             'price' => $price,
             'stock' => -1,
             'effect' => array(
-                'description' => $row['txt'],
+                'description' => $row['description'],
                 'type' => get_item_type_name($row['type']),
-                'addhp' => (int) $row['addhp'],
-                'addexp' => (int) $row['addexp'],
-                'addlv' => (int) $row['addlv'],
+                'addhp' => (int) ($effects['hp'] ?? 0),
+                'addexp' => (int) ($effects['exp'] ?? 0),
+                'addlv' => (int) ($effects['level'] ?? 0),
             ),
             'can_buy' => $user_money >= $price,
         );
@@ -336,7 +337,7 @@ function api_get_shop_pets()
             'def' => (int) $row['def'],
             'spatk' => (int) $row['spatk'],
             'spdef' => (int) $row['spdef'],
-            'speed' => (int) $row['sd'],
+            'speed' => (int) $row['speed'],
             'price' => $price,
             'can_buy' => $user_money >= $price,
         );

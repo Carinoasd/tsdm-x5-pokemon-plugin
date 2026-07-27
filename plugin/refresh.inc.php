@@ -22,7 +22,7 @@ showmessage('已' . ($hide ? '隐藏' : '刷新') . '状态栏', '', [], [
 function get_my_pm_data()
 {
     global $_G;
-    $rows = DB::fetch_all('SELECT id, pmno, nowname, level, site, sg FROM %t WHERE uid=%d AND site < 3', [
+    $rows = DB::fetch_all('SELECT id, species_id, nickname, level, site, is_shiny FROM %t WHERE uid=%d AND site < 3', [
         'pm_mypm', $_G['uid']
     ]);
     $data = [];

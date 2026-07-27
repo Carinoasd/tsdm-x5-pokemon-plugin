@@ -266,9 +266,9 @@ function create_new_pokemon_data($pokemon_data, $level, $uid, $nickname = null)
 
     return [
         'uid' => $uid,
-        'pmno' => $pokemon_id,
+        'species_id' => $pokemon_id,
         'pmname' => $pokemon_data['name'],
-        'nowname' => $name,
+        'nickname' => $name,
         'sex' => $sex,
         'sx' => $pokemon_data['xs'],
         'level' => $level,

@@ -152,7 +152,7 @@ function api_test_create_pokemon()
 
     $input = get_json_input();
 
-    $pmno = isset($input['pmno']) ? validate_id($input['pmno'], 'pmno') : null;
+    $pmno = isset($input['species_id']) ? validate_id($input['species_id'], 'pmno') : null;
     if (!$pmno) {
         $pmno = rand(1, 151);
     }
@@ -175,7 +175,7 @@ function api_test_create_pokemon()
     $base_def = (int) $pokemon_data['def'];
     $base_spatk = (int) $pokemon_data['spatk'];
     $base_spdef = (int) $pokemon_data['spdef'];
-    $base_sd = (int) $pokemon_data['sd'];
+    $base_sd = (int) $pokemon_data['speed'];
 
     $hp = (int) (($base_hp * 2 * $level / 100) + $level + 10);
     $max_hp = $hp;
@@ -204,10 +204,10 @@ function api_test_create_pokemon()
     $current_time = time();
 
     DB::query(pm_sql("INSERT INTO " . pm_table('pm_mypm') . "
-        (uid, pmno, pmname, nowname, level, exp, sex, sx, hp, hpg, atkg, defg, spatkg, spdefg, sdg, site, pctime, good, ballid, state, statetime, gduptime, initialuid, swap, sg)
+        (uid, species_id, pmname, nickname, level, exp, sex, sx, hp, iv_values, ev_values, site, created_at, good, ballid, state, statetime, gduptime, initialuid, swap, is_shiny)
         VALUES
         (%d, %d, %s, %s, %d, %d, %d,
-         %s, %d, 0, 0, 0, 0, 0, 0, %d,
+         %s, %d, '{}', '{}', %d,
          %d, 0, 0, 0, 0, %d, %d, 1, %d)",
         $uid, $pmno, $pmname, $pmname, $level, $exp_for_level, $sex,
          $xs, $current_hp, $site,
@@ -248,7 +248,7 @@ function api_test_create_pokemon()
     }
 
     $skills_response = [];
-    $skill_rows = DB::fetch_all(pm_sql("SELECT s.id, s.name, s.num as max_pp, ms.skillnum as pp, s.type, s.category, s.powr as power
+    $skill_rows = DB::fetch_all(pm_sql("SELECT s.id, s.name, s.max_uses as max_pp, ms.skillnum as pp, s.type, s.category, s.power as power
         FROM " . pm_table('pm_myskill') . " ms
         JOIN " . pm_table('pm_skill') . " s ON ms.skillid = s.id
         WHERE ms.petid = %d", $pet_id));
@@ -383,14 +383,14 @@ function api_test_get_state()
     $pokemons_response = [];
     $pokemon_rows = DB::fetch_all(pm_sql("SELECT m.*, d.name as pmname, d.xs as type1, d.xs2 as type2, d.capture
         FROM " . pm_table('pm_mypm') . " m
-        LEFT JOIN " . pm_table('pm_data') . " d ON m.pmno = d.id
+        LEFT JOIN " . pm_table('pm_data') . " d ON m.species_id = d.id
         WHERE m.uid = %d
         ORDER BY m.site DESC, m.id ASC",
         $target_uid));
 
     foreach ($pokemon_rows as $p) {
         $skills_response = [];
-        $skill_rows = DB::fetch_all(pm_sql("SELECT s.id, s.name, ms.skillnum as pp, s.num as max_pp
+        $skill_rows = DB::fetch_all(pm_sql("SELECT s.id, s.name, ms.skillnum as pp, s.max_uses as max_pp
             FROM " . pm_table('pm_myskill') . " ms
             JOIN " . pm_table('pm_skill') . " s ON ms.skillid = s.id
             WHERE ms.petid = %d",
@@ -407,15 +407,15 @@ function api_test_get_state()
 
         $pokemons_response[] = [
             'id' => (int) $p['id'],
-            'pmno' => (int) $p['pmno'],
-            'name' => $p['pmname'] ?: $p['nowname'],
-            'nickname' => $p['nowname'],
+            'pmno' => (int) $p['species_id'],
+            'name' => $p['pmname'] ?: $p['nickname'],
+            'nickname' => $p['nickname'],
             'level' => (int) $p['level'],
             'exp' => (int) $p['exp'],
             'hp' => (int) $p['hp'],
             'max_hp' => api_calculate_pokemon_max_hp($p),
             'is_zd' => (int)($p['site'] == 1),
-            'is_shiny' => (int) $p['sg'],
+            'is_shiny' => (int) $p['is_shiny'],
             'type1' => $p['type1'],
             'type2' => $p['type2'],
             'skills' => $skills_response
@@ -540,7 +540,7 @@ function api_test_set_battle_state()
     $base_def = (int) $wild_data['def'];
     $base_spatk = (int) $wild_data['spatk'];
     $base_spdef = (int) $wild_data['spdef'];
-    $base_sd = (int) $wild_data['sd'];
+    $base_sd = (int) $wild_data['speed'];
 
     $atk = (int) (($base_atk * 2 * $wild_level / 100) + 5);
     $def = (int) (($base_def * 2 * $wild_level / 100) + 5);

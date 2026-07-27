@@ -357,9 +357,9 @@ function api_get_inventory_stats()
 
     // 查询用户的物品，并关联 pm_itemdata 获取正确的 type 字段
     $rows = DB::fetch_all(pm_sql(
-        "SELECT m.itemid, m.num, i.type as item_type FROM " . pm_table('pm_myitem') . " m
+        "SELECT m.itemid, m.nums, i.type as item_type FROM " . pm_table('pm_myitem') . " m
         LEFT JOIN " . pm_table('pm_itemdata') . " i ON m.itemid = i.id
-        WHERE m.uid = %d AND m.num > 0",
+        WHERE m.uid = %d AND m.nums > 0",
         (int)$uid
     ));
 
@@ -513,7 +513,7 @@ function api_heal_pokemon()
 
     api_success([
         'cost' => $cost,
-        'message' => "{$pokemon_data['nowname']}已治疗，花费 {$cost} 金币",
+        'message' => "{$pokemon_data['nickname']}已治疗，花费 {$cost} 金币",
         'pokemon_id' => $pokemon_id,
         'current_hp' => (int)$petmaxhp,
         'max_hp' => (int)$petmaxhp,
@@ -634,7 +634,7 @@ function api_heal_and_flee()
 
     api_success([
         'cost' => $cost,
-        'message' => "{$pokemon_data['nowname']}已脱战并治疗",
+        'message' => "{$pokemon_data['nickname']}已脱战并治疗",
         'pokemon_id' => $pokemon_id,
         'current_hp' => (int)$petmaxhp,
         'max_hp' => (int)$petmaxhp,
@@ -883,7 +883,7 @@ function api_use_item()
             }
 
             if ($current_hp >= $max_hp && $addhp > 0 && !$state_changed) {
-                api_error("{$pokemon['nowname']}不需要增加 HP 了", 400);
+                api_error("{$pokemon['nickname']}不需要增加 HP 了", 400);
             }
 
             $heal = $addhp;
@@ -917,7 +917,7 @@ function api_use_item()
 
             // 构建消息
             $message_parts = [];
-            $message_parts[] = "成功对 {$pokemon['nowname']} 使用了 {$item_data['name']}";
+            $message_parts[] = "成功对 {$pokemon['nickname']} 使用了 {$item_data['name']}";
             if ($heal > 0) {
                 $message_parts[] = "恢复了 {$heal} 点 HP";
             }
@@ -969,7 +969,7 @@ function api_use_item()
                 }
 
                 $success = true;
-                $message = "成功对 {$pokemon['nowname']} 使用了 {$item_data['name']}";
+                $message = "成功对 {$pokemon['nickname']} 使用了 {$item_data['name']}";
             } else {
                 api_error('物品功能未实现', 500);
             }
@@ -1008,7 +1008,7 @@ function api_use_item()
                 }
 
                 $success = true;
-                $message = "成功对 {$pokemon['nowname']} 使用了 {$item_data['name']}";
+                $message = "成功对 {$pokemon['nickname']} 使用了 {$item_data['name']}";
             } else {
                 api_error('物品功能未实现', 500);
             }
@@ -1090,7 +1090,7 @@ function api_get_usable_pokemon()
 
     // 获取用户所有宠物
     $all_pokemon = DB::fetch_all(pm_sql(
-        "SELECT id, pmno, nowname, level, hp, hpg, hpn, state FROM " . pm_table('pm_mypm') . " WHERE uid = %d",
+        "SELECT id, species_id, nickname, level, hp, iv_values, ev_values, state FROM " . pm_table('pm_mypm') . " WHERE uid = %d",
         $uid
     ));
 
@@ -1109,7 +1109,7 @@ function api_get_usable_pokemon()
         // 获取宠物基础信息（包括名字）
         $pm_data = DB::fetch_first(pm_sql(
             "SELECT name, hp FROM " . pm_table('pm_data') . " WHERE id = %d",
-            $pokemon['pmno']
+            $pokemon['species_id']
         ));
 
         $pokemon_name = $pm_data ? $pm_data['name'] : '???';
@@ -1137,9 +1137,9 @@ function api_get_usable_pokemon()
 
         $pokemon_info = [
             'id' => (int) $pokemon['id'],
-            'type_id' => (int) $pokemon['pmno'],
+            'type_id' => (int) $pokemon['species_id'],
             'name' => $pokemon_name,
-            'nickname' => $pokemon['nowname'] ?: $pokemon_name,
+            'nickname' => $pokemon['nickname'] ?: $pokemon_name,
             'level' => $level,
             'hp' => $current_hp,
             'max_hp' => $max_hp,
@@ -1188,7 +1188,7 @@ function api_refresh_forum_badge()
         $serialized, $uid
     ));
 
-    $first_name = isset($pm_data['first']) ? $pm_data['first']['nowname'] : '';
+    $first_name = isset($pm_data['first']) ? $pm_data['first']['nickname'] : '';
     $creep_count = isset($pm_data['creeps']) ? count($pm_data['creeps']) : 0;
 
     api_success([
@@ -1204,7 +1204,7 @@ function api_refresh_forum_badge()
 function _get_badge_pokemon_data($uid)
 {
     $rows = DB::fetch_all(pm_sql(
-        "SELECT id, pmno, nowname, level, site, sg FROM " . pm_table('pm_mypm') . "
+        "SELECT id, species_id, nickname, level, site, is_shiny FROM " . pm_table('pm_mypm') . "
         WHERE uid = %d AND site < 3",
         $uid
     ));
