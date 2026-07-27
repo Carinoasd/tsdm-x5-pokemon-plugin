@@ -128,6 +128,8 @@ CREATE TABLE IF NOT EXISTS `pm_evolution` (
 -- User game data
 CREATE TABLE IF NOT EXISTS `pm_usersdata` (
     `uid` mediumint(8) unsigned NOT NULL,
+    
+pcid int(20) NOT NULL DEFAULT 0,
     `npcid` int(20) NOT NULL DEFAULT 0,
     `hpg` int(5) NOT NULL DEFAULT 0,
     `hp` int(10) NOT NULL DEFAULT 0,
@@ -172,6 +174,8 @@ CREATE TABLE IF NOT EXISTS `pm_mypm` (
     `id` mediumint(8) unsigned NOT NULL AUTO_INCREMENT,
     `pctime` int(10) NOT NULL DEFAULT 0,
     `uid` mediumint(9) NOT NULL DEFAULT 0,
+    
+pcid int(20) NOT NULL DEFAULT 0,
     `pmname` varchar(10) NOT NULL DEFAULT '',
     `nowname` varchar(10) NOT NULL DEFAULT '',
     `pmno` smallint(8) unsigned NOT NULL DEFAULT 0,
@@ -214,6 +218,8 @@ CREATE TABLE IF NOT EXISTS `pm_mypm` (
 CREATE TABLE IF NOT EXISTS `pm_myitem` (
     `id` int(8) unsigned NOT NULL AUTO_INCREMENT,
     `uid` mediumint(9) NOT NULL DEFAULT 0,
+    
+pcid int(20) NOT NULL DEFAULT 0,
     `itemid` varchar(5) NOT NULL DEFAULT '',
     `typeid` mediumint(8) unsigned NOT NULL DEFAULT 0,
     `nums` smallint(3) NOT NULL DEFAULT 0,
@@ -226,6 +232,8 @@ CREATE TABLE IF NOT EXISTS `pm_myitem` (
 CREATE TABLE IF NOT EXISTS `pm_myskill` (
     `id` mediumint(8) unsigned NOT NULL AUTO_INCREMENT,
     `uid` mediumint(8) unsigned NOT NULL DEFAULT 0,
+    
+pcid int(20) NOT NULL DEFAULT 0,
     `petid` mediumint(8) unsigned NOT NULL DEFAULT 0,
     `skillid` mediumint(8) unsigned NOT NULL DEFAULT 0,
     `skillnum` smallint(5) NOT NULL DEFAULT 0,
@@ -236,6 +244,8 @@ CREATE TABLE IF NOT EXISTS `pm_myskill` (
 CREATE TABLE IF NOT EXISTS `pm_pc` (
     `id` int(10) unsigned NOT NULL AUTO_INCREMENT,
     `uid` mediumint(8) unsigned NOT NULL,
+    
+pcid int(20) NOT NULL DEFAULT 0,
     `pm_id` mediumint(8) unsigned NOT NULL,
     `deposited_at` int(10) unsigned NOT NULL DEFAULT 0,
     `healed_at` int(10) unsigned NOT NULL DEFAULT 0,
@@ -246,6 +256,8 @@ CREATE TABLE IF NOT EXISTS `pm_pc` (
 CREATE TABLE IF NOT EXISTS `pm_box` (
     `id` int(10) unsigned NOT NULL AUTO_INCREMENT,
     `uid` mediumint(8) unsigned NOT NULL,
+    
+pcid int(20) NOT NULL DEFAULT 0,
     `box_index` tinyint(3) unsigned NOT NULL DEFAULT 0,
     `pm_id` mediumint(8) unsigned NOT NULL,
     `slot` tinyint(3) unsigned NOT NULL DEFAULT 0,
