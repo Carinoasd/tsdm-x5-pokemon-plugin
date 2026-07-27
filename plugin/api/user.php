@@ -500,10 +500,10 @@ function api_heal_pokemon()
             "SELECT * FROM " . pm_table('pm_skill') . " WHERE id=%d",
             $skill_id
         ));
-        if ($skill && isset($skill['num'])) {
+        if ($skill && isset($skill['max_uses'])) {
             DB::query(pm_sql(
                 "UPDATE " . pm_table('pm_myskill') . " SET skillnum=%d WHERE skillid=%d AND uid=%d AND petid=%d",
-                $skill['num'],
+                $skill['max_uses'],
                 $skill_id,
                 $uid,
                 $pokemon_id
@@ -621,10 +621,10 @@ function api_heal_and_flee()
             "SELECT * FROM " . pm_table('pm_skill') . " WHERE id=%d",
             $skill_id
         ));
-        if ($skill && isset($skill['num'])) {
+        if ($skill && isset($skill['max_uses'])) {
             DB::query(pm_sql(
                 "UPDATE " . pm_table('pm_myskill') . " SET skillnum=%d WHERE skillid=%d AND uid=%d AND petid=%d",
-                $skill['num'],
+                $skill['max_uses'],
                 $skill_id,
                 $uid,
                 $pokemon_id

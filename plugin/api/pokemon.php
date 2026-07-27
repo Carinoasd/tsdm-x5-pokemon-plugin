@@ -1144,7 +1144,7 @@ function api_learn_skill()
     }
 
     // 检查等级是否满足
-    $required_level = (int) $skill['lv'];
+    $required_level = (int) $skill['level_required'];
 
     if ($pet_level < $required_level) {
         api_error("Level requirement not met. Required: Lv {$required_level}", 400);
@@ -1152,7 +1152,7 @@ function api_learn_skill()
 
     // 检查宠物是否可以学习这个技能（种族或全局）
     $can_learn = false;
-    $pmid = $skill['pmid'];
+    $pmid = $skill['available_pokemons'];
 
     if (strpos($pmid, (string)$pmno) !== false || $pmid === '99999') {
         $can_learn = true;
@@ -1185,7 +1185,7 @@ WHERE petid=%d AND skillid=%d",
     }
 
     // 学习技能
-    $max_pp = (int) $skill['num'];
+    $max_pp = (int) $skill['max_uses'];
     DB::query(
         "INSERT INTO " . pm_table('pm_myskill') . "
 (uid, petid, skillid, skillnum) VALUES ($uid, $pet_id, $skill_id, $max_pp)"
@@ -1198,9 +1198,9 @@ WHERE petid=%d AND skillid=%d",
             'type_id' => $skill_id,
             'pp' => $max_pp,
             'name' => $skill['name'],
-            'skill_type' => $skill['tn'] ?: '',
+            'skill_type' => $skill['element'] ?: '',
             'category' => $skill['category'] ?: '',
-            'level' => (int) $skill['lv'],
+            'level' => (int) $skill['level_required'],
             'max_pp' => $max_pp,
         ],
     ]);

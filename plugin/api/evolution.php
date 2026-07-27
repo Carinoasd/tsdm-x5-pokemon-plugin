@@ -70,7 +70,7 @@ function api_check_evolution()
 
     // 获取宠物的进化信息
     $evolution_info = DB::fetch_first(pm_sql(
-        "SELECT * FROM " . pm_table('pm_up') . "
+        "SELECT * FROM " . pm_table('pm_evolution') . "
         WHERE pmid = %d",
         $pet['species_id']
     ));
@@ -125,7 +125,7 @@ function api_evolve_pokemon()
 
     // 获取进化信息
     $evolution_info = DB::fetch_first(pm_sql(
-        "SELECT * FROM " . pm_table('pm_up') . "
+        "SELECT * FROM " . pm_table('pm_evolution') . "
         WHERE pmid = %d",
         $pet['species_id']
     ));
@@ -204,7 +204,7 @@ function api_get_available_evolutions()
 
     // 获取所有可能的进化路线
     $rows = DB::fetch_all(pm_sql(
-        "SELECT * FROM " . pm_table('pm_up') . "
+        "SELECT * FROM " . pm_table('pm_evolution') . "
         WHERE pmid = %d",
         $pet['species_id']
     ));
@@ -213,14 +213,14 @@ function api_get_available_evolutions()
     foreach ($rows as $row) {
         $target_info = DB::fetch_first(pm_sql(
             "SELECT * FROM " . pm_table('pm_data') . " WHERE id = %d",
-            $row['targetpmid']
+            $row['to_id']
         ));
 
         $conditions = check_evolution_conditions($pet, $row);
 
         $evolutions[] = [
             'from_id' => (int) $pet['species_id'],
-            'to_id' => (int) $row['targetpmid'],
+            'to_id' => (int) $row['to_id'],
             'to_name' => $target_info ? $target_info['name'] : 'Unknown',
             'evolution_type' => $row['cond'],
             'can_evolve' => $conditions['can_evolve'],
@@ -325,7 +325,7 @@ function api_get_evolution_path()
     }
 
     $pokemon_info = DB::fetch_first(pm_sql(
-        "SELECT name, xs, xs2 FROM " . pm_table('pm_data') . " WHERE id = %d",
+        "SELECT name, type1, type2 FROM " . pm_table('pm_data') . " WHERE id = %d",
         $pmid
     ));
 
@@ -335,21 +335,21 @@ function api_get_evolution_path()
 
     $forward = [];
     $forward_rows = DB::fetch_all(pm_sql(
-        "SELECT u.*, d.name as target_name, d.xs as target_type1, d.xs2 as target_type2
-        FROM " . pm_table('pm_up') . " u
-        JOIN " . pm_table('pm_data') . " d ON u.targetpmid = d.id
-        WHERE u.pmid = %d
+        "SELECT u.*, d.name as target_name, d.type1 as target_type1, d.type2 as target_type2
+        FROM " . pm_table('pm_evolution') . " u
+        JOIN " . pm_table('pm_data') . " d ON u.to_id = d.id
+        WHERE u.from_id = %d
         ORDER BY u.priority",
         $pmid
     ));
 
     foreach ($forward_rows as $row) {
         $cond_type = $row['cond'];
-        $cond_value = $row['val'];
+        $cond_value = $row['condition_value'];
         $cond_display = _format_evolution_condition($cond_type, $cond_value);
 
         $forward[] = [
-            'id' => (int) $row['targetpmid'],
+            'id' => (int) $row['to_id'],
             'name' => $row['target_name'],
             'type_1' => $row['target_type1'],
             'type_2' => $row['target_type2'] ? $row['target_type2'] : null,
@@ -361,21 +361,21 @@ function api_get_evolution_path()
 
     $backward = [];
     $backward_rows = DB::fetch_all(pm_sql(
-        "SELECT u.*, d.name as source_name, d.xs as source_type1, d.xs2 as source_type2
-        FROM " . pm_table('pm_up') . " u
-        JOIN " . pm_table('pm_data') . " d ON u.pmid = d.id
-        WHERE u.targetpmid = %d
+        "SELECT u.*, d.name as source_name, d.type1 as source_type1, d.type2 as source_type2
+        FROM " . pm_table('pm_evolution') . " u
+        JOIN " . pm_table('pm_data') . " d ON u.from_id = d.id
+        WHERE u.to_id = %d
         ORDER BY u.priority",
         $pmid
     ));
 
     foreach ($backward_rows as $row) {
         $cond_type = $row['cond'];
-        $cond_value = $row['val'];
+        $cond_value = $row['condition_value'];
         $cond_display = _format_evolution_condition($cond_type, $cond_value);
 
         $backward[] = [
-            'id' => (int) $row['pmid'],
+            'id' => (int) $row['from_id'],
             'name' => $row['source_name'],
             'type_1' => $row['source_type1'],
             'type_2' => $row['source_type2'] ? $row['source_type2'] : null,
@@ -388,8 +388,8 @@ function api_get_evolution_path()
     api_success([
         'pokemon_id' => $pmid,
         'pokemon_name' => $pokemon_info['name'],
-        'pokemon_type1' => $pokemon_info['xs'],
-        'pokemon_type2' => $pokemon_info['xs2'] ? $pokemon_info['xs2'] : null,
+        'pokemon_type1' => $pokemon_info['type1'],
+        'pokemon_type2' => $pokemon_info['type2'] ? $pokemon_info['type2'] : null,
         'forward' => $forward,
         'backward' => $backward,
     ]);

@@ -239,7 +239,7 @@ function api_test_create_pokemon()
 
         foreach ($auto_skills as $skill) {
             $skill_id = (int) $skill['id'];
-            $max_pp = (int) $skill['num'];
+            $max_pp = (int) $skill['max_uses'];
             DB::query(pm_sql("INSERT INTO " . pm_table('pm_myskill') . "
                 (uid, petid, skillid, skillnum)
                 VALUES (%d, %d, %d, %d)",
