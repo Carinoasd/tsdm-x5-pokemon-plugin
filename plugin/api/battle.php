@@ -57,6 +57,12 @@ if ($action === 'capture') {
     exit;
 }
 
+// maps 接口用于获取地图列表
+if ($action === 'maps') {
+    api_get_maps();
+    exit;
+}
+
 // use_item 接口用于在战斗中使用物品
 if ($action === 'use_item') {
     api_use_item_in_battle();
@@ -186,8 +192,102 @@ function api_start_battle()
     if (!empty($myusersdata['npcid']) && $myusersdata['npcid'] > 0) {
         // 返回现有战斗状态
         $battle = build_battle_response($myusersdata, $mypokemon);
-        api_success($battle);
+    api_success($battle);
+}
+
+/**
+ * 获取地图列表
+ */
+function api_get_maps()
+{
+    require_login();
+
+    global $_G;
+    $uid = validate_uid($_G['uid']);
+
+    $min_level = isset($_GET['min_level']) ? intval($_GET['min_level']) : 0;
+    $max_level = isset($_GET['max_level']) ? intval($_GET['max_level']) : 999;
+
+    $where = "WHERE is_enabled = 1";
+    if ($min_level > 0) {
+        $where .= " AND min_level >= $min_level";
     }
+    if ($max_level < 999) {
+        $where .= " AND max_level <= $max_level";
+    }
+
+    $maps_raw = DB::fetch_all("SELECT * FROM " . pm_table('pm_map') . " $where ORDER BY id ASC");
+    $maps = [];
+
+    foreach ($maps_raw as $map) {
+        $map_id = (int) $map['id'];
+
+        // 获取该地图上的野生宠物
+        $wild_pokemon_rows = DB::fetch_all(
+            "SELECT id, name, xs, xs2, hp, atk, def, spatk, spdef, speed " .
+            "FROM " . pm_table('pm_data') . " " .
+            "WHERE FIND_IN_SET($map_id, REPLACE(mapid, ' ', '')) > 0 " .
+            "ORDER BY id ASC"
+        );
+        $wild_pokemons = [];
+        foreach ($wild_pokemon_rows as $poke) {
+            $wild_pokemons[] = [
+                'pokemon_type_id' => (int) $poke['id'],
+                'name' => $poke['name'],
+                'type1' => $poke['xs'],
+                'type2' => $poke['xs2'],
+            ];
+        }
+
+        // 确定地图模式
+        $boss_config = !empty($map['boss_config']) ? intval($map['boss_config']) : 0;
+        $has_wild = !empty($wild_pokemons);
+
+        $mode = 'wild';
+        $bosses = [];
+        if ($boss_config > 0 && $has_wild) {
+            $mode = 'hybrid';
+        } elseif ($boss_config > 0) {
+            $mode = 'boss';
+        }
+
+        // 如果有boss配置，获取boss信息
+        if ($boss_config > 0) {
+            $boss_npc_rows = DB::fetch_all(
+                "SELECT id, name, xs, xs2 FROM " . pm_table('pm_data') . " WHERE id = $boss_config"
+            );
+            foreach ($boss_npc_rows as $boss_npc) {
+                $bosses[] = [
+                    'pokemon_type_id' => (int) $boss_npc['id'],
+                    'pokemon_name' => $boss_npc['name'],
+                    'level' => (int) $map['max_level'],
+                    'boss_multiplier' => 1.0,
+                ];
+            }
+        }
+
+        $maps[] = [
+            'id' => $map_id,
+            'name' => $map['name'],
+            'area_type' => $map['site'],
+            'area_type_name' => $map['site'],
+            'region' => $map['region'],
+            'pos_x' => (int) $map['pos_x'],
+            'pos_y' => (int) $map['pos_y'],
+            'is_enabled' => (bool) $map['is_enabled'],
+            'min_level' => (int) $map['min_level'],
+            'max_level' => (int) $map['max_level'],
+            'mode' => $mode,
+            'bosses' => $bosses,
+            'wild_pokemons' => $wild_pokemons,
+        ];
+    }
+
+    api_success([
+        'maps' => $maps,
+        'total' => count($maps),
+    ]);
+}
 
     // 获取地图信息
     $map = DB::fetch_first(pm_sql("SELECT * FROM " . pm_table('pm_map') . " WHERE id = %d", $map_id));
