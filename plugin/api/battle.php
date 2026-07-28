@@ -108,6 +108,10 @@ switch ($action) {
         api_start_battle();
         break;
 
+    case 'recover':
+        api_recover_battle();
+        break;
+
     case 'turn':
         api_use_skill();
         break;
@@ -118,6 +122,32 @@ switch ($action) {
 
     default:
         api_error('Invalid action', 400);
+}
+
+/**
+ * 恢复战斗状态
+ * 如果用户有进行中的战斗，返回当前的战斗状态
+ */
+function api_recover_battle()
+{
+    require_login();
+
+    global $_G;
+
+    $myusersdata = api_my_usersdata($_G['uid']);
+    $mypokemon = api_my_pokemon($_G['username']);
+
+    if (empty($myusersdata['npcid']) || $myusersdata['npcid'] <= 0) {
+        api_error('No active battle to recover', 404);
+    }
+
+    if (!$mypokemon || !is_array($mypokemon) || $mypokemon['species_id'] <= 0) {
+        api_error('No active pokemon found', 400);
+    }
+
+    $battle = build_battle_response($myusersdata, $mypokemon);
+    $battle['status'] = 'active';
+    api_success($battle);
 }
 
 /**
@@ -315,7 +345,7 @@ function api_use_skill()
                 $skill_id, $_G['uid'], $mypokemon['id']
             ));
 
-            if ($myskill && $myskill['skillnum'] <= 0 && $skilldata['num'] != 0) {
+            if ($myskill && $myskill['skillnum'] <= 0 && $skilldata['max_uses'] != 0) {
                 api_error('Skill PP is depleted', 400);
             }
         }
@@ -353,7 +383,7 @@ function api_use_skill()
             $damage_log[] = "{$mypokemon['nickname']}使用了{$skillname}，对{$npc['name']}造成了{$damage}点伤害！";
 
             // 扣除PP
-            if ($skill_id > 0 && $myskill && $skilldata['num'] != 0) {
+            if ($skill_id > 0 && $myskill && $skilldata['max_uses'] != 0) {
                 DB::query(pm_sql("UPDATE " . pm_table('pm_myskill') . "
                     SET skillnum = skillnum - 1
                     WHERE skillid = %d AND uid = %d AND petid = %d",
@@ -484,7 +514,7 @@ function api_use_skill()
                 if ($npc_hp < 0) $npc_hp = 0;
                 $damage_log[] = "{$mypokemon['nickname']}使用了{$skillname}，对{$npc['name']}造成了{$damage}点伤害！";
 
-                if ($skill_id > 0 && $myskill && $skilldata['num'] != 0) {
+                if ($skill_id > 0 && $myskill && $skilldata['max_uses'] != 0) {
                     DB::query(pm_sql("UPDATE " . pm_table('pm_myskill') . "
                         SET skillnum = skillnum - 1
                         WHERE skillid = %d AND uid = %d AND petid = %d",
@@ -1635,16 +1665,16 @@ function api_capture_pokemon()
 
     // 查看用户背包中所有物品
     $user_items = DB::fetch_all(pm_sql("
-        SELECT m.id, m.itemid, m.num, i.id as itemdata_id, i.name, i.type as item_type
+        SELECT m.id, m.itemid, m.nums, i.id as itemdata_id, i.name, i.type as item_type
         FROM " . pm_table('pm_myitem') . " m
         LEFT JOIN " . pm_table('pm_itemdata') . " i ON m.itemid = i.id
-        WHERE m.uid = %d AND m.num > 0
+        WHERE m.uid = %d AND m.nums > 0
     ", $_G['uid']));
     $debug_info['user_items'] = $user_items;
 
     // 检查用户是否拥有该精灵球
     // 明确指定字段以避免 id 字段冲突
-    $sql = pm_sql("SELECT m.id as myitem_id, m.itemid, m.num, m.uid,
+    $sql = pm_sql("SELECT m.id as myitem_id, m.itemid, m.nums, m.uid,
         i.id as itemdata_id, i.name, i.type, i.captmax, i.ballid
         FROM " . pm_table('pm_myitem') . " m
         LEFT JOIN " . pm_table('pm_itemdata') . " i ON m.itemid = i.id
@@ -1657,12 +1687,12 @@ function api_capture_pokemon()
     if ($my_ball) {
         $debug_info['found_ball'] = array(
             'itemid' => $my_ball['itemid'],
-            'num' => $my_ball['num'],
+            'nums' => $my_ball['nums'],
             'item_name' => isset($my_ball['name']) ? $my_ball['name'] : 'unknown'
         );
     }
 
-    if (!$my_ball || $my_ball['num'] <= 0) {
+    if (!$my_ball || $my_ball['nums'] <= 0) {
         api_error('您没有该精灵球', 400, $debug_info);
     }
 
@@ -1717,10 +1747,10 @@ function api_capture_pokemon()
     $status = 'active';
 
     // 扣除精灵球（使用正确的 myitem_id）
-    if ($my_ball['num'] == 1) {
+    if ($my_ball['nums'] == 1) {
         DB::query(pm_sql("DELETE FROM " . pm_table('pm_myitem') . " WHERE id = %d", intval($my_ball['myitem_id'])));
     } else {
-        DB::query(pm_sql("UPDATE " . pm_table('pm_myitem') . " SET num = num - 1 WHERE id = %d", intval($my_ball['myitem_id'])));
+        DB::query(pm_sql("UPDATE " . pm_table('pm_myitem') . " SET nums = nums - 1 WHERE id = %d", intval($my_ball['myitem_id'])));
     }
 
     if ($captured) {
@@ -1870,7 +1900,7 @@ function api_use_item_in_battle()
         $_G['uid'], strval($item_id));
     $my_item = DB::fetch_first($item_sql);
 
-    if (!$my_item || $my_item['num'] <= 0) {
+    if (!$my_item || $my_item['nums'] <= 0) {
         api_error('您没有该物品', 400);
     }
 
@@ -1958,10 +1988,10 @@ function api_use_item_in_battle()
     }
 
     // 扣除物品
-    if ($my_item['num'] == 1) {
+    if ($my_item['nums'] == 1) {
         DB::query(pm_sql("DELETE FROM " . pm_table('pm_myitem') . " WHERE id = %d", intval($my_item['id'])));
     } else {
-        DB::query(pm_sql("UPDATE " . pm_table('pm_myitem') . " SET num = num - 1 WHERE id = %d", intval($my_item['id'])));
+        DB::query(pm_sql("UPDATE " . pm_table('pm_myitem') . " SET nums = nums - 1 WHERE id = %d", intval($my_item['id'])));
     }
 
     // 野怪反击
@@ -2061,7 +2091,7 @@ function api_use_item_on_skill_in_battle()
         $_G['uid'], strval($item_id));
     $my_item = DB::fetch_first($item_sql);
 
-    if (!$my_item || $my_item['num'] <= 0) {
+    if (!$my_item || $my_item['nums'] <= 0) {
         api_error('您没有该物品', 400);
     }
 
@@ -2111,10 +2141,10 @@ function api_use_item_on_skill_in_battle()
     ));
 
     // 扣除物品
-    if ($my_item['num'] == 1) {
+    if ($my_item['nums'] == 1) {
         DB::query(pm_sql("DELETE FROM " . pm_table('pm_myitem') . " WHERE id = %d", intval($my_item['id'])));
     } else {
-        DB::query(pm_sql("UPDATE " . pm_table('pm_myitem') . " SET num = num - 1 WHERE id = %d", intval($my_item['id'])));
+        DB::query(pm_sql("UPDATE " . pm_table('pm_myitem') . " SET nums = nums - 1 WHERE id = %d", intval($my_item['id'])));
     }
 
     // 野怪反击
@@ -2188,7 +2218,7 @@ function api_get_battle_items()
         "SELECT mi.*, i.type, i.module, i.addhp, i.name, i.img
          FROM " . pm_table('pm_myitem') . " mi
          INNER JOIN " . pm_table('pm_itemdata') . " i ON mi.itemid = i.id
-         WHERE mi.uid = %d AND mi.num > 0
+         WHERE mi.uid = %d AND mi.nums > 0
          ORDER BY i.type, i.id",
         $uid
     ));
@@ -2207,7 +2237,7 @@ function api_get_battle_items()
                 'id' => (int) $item['itemid'],
                 'name' => $item['name'],
                 'img' => $item['img'],
-                'nums' => (int) $item['num'],
+                'nums' => (int) $item['nums'],
                 'item_type' => (int) $item_type,
                 'module' => $item_module,
                 'addhp' => (int) $item['addhp'],
@@ -2219,7 +2249,7 @@ function api_get_battle_items()
                 'id' => (int) $item['itemid'],
                 'name' => $item['name'],
                 'img' => $item['img'],
-                'nums' => (int) $item['num'],
+                'nums' => (int) $item['nums'],
                 'item_type' => (int) $item_type,
                 'module' => $item_module,
             ];
