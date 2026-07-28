@@ -404,7 +404,7 @@ function api_use_skill()
 
             if ($level_up_info && $level_up_info['level_up']) {
                 $battle['level_up'] = $level_up_info;
-                $pokemon_name = $mypokemon['nickname'] ?: $mypokemon['petname'];
+                $pokemon_name = $mypokemon['nickname'] ?: $mypokemon['pmname'];
                 $battle['message'] .= "\n🎉 {$pokemon_name}升级了！Lv.{$level_up_info['old_level']} → Lv.{$level_up_info['new_level']}";
             }
 
@@ -529,7 +529,7 @@ function api_use_skill()
 
                 if ($level_up_info && $level_up_info['level_up']) {
                     $battle['level_up'] = $level_up_info;
-                    $pokemon_name = $mypokemon['nickname'] ?: $mypokemon['petname'];
+                    $pokemon_name = $mypokemon['nickname'] ?: $mypokemon['pmname'];
                     $battle['message'] .= "\n🎉 {$pokemon_name}升级了！Lv.{$level_up_info['old_level']} → Lv.{$level_up_info['new_level']}";
                 }
 
@@ -627,7 +627,7 @@ function api_use_skill()
 
     if ($level_up_info && $level_up_info['level_up']) {
         $battle['level_up'] = $level_up_info;
-        $pokemon_name = $mypokemon['nickname'] ?: $mypokemon['petname'];
+        $pokemon_name = $mypokemon['nickname'] ?: $mypokemon['pmname'];
         $battle['message'] .= "\n🎉 {$pokemon_name}升级了！Lv.{$level_up_info['old_level']} → Lv.{$level_up_info['new_level']}";
     }
 
@@ -1180,10 +1180,10 @@ function build_battle_response($myusersdata, $mypokemon, $map = null, $is_boss =
         $skills[] = [
             'id' => (int)$sk['skillid'],
             'name' => $sk['name'],
-            'power' => (int)($sk['powr'] ?: 40),
+            'power' => (int)($sk['power'] ?: 40),
             'pp' => (int)$sk['skillnum'],
             'max_pp' => (int)$sk['max_pp'],
-            'skill_type' => $sk['tn'] ?: '',
+            'skill_type' => $sk['element'] ?: '',
             'category' => $sk['category'] ?: '',
         ];
     }
@@ -1204,7 +1204,7 @@ function build_battle_response($myusersdata, $mypokemon, $map = null, $is_boss =
         'my_pokemon' => [
             'id' => (int)$mypokemon['species_id'],
             'instance_id' => (int)$mypokemon['id'],  // 数据库唯一 ID
-            'name' => $mypokemon['nickname'] ?: $mypokemon['petname'],
+            'name' => $mypokemon['nickname'] ?: $mypokemon['pmname'],
             'level' => (int)$mypokemon['level'],
             'hp' => (int)$mypokemon['hp'],
             'max_hp' => $my_max_hp,
