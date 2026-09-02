@@ -6,21 +6,23 @@ use crate::{
     pages::BattlePage,
     state::{
         clear_battle_scene, refresh_inventory_state, refresh_pokemon_list,
-        refresh_user_profile_state, set_battle_scene, show_error, use_pokemon_state,
-        BATTLE_STATE, POKEMON_STATE,
+        refresh_user_profile_state, set_battle_scene, show_error, use_pokemon_state, BATTLE_STATE,
+        POKEMON_STATE,
     },
     utils::api_client::NewApiClient,
 };
 use _utils::types::{
-    api_map::MapInfo, api_map_region::MapRegion,
-    api_pokemon::{ApiResponse as PokemonApiResponse, PokemonBasic}, api_user::InventoryItem,
+    api_map::MapInfo,
+    api_map_region::MapRegion,
+    api_pokemon::{ApiResponse as PokemonApiResponse, PokemonBasic},
+    api_user::InventoryItem,
 };
 
 #[component]
 pub fn Adventure() -> Element {
     use_pokemon_state();
     let mut loading = use_signal(|| false);
-    let mut message_log = use_signal(|| Vec::<String>::new());
+    let mut message_log = use_signal(Vec::<String>::new);
     let mut selected_region = use_signal(|| None::<String>);
     let mut selected_map_for_modal = use_signal(|| None::<MapInfo>);
     let min_level_filter = use_signal(|| None::<u32>);
@@ -29,12 +31,13 @@ pub fn Adventure() -> Element {
     let mut maps: Signal<Vec<MapInfo>> = use_signal(Vec::new);
     let mut maps_loading = use_signal(|| true);
 
-    let mut battle_items = use_signal(|| Vec::<InventoryItem>::new());
-    let mut battle_balls = use_signal(|| Vec::<InventoryItem>::new());
+    let mut battle_items = use_signal(Vec::<InventoryItem>::new);
+    let mut battle_balls = use_signal(Vec::<InventoryItem>::new);
 
-    let mut skill_selection_mode = use_signal(|| None::<(u64, String, Vec<_utils::types::api_battle::BattleSkill>)>);
+    let mut skill_selection_mode =
+        use_signal(|| None::<(u64, String, Vec<_utils::types::api_battle::BattleSkill>)>);
 
-    let _ = use_resource(move || async move {
+    let _resource = use_resource(move || async move {
         let api = NewApiClient::new();
 
         match api.recover_battle().await {
@@ -57,7 +60,7 @@ pub fn Adventure() -> Element {
         }
     });
 
-    let _ = use_resource(move || {
+    let _resource = use_resource(move || {
         let min = *min_level_filter.read();
         let max = *max_level_filter.read();
         async move {
@@ -193,7 +196,9 @@ pub fn Adventure() -> Element {
             match api.use_item_on_skill(item_id, skill_id).await {
                 Ok(scene) => {
                     skill_selection_mode.set(None);
-                    message_log.write().push(format!("对技能使用了PP恢复道具！"));
+                    message_log
+                        .write()
+                        .push("对技能使用了PP恢复道具！".to_string());
 
                     let api2 = NewApiClient::new();
                     if let Ok(data) = api2.get_battle_items().await {
@@ -204,11 +209,7 @@ pub fn Adventure() -> Element {
                         battle_balls.set(data.items);
                     }
 
-                    if scene.status != _utils::types::api_battle::BattleStatus::Active {
-                        set_battle_scene(Some(scene.clone()));
-                    } else {
-                        set_battle_scene(Some(scene.clone()));
-                    }
+                    set_battle_scene(Some(scene.clone()));
                     refresh_pokemon_list();
                 }
                 Err(e) => {
@@ -226,11 +227,18 @@ pub fn Adventure() -> Element {
 
             match api.use_item_in_battle_raw(item_id).await {
                 Ok(response_text) => {
-                    if let Ok(skill_resp) = serde_json::from_str::<PokemonApiResponse<_utils::types::api_battle::SkillSelectionResponse>>(&response_text) {
+                    if let Ok(skill_resp) = serde_json::from_str::<
+                        PokemonApiResponse<_utils::types::api_battle::SkillSelectionResponse>,
+                    >(&response_text)
+                    {
                         if skill_resp.success {
                             if let Some(data) = skill_resp.data {
                                 if data.requires_skill_selection {
-                                    skill_selection_mode.set(Some((data.item_id, data.item_name, data.available_skills)));
+                                    skill_selection_mode.set(Some((
+                                        data.item_id,
+                                        data.item_name,
+                                        data.available_skills,
+                                    )));
                                     loading.set(false);
                                     return;
                                 }
@@ -240,7 +248,7 @@ pub fn Adventure() -> Element {
 
                     match api.use_item_in_battle(item_id).await {
                         Ok(scene) => {
-                            message_log.write().push(format!("使用了物品！"));
+                            message_log.write().push("使用了物品！".to_string());
 
                             let api2 = NewApiClient::new();
                             if let Ok(data) = api2.get_battle_items().await {
@@ -251,11 +259,7 @@ pub fn Adventure() -> Element {
                                 battle_balls.set(data.items);
                             }
 
-                            if scene.status != _utils::types::api_battle::BattleStatus::Active {
-                                set_battle_scene(Some(scene.clone()));
-                            } else {
-                                set_battle_scene(Some(scene.clone()));
-                            }
+                            set_battle_scene(Some(scene.clone()));
                             refresh_pokemon_list();
                         }
                         Err(e) => {
@@ -315,16 +319,8 @@ pub fn Adventure() -> Element {
             loading.set(true);
             match api.capture(ball_id).await {
                 Ok(scene) => {
-                    let status = &scene.status;
-                    if *status == _utils::types::api_battle::BattleStatus::Victory
-                        || *status == _utils::types::api_battle::BattleStatus::Captured
-                    {
-                        message_log.write().push(scene.message.clone());
-                        set_battle_scene(Some(scene.clone()));
-                    } else {
-                        message_log.write().push(scene.message.clone());
-                        set_battle_scene(Some(scene.clone()));
-                    }
+                    message_log.write().push(scene.message.clone());
+                    set_battle_scene(Some(scene.clone()));
 
                     let api2 = NewApiClient::new();
                     if let Ok(data) = api2.get_user_inventory(Some(2), 1).await {
@@ -509,14 +505,28 @@ pub fn Adventure() -> Element {
         .unwrap_or_default();
     let modal_is_open = selected_map_clone.is_some();
 
-    let (pokemon_list_empty, pokemon_list_for_recommendation, current_battle_scene, can_continue_battle, last_map_id) = {
+    let (
+        pokemon_list_empty,
+        pokemon_list_for_recommendation,
+        current_battle_scene,
+        can_continue_battle,
+        last_map_id,
+    ) = {
         let ps = POKEMON_STATE.read();
         let bs = BATTLE_STATE.read();
         let scene = bs.scene.as_ref();
-        let is_victory = scene.map(|s| s.status == _utils::types::api_battle::BattleStatus::Victory).unwrap_or(false);
+        let is_victory = scene
+            .map(|s| s.status == _utils::types::api_battle::BattleStatus::Victory)
+            .unwrap_or(false);
         let my_pokemon_alive = scene.map(|s| s.my_pokemon.hp > 0).unwrap_or(false);
         let map_id = scene.map(|s| s.map_id).unwrap_or(0);
-        (ps.list.is_empty(), ps.list.clone(), bs.scene.clone(), is_victory && my_pokemon_alive, map_id)
+        (
+            ps.list.is_empty(),
+            ps.list.clone(),
+            bs.scene.clone(),
+            is_victory && my_pokemon_alive,
+            map_id,
+        )
     };
 
     let mut continue_battle = move |_| {
@@ -705,7 +715,7 @@ pub fn Adventure() -> Element {
                     on_flee: move |_| flee_battle(()),
                     on_end: move |_| end_battle_with_refresh(()),
                     on_use_item: move |item_id: u64| use_item_in_battle(item_id),
-                    on_attack: move || attack(),
+                    on_attack: attack,
                     on_capture: move |ball_id: u64| capture(ball_id),
                     items: battle_items.read().clone(),
                     balls: battle_balls.read().clone(),
@@ -720,7 +730,7 @@ pub fn Adventure() -> Element {
                     },
                     on_enter_items_tab: move |_| refresh_battle_items(()),
                     on_enter_capture_tab: move |_| refresh_battle_balls(()),
-                    on_switch_pokemon: move || switch_pokemon(),
+                    on_switch_pokemon: switch_pokemon,
                     on_replace_pokemon: move |pokemon_id: u64| replace_pokemon(pokemon_id),
                     can_continue: can_continue_battle,
                     on_continue: move |_| continue_battle(()),

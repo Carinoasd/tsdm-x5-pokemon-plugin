@@ -8,8 +8,7 @@ use crate::{
     state::{
         refresh_pokemon_list, show_error, show_success, start_global_loading, stop_global_loading,
         update_pokemon_hp, use_battle_state, use_pokemon_state, MyPokemonTab, SelectedItem,
-        EQUIPMENT_BONUSES, MY_POKEMON_TAB, POKEMON_STATE, SELECTED_ITEM,
-        SELECTED_POKEMON_INDEX,
+        EQUIPMENT_BONUSES, MY_POKEMON_TAB, POKEMON_STATE, SELECTED_ITEM, SELECTED_POKEMON_INDEX,
     },
     utils::{
         api_client::NewApiClient,
@@ -103,7 +102,7 @@ pub fn MyPokemon() -> Element {
     let mut selected_pokemon_type_id = use_signal(|| 0u64);
 
     // 每次打开个人中心时都刷新宠物列表，确保数据是最新的
-    let _ = use_resource(move || async move {
+    let _resource = use_resource(move || async move {
         refresh_pokemon_list();
     });
 
@@ -120,11 +119,7 @@ pub fn MyPokemon() -> Element {
         let pm = selected_id
             .and_then(|id| state.list.iter().find(|p| p.id == id).cloned())
             .or_else(|| state.get_first_pokemon().cloned());
-        (
-            state.loading,
-            state.error.clone(),
-            pm,
-        )
+        (state.loading, state.error.clone(), pm)
     };
 
     rsx! {
@@ -1210,13 +1205,14 @@ fn calculate_total_bonuses(slots: &[EquipmentSlot]) -> Vec<(String, i64)> {
         }
     }
 
-    let mut bonuses = Vec::new();
-    bonuses.push(("HP".to_string(), hp));
-    bonuses.push(("攻击".to_string(), atk));
-    bonuses.push(("防御".to_string(), def));
-    bonuses.push(("特攻".to_string(), spat));
-    bonuses.push(("特防".to_string(), spdef));
-    bonuses.push(("速度".to_string(), spd));
+    let bonuses = vec![
+        ("HP".to_string(), hp),
+        ("攻击".to_string(), atk),
+        ("防御".to_string(), def),
+        ("特攻".to_string(), spat),
+        ("特防".to_string(), spdef),
+        ("速度".to_string(), spd),
+    ];
 
     bonuses
 }
@@ -1773,7 +1769,7 @@ fn SkillLearnModal(
                         for skill in available.iter() {
                             SkillLearnItem {
                                 skill: skill.clone(),
-                                on_learn: on_learn.clone(),
+                                on_learn,
                             }
                         }
                     }
@@ -1783,7 +1779,7 @@ fn SkillLearnModal(
                         for skill in unavailable.iter() {
                             SkillLearnItem {
                                 skill: skill.clone(),
-                                on_learn: on_learn.clone(),
+                                on_learn,
                             }
                         }
                     }
@@ -2043,10 +2039,7 @@ enum EvoPathTab {
 }
 
 #[component]
-fn EvolutionPathModal(
-    pokemon_type_id: u64,
-    on_close: EventHandler<()>,
-) -> Element {
+fn EvolutionPathModal(pokemon_type_id: u64, on_close: EventHandler<()>) -> Element {
     let mut active_evo_tab = use_signal(|| EvoPathTab::Forward);
 
     let evo_data = use_resource(move || async move {
@@ -2056,7 +2049,11 @@ fn EvolutionPathModal(
             .map_err(|e| format!("查询失败: {}", e))
     });
 
-    let loaded = evo_data.read().as_ref().and_then(|r| r.as_ref().ok()).cloned();
+    let loaded = evo_data
+        .read()
+        .as_ref()
+        .and_then(|r| r.as_ref().ok())
+        .cloned();
 
     rsx! {
         Modal {
