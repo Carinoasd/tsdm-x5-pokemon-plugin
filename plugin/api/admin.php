@@ -24,6 +24,10 @@ if (defined('API_ROUTED')) {
 
 require_once __DIR__ . '/constants.php';
 
+// 加载 API 工具函数：test_get_state 等需要 api_calculate_pokemon_max_hp，
+// 此前仅经路由访问时未加载 utils.php，调用即 500
+require_once __DIR__ . '/utils.php';
+
 global $_G;
 
 $action = get_param('action', '');
@@ -211,7 +215,7 @@ function api_test_create_pokemon()
         VALUES
         (%d, %d, %s, %s, %d, %d, %d,
          %s, %d, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, %d,
-         %d, 0, 0, 0, 0, %d, %d, 1, %d)",
+         %d, 0, 0, 1, 0, %d, %d, 1, %d)",
         $uid, $pmno, $pmname, $pmname, $level, $exp_for_level, $sex,
          $xs, $current_hp, $site,
          $current_time, $current_time, $uid, $is_shiny));

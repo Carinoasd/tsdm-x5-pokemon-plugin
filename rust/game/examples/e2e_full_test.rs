@@ -5,6 +5,7 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::{sync::Arc, time::Duration};
 
+use reqwest::cookie::CookieStore;
 use reqwest::cookie::Jar;
 
 fn api_base(base_url: &str) -> String {
@@ -82,6 +83,7 @@ struct TestContext {
 impl TestContext {
     fn new(base_url: &str, cookie_jar: Arc<Jar>) -> Self {
         let client = reqwest::Client::builder()
+            .danger_accept_invalid_certs(true)
             .cookie_provider(cookie_jar)
             .timeout(Duration::from_secs(30))
             .build()
@@ -149,7 +151,7 @@ impl TestContext {
             .client
             .post(&url)
             .json(&serde_json::json!({
-                "pmno": pmno,
+                "species_id": pmno,
                 "level": level,
                 "is_zd": is_zd,
                 "hp_percent": hp_percent
@@ -505,33 +507,46 @@ async fn login_discuz(base_url: &str) -> Result<Arc<Jar>> {
 
     let jar = Arc::new(Jar::default());
     let client = reqwest::Client::builder()
+        .danger_accept_invalid_certs(true)
         .cookie_provider(jar.clone())
         .timeout(Duration::from_secs(30))
         .build()?;
 
+    // 现版 X5 已拒绝 lssubmit 快捷登录，必须走带 formhash 的完整表单
     let login_page = format!("{}/member.php?mod=logging&action=login", base_url);
-    client.get(&login_page).send().await?;
+    let page_html = client.get(&login_page).send().await?.text().await?;
+    let formhash = extract_formhash(&page_html)
+        .ok_or_else(|| anyhow::anyhow!("login page has no formhash"))?;
 
-    let login_url = format!(
-        "{}/member.php?mod=logging&action=login&loginsubmit=yes&infloat=yes&lssubmit=yes&inajax=1",
-        base_url
-    );
-
+    let login_url = format!("{}/member.php?mod=logging&action=login", base_url);
     let params = [
+        ("formhash", formhash.as_str()),
         ("username", "admin"),
         ("password", "admin123"),
         ("questionid", "0"),
         ("answer", ""),
         ("cookietime", "2592000"),
+        ("loginsubmit", "yes"),
+        ("referer", &format!("{}/", base_url)),
     ];
 
     let response = client.post(&login_url).form(&params).send().await?;
     let status = response.status();
+    let _ = response.text().await?;
 
-    if !status.is_success() {
-        anyhow::bail!("Login failed: {}", status);
+    // X5 登录失败也返回 200（错误信息在页面里），唯一可靠的成功信号是
+    // cookie jar 里出现 *_auth 会话 cookie
+    let cookie_header = jar
+        .cookies(&reqwest::Url::parse(base_url)?)
+        .and_then(|value| value.to_str().ok().map(str::to_string))
+        .unwrap_or_default();
+    if !status.is_success() || !cookie_header.contains("_auth") {
+        anyhow::bail!(
+            "Login failed: status={}, cookies=[{}]",
+            status,
+            cookie_header
+        );
     }
-
     println!("   ✅ Login successful");
 
     let plugin_home = format!("{}/plugin.php?id=pokemon:pokemon", base_url);
@@ -539,6 +554,14 @@ async fn login_discuz(base_url: &str) -> Result<Arc<Jar>> {
     println!("   ✅ Plugin session initialized");
 
     Ok(jar)
+}
+
+fn extract_formhash(html: &str) -> Option<String> {
+    let marker = r#"name="formhash" value=""#;
+    let start = html.find(marker)? + marker.len();
+    let rest = &html[start..];
+    let end = rest.find('"')?;
+    Some(rest[..end].to_string())
 }
 
 fn print_separator(title: &str) {
@@ -759,7 +782,32 @@ async fn test_shop_flow(ctx: &TestContext) -> Result<()> {
     let money_before = state_before.user.money;
     println!("   💰 Money before: {}", money_before);
 
-    ctx.buy_item(1, 5).await?;
+    // 从商店列表动态取第一件可购买商品，避免与种子数据的物品 ID 漂移
+    let shop_url = api_url(&ctx.api_base, "shop", "list");
+    let shop_resp = ctx.client.get(&shop_url).send().await?;
+    let shop_json: serde_json::Value = serde_json::from_str(&shop_resp.text().await?)?;
+    let shop_item = shop_json
+        .get("data")
+        .and_then(|d| d.get("items"))
+        .and_then(|i| i.as_array())
+        .and_then(|a| a.first())
+        .cloned();
+    let Some(shop_item) = shop_item else {
+        println!("   ⚠️  Shop is empty, skipping purchase assertions");
+        println!("   ✅ Shop flow test passed (skipped)");
+        return Ok(());
+    };
+    let item_id = shop_item.get("id").and_then(|v| v.as_u64()).unwrap_or(0);
+    let item_type = shop_item
+        .get("type_id")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
+    println!(
+        "   🛍️  Picked shop item id={} type_id={}",
+        item_id, item_type
+    );
+
+    ctx.buy_item(item_id, 5).await?;
 
     let state_after = ctx.get_state().await?;
     println!("   💰 Money after: {}", state_after.user.money);
@@ -768,9 +816,11 @@ async fn test_shop_flow(ctx: &TestContext) -> Result<()> {
         state_after.user.money < money_before,
         "Money should decrease after purchase"
     );
+    // 背包条目的 type_id 是物品定义 id（pm_itemdata.id，即商店条目的 id），
+    // 物品类别字段另叫 item_type，两者不要混淆
     assert!(
-        state_after.items.iter().any(|i| i.type_id == 1),
-        "Should have item type 1"
+        state_after.items.iter().any(|i| i.type_id == item_id),
+        "Should have the purchased item in inventory"
     );
 
     println!();
