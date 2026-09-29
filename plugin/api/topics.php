@@ -99,14 +99,20 @@ function api_get_topics()
   try {
     $fid_escaped = intval($fid);
     $limit_escaped = intval($limit);
-    $rows = DB::fetch_all(pm_sql(
+    $rows = [];
+    // This compact feed only publishes public forums. Restricted forums keep
+    // their native Discuz permission/password/formula checks on forum.php.
+    if (!empty($_G['group']['allowvisit']) && pm_topics_forum_public($fid)) {
+      $readaccess = max(0, intval($_G['group']['readaccess'] ?? 0));
+      $rows = DB::fetch_all(pm_sql(
       "SELECT tid, subject, dateline, displayorder, author, authorid, views, replies
            FROM " . DB::table('forum_thread') . "
-           WHERE fid = %d AND displayorder >= 0
+           WHERE fid = %d AND displayorder >= 0 AND readperm <= %d
            ORDER BY displayorder DESC, lastpost DESC
            LIMIT 0, %d",
-      $fid_escaped, $limit_escaped
-    ));
+      $fid_escaped, $readaccess, $limit_escaped
+      ));
+    }
 
     foreach ($rows as $topic) {
       $topics[] = [
@@ -130,4 +136,37 @@ function api_get_topics()
     'topics' => $topics,
     'total' => count($topics),
   ]);
+}
+
+function pm_topics_forum_public($fid)
+{
+  global $_G;
+  $seen = [];
+  while ($fid > 0) {
+    if (isset($seen[$fid]) || count($seen) >= 10) {
+      return false;
+    }
+    $seen[$fid] = true;
+    $forum = DB::fetch_first(pm_sql(
+      "SELECT f.fid, f.fup, f.status, p.password, p.viewperm, p.formulaperm
+       FROM " . DB::table('forum_forum') . " f
+       INNER JOIN " . DB::table('forum_forumfield') . " p ON p.fid=f.fid
+       WHERE f.fid=%d", $fid
+    ));
+    if (!$forum || intval($forum['status']) !== 1 || !empty($forum['password'])
+      || !empty($forum['viewperm']) || !empty($forum['formulaperm'])) {
+      return false;
+    }
+    if (!empty($_G['uid'])) {
+      $access = DB::fetch_first(pm_sql(
+        "SELECT allowview FROM " . DB::table('forum_access') . " WHERE uid=%d AND fid=%d",
+        $_G['uid'], $fid
+      ));
+      if ($access && intval($access['allowview']) === -1) {
+        return false;
+      }
+    }
+    $fid = intval($forum['fup']);
+  }
+  return true;
 }

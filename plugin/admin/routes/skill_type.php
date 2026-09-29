@@ -1,5 +1,7 @@
 <?php
 
+require_once __DIR__ . '/security.php';
+
 function count_skill_type()
 {
   $count = DB::result_first("SELECT count(*) from pm_skill");
@@ -109,12 +111,13 @@ function set_skill_type($info)
       exit(json_encode($json_ret, JSON_UNESCAPED_UNICODE));
     }
 
+    $available_pokemons = pm_admin_id_list($info["available_pokemons"]);
+
     if ($query['name'] != $info["name"]) {
-      DB::query("UPDATE pm_skill set name='{$info["name"]}' where id=$id");
+      DB::query(pm_sql("UPDATE pm_skill SET name=%s WHERE id=%d", $info["name"], $id));
     }
 
     // 排序并去重
-    $available_pokemons = $info["available_pokemons"];
     sort($available_pokemons);
     $available_pokemons = array_values(array_unique($available_pokemons));
 
@@ -122,15 +125,15 @@ function set_skill_type($info)
     DB::query("UPDATE pm_skill set available_pokemons='$pokemon_list_str' where id=$id");
 
     if ($query['description'] != $info["description"]) {
-      DB::query("UPDATE pm_skill set description='{$info["description"]}' where id=$id");
+      DB::query(pm_sql("UPDATE pm_skill SET description=%s WHERE id=%d", $info["description"], $id));
     }
 
     if (intval($query['level_required']) != intval($info["min_level_limit"])) {
-      DB::query("UPDATE pm_skill set level_required='{$info["min_level_limit"]}' where id=$id");
+      DB::query(pm_sql("UPDATE pm_skill SET level_required=%d WHERE id=%d", $info["min_level_limit"], $id));
     }
 
     if (intval($query['max_uses']) != intval($info["use_times_limit"])) {
-      DB::query("UPDATE pm_skill set max_uses='{$info["use_times_limit"]}' where id=$id");
+      DB::query(pm_sql("UPDATE pm_skill SET max_uses=%d WHERE id=%d", $info["use_times_limit"], $id));
     }
 
     $effect = translate_skill_type_obj_to_raw($info["effect"]);
@@ -138,10 +141,10 @@ function set_skill_type($info)
     $pokemon_type = $effect[1];
     $damage = intval($effect[2]);
     if ($query['category'] != $category) {
-      DB::query("UPDATE pm_skill set category='$category' where id=$id");
+      DB::query(pm_sql("UPDATE pm_skill SET category=%s WHERE id=%d", $category, $id));
     }
     if ($query['element'] != $pokemon_type) {
-      DB::query("UPDATE pm_skill set element='$pokemon_type' where id=$id");
+      DB::query(pm_sql("UPDATE pm_skill SET element=%s WHERE id=%d", $pokemon_type, $id));
     }
     if (intval($query['power']) != $damage) {
       DB::query("UPDATE pm_skill set power='$damage' where id=$id");
@@ -167,7 +170,7 @@ function insert_skill_type($info)
   $name = strval($info["name"]);
 
   // 排序并去重
-  $available_pokemons = $info["available_pokemons"];
+  $available_pokemons = pm_admin_id_list($info["available_pokemons"]);
   sort($available_pokemons);
   $available_pokemons = array_values(array_unique($available_pokemons));
 
@@ -187,11 +190,11 @@ function insert_skill_type($info)
   $last_id = intval($last_id['id']);
   $new_id = $last_id + 1;
 
-  DB::query("INSERT INTO pm_skill (
+  DB::query(pm_sql("INSERT INTO pm_skill (
     id, name, available_pokemons, description, level_required, max_uses, category, element, power
   ) VALUES (
-    $new_id, '$name', '$pmid', '$txt', $lv, $num, '$category', '$tn', $powr
-  )");
+    %d, %s, %s, %s, %d, %d, %s, %s, %d
+  )", $new_id, $name, $pmid, $txt, $lv, $num, $category, $tn, $powr));
 
   return $new_id;
 }

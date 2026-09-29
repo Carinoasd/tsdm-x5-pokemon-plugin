@@ -12,6 +12,8 @@ if (!defined('IN_DISCUZ')) {
     exit('Access Denied');
 }
 
+require_once __DIR__ . '/transactions.php';
+
 /**
  * 全局异常处理器
  *
@@ -20,6 +22,7 @@ if (!defined('IN_DISCUZ')) {
  */
 function api_exception_handler($exception)
 {
+    pm_api_rollback_transaction();
     // 记录详细错误到日志
     error_log(sprintf(
         "[API Exception] %s:%d - %s\nStack trace:\n%s",
@@ -31,7 +34,7 @@ function api_exception_handler($exception)
 
     // 根据异常类型返回适当的错误码
     $code = 500;
-    $message = sprintf("%s: %s", get_class($exception), $exception->getMessage());
+    $message = 'Internal Server Error';
 
     // 根据异常类型设置HTTP状态码
     if ($exception instanceof InvalidArgumentException) {
@@ -96,6 +99,7 @@ header('Pragma: no-cache');
 // 统一响应格式
 function api_success($data = null)
 {
+    pm_api_commit_transaction();
     echo json_encode([
         'success' => true,
         'data' => $data,
@@ -106,6 +110,7 @@ function api_success($data = null)
 
 function api_error($message, $code = 400, $debug_info = null, $error_code = null)
 {
+    pm_api_rollback_transaction();
     http_response_code($code);
     $response = [
         'success' => false,
@@ -127,6 +132,11 @@ function api_error($message, $code = 400, $debug_info = null, $error_code = null
 
 function api_json($data)
 {
+    if (is_array($data) && isset($data['success']) && !$data['success']) {
+        pm_api_rollback_transaction();
+    } else {
+        pm_api_commit_transaction();
+    }
     echo json_encode($data, JSON_UNESCAPED_UNICODE);
     exit;
 }
@@ -459,4 +469,16 @@ if (!defined('API_ROUTED')) {
         'timestamp' => time()
     ], JSON_UNESCAPED_UNICODE);
     exit;
+}
+
+// The plugin switch applies to APIs as well as the game page.
+$pm_endpoint = defined('API_ENDPOINT') ? API_ENDPOINT : (isset($_GET['endpoint']) ? $_GET['endpoint'] : '');
+$pm_settings = isset($_G['cache']['plugin']['pokemon']) ? $_G['cache']['plugin']['pokemon'] : [];
+if ($pm_endpoint !== 'admin' && array_key_exists('is_open', $pm_settings)
+    && empty($pm_settings['is_open']) && !pm_is_staff()) {
+    api_error('宠物系统已关闭', 403);
+}
+
+if (!empty($_G['uid'])) {
+    pm_api_begin_transaction($_G['uid']);
 }

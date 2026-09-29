@@ -142,10 +142,10 @@ function set_evolution_info($info)
     }
     $cond = translate_evolution_info_label_to_db_cond($info["condition"]);
     if ($query['method'] != $cond[0]) {
-      DB::query("UPDATE pm_evolution set `method`='" . $cond[0] . "' where `id`=$id");
+      DB::query(pm_sql("UPDATE pm_evolution SET `method`=%s WHERE `id`=%d", $cond[0], $id));
     }
     if ($query['condition_value'] != $cond[1]) {
-      DB::query("UPDATE pm_evolution set `condition_value`='" . $cond[1] . "' where `id`=$id");
+      DB::query(pm_sql("UPDATE pm_evolution SET `condition_value`=%s WHERE `id`=%d", $cond[1], $id));
     }
     if (intval($query['priority']) != intval($info["priority"])) {
       DB::query("UPDATE pm_evolution set `priority`=" . intval($info["priority"]) . " where `id`=$id");
@@ -169,14 +169,11 @@ function insert_evolution_info($info)
   $last_id = intval($last_id['id']);
   $new_id = $last_id + 1;
 
-  DB::query("INSERT INTO pm_evolution (
+  DB::query(pm_sql("INSERT INTO pm_evolution (
     `id`, `from_id`, `to_id`, `method`, `condition_value`, `priority`
   ) VALUES (
-    $new_id, $source_id, $target_id, '" .
-    $cond[0] . "', '" .
-    $cond[1] . "', 
-    $priority
-  )");
+    %d, %d, %d, %s, %s, %d
+  )", $new_id, $source_id, $target_id, $cond[0], $cond[1], $priority));
 
   return $new_id;
 }

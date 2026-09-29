@@ -37,12 +37,11 @@ function api_ensure_itemdata_module_column()
         return;
     }
     $done = true;
-    // 旧版 install.php/种子创建的 pm_itemdata 可能没有 module 列（全新安装站点），
-    // 显式 SELECT i.module 会直接抛 DbException；这里惰性补列，幂等安全。
+    // Schema upgrades belong in install/migrations; DDL here would implicitly
+    // commit the active request transaction and break rollback guarantees.
     $col = DB::fetch_first("SHOW COLUMNS FROM " . pm_table('pm_itemdata') . " LIKE 'module'");
     if (!$col) {
-        DB::query("ALTER TABLE " . pm_table('pm_itemdata') . "
-            ADD COLUMN module varchar(30) NOT NULL DEFAULT '' AFTER type");
+        api_error('请先执行宠物数据库迁移后重试', 503);
     }
 }
 

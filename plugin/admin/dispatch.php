@@ -142,4 +142,10 @@ if (empty($params) || (count($params) === 1 && isset($params['action']))) {
         $params = $rawJson;
     }
 }
-admin_dispatch($params["action"] ?? $_POST["action"] ?? "", $params);
+try {
+    admin_dispatch($params["action"] ?? $_POST["action"] ?? "", $params);
+} catch (InvalidArgumentException $e) {
+    http_response_code(400);
+    echo json_encode(["success" => false, "reason" => "Invalid request"], JSON_UNESCAPED_UNICODE);
+    exit;
+}

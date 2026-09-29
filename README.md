@@ -24,7 +24,10 @@ python scripts/docker/dev.py up
 
 首次访问需接受自签证书警告（浏览器点「高级 → 继续前往」）。
 
-默认管理员: `admin` / `admin123`
+开发测试管理员: `admin` / `admin123`。开发栈默认仅绑定 `127.0.0.1`；
+正式部署须替换测试账号与默认数据库密码。设 `APP_BIND_ADDRESS` 可显式更改监听地址。
+
+安全运行要求见 [部署与事务说明](docs/security-deployment.md)。
 
 首次启动时 `entrypoint.sh` 会自动完成：从镜像内置源码引导 Discuz、按
 `DB_*` 环境变量生成 `config/config_global.php` 与独立模式

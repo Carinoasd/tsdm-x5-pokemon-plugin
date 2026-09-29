@@ -49,6 +49,22 @@ jobs:
     timeout-minutes: 10
     permissions:
       contents: read
+    services:
+      security-db:
+        image: mariadb:10
+        env:
+          MARIADB_ALLOW_EMPTY_ROOT_PASSWORD: "1"
+          MARIADB_DATABASE: pokemon_security_test
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd "mariadb-admin ping -h localhost"
+          --health-interval 5s --health-timeout 3s --health-retries 20
+    env:
+      PM_TEST_DB_HOST: 127.0.0.1
+      PM_TEST_DB_PORT: "3306"
+      PM_TEST_DB_USER: root
+      PM_TEST_DB_NAME: pokemon_security_test
     steps:
       - uses: actions/checkout@v7
 
@@ -56,6 +72,7 @@ jobs:
       - uses: shivammathur/setup-php@v2
         with:
           php-version: '8.3'
+          extensions: mysqli
 
       - name: Static test suite (schema consistency + php -l over plugin/)
         run: python3 scripts/test/run.py

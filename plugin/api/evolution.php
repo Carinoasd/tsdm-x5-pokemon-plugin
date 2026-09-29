@@ -155,6 +155,23 @@ function api_evolve_pokemon()
 
     $new_max_hp = calculate_max_hp($new_base_info, $pet['level']);
 
+    // 在公共请求事务中消费进化道具，失败时不得改变宠物形态。
+    if (isset($evolution_info['method']) && $evolution_info['method'] === 'item') {
+        $required_item_id = (int) $evolution_info['condition_value'];
+        DB::query(pm_sql(
+            "UPDATE " . pm_table('pm_myitem') . " SET nums = nums - 1
+            WHERE uid = %d AND itemid = %s AND nums > 0 LIMIT 1",
+            $uid, strval($required_item_id)
+        ));
+        if (DB::affected_rows() !== 1) {
+            api_error('Required evolution item is unavailable', 400);
+        }
+        DB::query(pm_sql(
+            "DELETE FROM " . pm_table('pm_myitem') . " WHERE uid = %d AND itemid = %s AND nums = 0",
+            $uid, strval($required_item_id)
+        ));
+    }
+
     // 更新宠物形态
     DB::query("UPDATE " . pm_table('pm_mypm') . " SET
         species_id = $new_type_id,
@@ -300,7 +317,7 @@ function check_user_has_item($uid, $item_id)
         $uid, strval($item_id)
     ));
 
-    return $item !== null;
+    return !empty($item);
 }
 
 /**

@@ -196,12 +196,7 @@ function api_buy_item()
         api_error('Insufficient funds', 400);
     }
 
-    // 扣除金钱
-    DB::query(pm_sql(
-        "UPDATE " . pm_table('pm_usersdata') . " SET money = money - %d WHERE uid = %d",
-        $total_price,
-        $uid
-    ));
+    debit_shop_money($uid, $total_price);
 
     // 添加到用户背包
     for ($i = 0; $i < $quantity; $i++) {
@@ -378,7 +373,7 @@ function api_buy_pet()
         api_error('Pet not found or unavailable for purchase', 404);
     }
 
-    $price = (int) $pokemon_data['money'];
+    $price = validate_int_range($pokemon_data['money'], 'pokemon.money', 0, 999999999);
 
     $user = DB::fetch_first(pm_sql(
         "SELECT * FROM " . pm_table('pm_usersdata') . " WHERE uid = %d",
@@ -423,16 +418,12 @@ function api_buy_pet()
         $site = $bag_count >= 6 ? 3 : 2;
     }
 
+    debit_shop_money($uid, $price);
+
     $new_pokemon = create_new_pokemon_data($pokemon_data, $initial_level, $uid);
 
     $sql = build_pokemon_insert_sql($new_pokemon, $site);
     DB::query($sql);
-
-    DB::query(pm_sql(
-        "UPDATE " . pm_table('pm_usersdata') . " SET money = money - %d WHERE uid = %d",
-        $price,
-        $uid
-    ));
 
     api_success(array(
         'message' => 'Purchase successful',
@@ -442,4 +433,23 @@ function api_buy_pet()
         'pokemon_type_id' => (int) $pokemon_type_id,
         'site' => $site,
     ));
+}
+
+/**
+ * 扣款必须成功后才发放商品。免费商品不依赖 MySQL 的零变更行数。
+ * 调用者运行在公共请求事务及用户锁内。
+ */
+function debit_shop_money($uid, $amount)
+{
+    if ($amount === 0) {
+        return;
+    }
+    DB::query(pm_sql(
+        "UPDATE " . pm_table('pm_usersdata') . " SET money = money - %d
+        WHERE uid = %d AND money >= %d",
+        $amount, $uid, $amount
+    ));
+    if (DB::affected_rows() !== 1) {
+        api_error('Insufficient funds', 400);
+    }
 }

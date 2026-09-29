@@ -9,7 +9,12 @@ if (!$uid) {
     showmessage('错误: 没有登录');
 }
 
-$hide = (bool)$_GET['hide'];
+require_once __DIR__ . '/security.php';
+if (!pm_formhash_ok()) {
+    showmessage('formhash 校验失败，请刷新页面后重试');
+}
+
+$hide = !empty($_GET['hide']);
 
 DB::update('common_member_field_forum', [
     'pokemon' => $hide ? '' : serialize(get_my_pm_data()),

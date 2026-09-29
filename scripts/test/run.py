@@ -293,6 +293,22 @@ def test_php_syntax():
         ok(f"php -l passed", f"{len(php_files)} files")
 
 
+def test_security_behavior():
+    import shutil
+    import subprocess
+    print("\n=== Security behavior regressions ===")
+    php = shutil.which("php")
+    if not php:
+        fail("security regressions", "PHP CLI is required")
+        return
+    for suite in sorted((ROOT / "scripts" / "test").glob("security_*.php")):
+        result = subprocess.run([php, str(suite)], capture_output=True, text=True)
+        if result.returncode:
+            fail(suite.name, (result.stdout + result.stderr).strip()[-1000:])
+        else:
+            ok(suite.name)
+
+
 def main():
     print("TSDM Pokemon Plugin — Static Test Suite")
     print("=" * 60)
@@ -303,6 +319,7 @@ def main():
         test_seed_data_columns(schema)
     test_migration_coverage()
     test_php_syntax()
+    test_security_behavior()
 
     print("\n" + "=" * 60)
     print(f"Results: {PASS} passed, {FAIL} failed, {WARN} warnings")

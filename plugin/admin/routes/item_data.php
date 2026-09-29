@@ -82,15 +82,15 @@ function set_item_type($info)
 
   if ($query = DB::fetch_first("SELECT * from pm_itemdata where id=$id")) {
     if ($query['name'] != $info["name"]) {
-      DB::query("UPDATE pm_itemdata set name='" . $info["name"] . "' where id=$id");
+      DB::query(pm_sql("UPDATE pm_itemdata SET name=%s WHERE id=%d", $info["name"], $id));
     }
 
     if ($query['tpname'] != $info["img_name"]) {
-      DB::query("UPDATE pm_itemdata set tpname='" . $info["img_name"] . "' where id=$id");
+      DB::query(pm_sql("UPDATE pm_itemdata SET tpname=%s WHERE id=%d", $info["img_name"], $id));
     }
 
     if ($query['description'] != $info["description"]) {
-      DB::query("UPDATE pm_itemdata set description='" . $info["description"] . "' where id=$id");
+      DB::query(pm_sql("UPDATE pm_itemdata SET description=%s WHERE id=%d", $info["description"], $id));
     }
 
     if (boolval($query['shop']) != boolval($info["is_selling"])) {
@@ -127,7 +127,7 @@ function set_item_type($info)
       case 4:
         // 特殊物品
         if ($query['sitemname'] != $tag_value) {
-          DB::query("UPDATE pm_itemdata set sitemname='" . $tag_value . "' where id=$id");
+          DB::query(pm_sql("UPDATE pm_itemdata SET sitemname=%s WHERE id=%d", $tag_value, $id));
         }
         break;
       case 5:
@@ -248,7 +248,7 @@ function insert_item_type($info)
   $effects_json = '{"hp":' . intval($addhp) . ',"exp":' . intval($addexp) . ',"level":' . intval($addlv) . ',"intimacy":' . intval($addgood) . '}';
   $equipment_json = '{"hp":' . intval($equipment_hp) . ',"atk":' . intval($equipment_atk) . ',"def":' . intval($equipment_def) . ',"spatk":' . intval($equipment_spatk) . ',"spdef":' . intval($equipment_spdef) . ',"spd":' . intval($equipment_sd) . '}';
 
-  DB::query("INSERT INTO pm_itemdata (
+  DB::query(pm_sql("INSERT INTO pm_itemdata (
     id, name, tpname, description, shop, money, type,
     ballid, upitem, sitemname, zbtype,
     lvask, xsask,
@@ -256,13 +256,15 @@ function insert_item_type($info)
     equipment,
     captmax
   ) VALUES (
-    $new_id, '$name', '$tpname', '$txt', $shop, $money, '$type',
-    $ballid, $upitem, '$sitemname', $zbtype,
-    $lvask, '$xsask',
-    '$effects_json',
-    '$equipment_json',
-    $captmax
-  )");
+    %d, %s, %s, %s, %d, %d, %d,
+    %d, %d, %s, %d,
+    %d, %s,
+    %s,
+    %s,
+    %d
+  )", $new_id, $name, $tpname, $txt, $shop, $money, $type,
+    $ballid, $upitem, $sitemname, $zbtype, $lvask, $xsask,
+    $effects_json, $equipment_json, $captmax));
 
   return $new_id;
 }

@@ -43,12 +43,7 @@ function get_global_config()
     $exists = DB::fetch_first("SELECT * FROM pm_config WHERE `key`='$key'");
     if (!$exists) {
       $data_type = is_bool($default_value) ? 'boolean' : (is_int($default_value) ? 'integer' : 'string');
-      if (is_bool($default_value)) {
-        $escaped_value = $default_value ? '1' : '0';
-      } else {
-        $escaped_value = addslashes($default_value);
-      }
-      @DB::query("INSERT INTO pm_config (`key`, `value`, `data_type`) VALUES ('$key', '$escaped_value', '$data_type')");
+      @DB::query(pm_sql("INSERT INTO pm_config (`key`, `value`, `data_type`) VALUES (%s, %s, %s)", $key, is_bool($default_value) ? ($default_value ? "1" : "0") : $default_value, $data_type));
     }
   }
 
@@ -98,20 +93,19 @@ function set_global_config($data)
 {
   foreach ($data as $key => $value) {
     $value = $data[$key];
-    if ($query = DB::fetch_first("SELECT * from pm_config where `key`='$key'")) {
+    if ($query = DB::fetch_first(pm_sql("SELECT * FROM pm_config WHERE `key`=%s", $key))) {
       if ($query['data_type'] == "string") {
         // 特殊处理 news_announcements：如果是数组，转换为 JSON 字符串
         if ($key === 'news_announcements' && is_array($value)) {
           $value = json_encode($value, JSON_UNESCAPED_UNICODE);
         }
-        $escaped_value = addslashes($value);
-        DB::query("UPDATE pm_config SET `value`='$escaped_value' WHERE `key`='$key'");
+        DB::query(pm_sql("UPDATE pm_config SET `value`=%s WHERE `key`=%s", $value, $key));
       } else if ($query['data_type'] == "integer") {
         $value = intval($value);
-        DB::query("UPDATE pm_config SET `value`='$value' WHERE `key`='$key'");
+        DB::query(pm_sql("UPDATE pm_config SET `value`=%s WHERE `key`=%s", $value, $key));
       } else if ($query['data_type'] == "boolean") {
         $value = boolval($value) ? '1' : '0';
-        DB::query("UPDATE pm_config SET `value`='$value' WHERE `key`='$key'");
+        DB::query(pm_sql("UPDATE pm_config SET `value`=%s WHERE `key`=%s", $value, $key));
       } else {
         $json_ret = [];
         $json_ret["success"] = false;
@@ -164,15 +158,12 @@ function set_global_config($data)
           if ($key === 'news_announcements' && is_array($value)) {
             $value = json_encode($value, JSON_UNESCAPED_UNICODE);
           }
-          $escaped_value = addslashes($value);
         } else if ($data_type == "integer") {
           $value = intval($value);
-          $escaped_value = strval($value);
         } else if ($data_type == "boolean") {
           $value = boolval($value) ? '1' : '0';
-          $escaped_value = $value;
         }
-        DB::query("INSERT INTO pm_config (`key`, `value`, `data_type`) VALUES ('$key', '$escaped_value', '$data_type')");
+        DB::query(pm_sql("INSERT INTO pm_config (`key`, `value`, `data_type`) VALUES (%s, %s, %s)", $key, $value, $data_type));
       } else {
         // 对于未知键，忽略而不是报错
         continue;

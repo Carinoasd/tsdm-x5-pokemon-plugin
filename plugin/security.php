@@ -26,3 +26,17 @@ if (!function_exists('pm_request_formhash')) {
         return $hash !== '' && hash_equals(formhash(), $hash);
     }
 }
+
+function pm_is_staff()
+{
+    global $_G;
+    if (empty($_G['uid'])) {
+        return false;
+    }
+    if (intval($_G['adminid'] ?? 0) === 1 || intval($_G['groupid'] ?? 0) === 1) {
+        return true;
+    }
+    $settings = $_G['cache']['plugin']['pokemon'] ?? [];
+    $staff = array_filter(array_map('trim', explode(',', $settings['poke_smgly'] ?? '')), 'strlen');
+    return in_array((string) ($_G['member']['username'] ?? $_G['username'] ?? ''), $staff, true);
+}

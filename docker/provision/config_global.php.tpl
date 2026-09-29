@@ -65,8 +65,8 @@ $_config['security']['querysafe']['afullnote'] = 0;
 $_config['security']['creditsafe']['second'] = 0;
 $_config['security']['creditsafe']['times'] = 10;
 $_config['security']['fsockopensafe']['status'] = 0;
-$_config['security']['error']['showerror'] = '1';
-$_config['security']['error']['guessplugin'] = '1';
+$_config['security']['error']['showerror'] = '0';
+$_config['security']['error']['guessplugin'] = '0';
 // --------------------------  CONFIG ADMINCP  -------------------------- //
 $_config['admincp']['founder'] = '1';
 $_config['admincp']['forcesecques'] = 0;

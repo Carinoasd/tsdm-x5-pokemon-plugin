@@ -3,6 +3,7 @@
 function normalize_pokemon_status($status, $pokemon_id)
 {
   $status = intval($status);
+  $pokemon_id = intval($pokemon_id);
   if ($status < 1 || $status > 20) {
     DB::query("UPDATE pm_mypm set `state`='1' where `id`='$pokemon_id'");
     return 1;

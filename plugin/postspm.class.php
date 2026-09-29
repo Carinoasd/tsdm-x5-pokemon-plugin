@@ -48,7 +48,7 @@ class plugin_pokemon_forum
     {
         $img_url = self::pet_img_url($pet);
         $fallback_url = htmlspecialchars(self::pet_img_fallback_url($pet), ENT_QUOTES);
-        $name = self::pet_name($pet);
+        $name = htmlspecialchars(self::pet_name($pet), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
         $level = self::pet_level($pet);
         $href = "plugin.php?id=pokemon:game";
         return <<<HTML

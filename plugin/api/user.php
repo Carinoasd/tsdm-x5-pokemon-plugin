@@ -1209,7 +1209,7 @@ function api_refresh_forum_badge()
 
     $col = DB::fetch_first("SHOW COLUMNS FROM $forum_table LIKE 'pokemon'");
     if (!$col) {
-        DB::query("ALTER TABLE $forum_table ADD COLUMN pokemon text NOT NULL");
+        api_error('请先安装或升级宠物插件后重试', 503);
     }
 
     if ($hide) {

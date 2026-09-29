@@ -174,6 +174,9 @@ function api_start_battle()
     if (!$map) {
         api_error('Map not found', 404);
     }
+    if (empty($map['is_enabled'])) {
+        api_error('Map is disabled', 400);
+    }
 
     // 检查宠物HP
     if ($mypokemon['hp'] <= 0) {
@@ -282,6 +285,31 @@ function api_use_skill()
         api_error('No active battle found', 400);
     }
 
+    if (!$mypokemon || $mypokemon['hp'] <= 0 || (int)$mypokemon['state'] === 0) {
+        api_error('你的宠物已晕倒，请先更换宠物！', 400);
+    }
+
+    // 先验证当前宠物拥有技能及可用PP，再进行任何战斗计算或状态更新。
+    $skilldata = null;
+    $myskill = null;
+    if ($skill_id > 0) {
+        $skilldata = DB::fetch_first(pm_sql("SELECT * FROM " . pm_table('pm_skill') . " WHERE id = %d", $skill_id));
+        if (!$skilldata) {
+            api_error('Skill not found', 404);
+        }
+        $myskill = DB::fetch_first(pm_sql(
+            "SELECT * FROM " . pm_table('pm_myskill') . "
+            WHERE skillid = %d AND uid = %d AND petid = %d",
+            $skill_id, $_G['uid'], $mypokemon['id']
+        ));
+        if (!$myskill) {
+            api_error('Pokemon has not learned this skill', 400);
+        }
+        if ($myskill['skillnum'] <= 0 && $skilldata['max_uses'] != 0) {
+            api_error('Skill PP is depleted', 400);
+        }
+    }
+
     // 获取地图信息
     $map = null;
 
@@ -311,26 +339,12 @@ function api_use_skill()
     $skill_category = 0;
 
     if ($skill_id > 0) {
-        $skilldata = DB::fetch_first(pm_sql("SELECT * FROM " . pm_table('pm_skill') . " WHERE id = %d", $skill_id));
-        if ($skilldata) {
-            $skillname = $skilldata['name'];
-            $power = intval($skilldata['power']) ?: 40;
-            // pm_skill 的属性列是 element（曾误用不存在的 sx 列导致技能属性恒为宠物自身属性）
-            $skill_type = $skilldata['element'] ?: $mydata['xs'];
-            // pm_skill.category 存中文（'物攻'/'特攻'），intval 恒为 0，需按字符串判断
-            $skill_category = api_normalize_skill_category($skilldata['category']);
-
-            // 检查PP值
-            $myskill = DB::fetch_first(pm_sql(
-                "SELECT * FROM " . pm_table('pm_myskill') . "
-                WHERE skillid = %d AND uid = %d AND petid = %d",
-                $skill_id, $_G['uid'], $mypokemon['id']
-            ));
-
-            if ($myskill && $myskill['skillnum'] <= 0 && $skilldata['max_uses'] != 0) {
-                api_error('Skill PP is depleted', 400);
-            }
-        }
+        $skillname = $skilldata['name'];
+        $power = intval($skilldata['power']) ?: 40;
+        // pm_skill 的属性列是 element（曾误用不存在的 sx 列导致技能属性恒为宠物自身属性）
+        $skill_type = $skilldata['element'] ?: $mydata['xs'];
+        // pm_skill.category 存中文（'物攻'/'特攻'），intval 恒为 0，需按字符串判断
+        $skill_category = api_normalize_skill_category($skilldata['category']);
     }
 
     // 决定先手
@@ -370,8 +384,8 @@ function api_use_skill()
             if ($skill_id > 0 && $myskill && $skilldata['max_uses'] != 0) {
                 DB::query(pm_sql("UPDATE " . pm_table('pm_myskill') . "
                     SET skillnum = skillnum - 1
-                    WHERE skillid = %d AND uid = %d AND petid = %d",
-                    $skill_id, $_G['uid'], $mypokemon['id']
+                    WHERE id = %d AND uid = %d AND petid = %d AND skillnum > 0",
+                    $myskill['id'], $_G['uid'], $mypokemon['id']
                 ));
             }
         }
@@ -497,8 +511,8 @@ function api_use_skill()
                 if ($skill_id > 0 && $myskill && $skilldata['max_uses'] != 0) {
                     DB::query(pm_sql("UPDATE " . pm_table('pm_myskill') . "
                         SET skillnum = skillnum - 1
-                        WHERE skillid = %d AND uid = %d AND petid = %d",
-                        $skill_id, $_G['uid'], $mypokemon['id']
+                        WHERE id = %d AND uid = %d AND petid = %d AND skillnum > 0",
+                        $myskill['id'], $_G['uid'], $mypokemon['id']
                     ));
                 }
             }
@@ -2599,6 +2613,10 @@ function api_replace_pokemon()
 
     if (empty($myusersdata['npcid']) || $myusersdata['npcid'] <= 0) {
         api_error('没有进行中的战斗', 400);
+    }
+
+    if (!$mypokemon || $mypokemon['hp'] > 0) {
+        api_error('当前宠物尚未倒下，请使用主动切换', 400);
     }
 
     $current_pet_id = intval($mypokemon['id']);

@@ -99,21 +99,21 @@ function set_map_info($info)
     }
 
     if ($query['name'] != $info["name"]) {
-      DB::query("UPDATE pm_map set name='{$info["name"]}' where id={$info["id"]}");
+      DB::query(pm_sql("UPDATE pm_map SET name=%s WHERE id=%d", $info["name"], $id));
     }
     if ($query['site'] != $info["area_type"]) {
-      DB::query("UPDATE pm_map set site='{$info["area_type"]}' where id={$info["id"]}");
+      DB::query(pm_sql("UPDATE pm_map SET site=%s WHERE id=%d", $info["area_type"], $id));
     }
 
     if (boolval($query['is_enabled']) != boolval($info["is_enabled"])) {
       $is_enabled = boolval($info["is_enabled"]) ? 1 : 0;
-      DB::query("UPDATE pm_map set is_enabled={$is_enabled} where id={$info["id"]}");
+      DB::query("UPDATE pm_map set is_enabled={$is_enabled} where id={$id}");
     }
     if (intval($query['min_level']) != intval($info["min_level"])) {
-      DB::query("UPDATE pm_map set min_level={$info["min_level"]} where id={$info["id"]}");
+      DB::query(pm_sql("UPDATE pm_map SET min_level=%d WHERE id=%d", $info["min_level"], $id));
     }
     if (intval($query['max_level']) != intval($info["max_level"])) {
-      DB::query("UPDATE pm_map set max_level={$info["max_level"]} where id={$info["id"]}");
+      DB::query(pm_sql("UPDATE pm_map SET max_level=%d WHERE id=%d", $info["max_level"], $id));
     }
 
     // 处理地图模式配置
@@ -186,7 +186,7 @@ function set_map_info($info)
     $current_expn = $query['boss_config'];
     if ($current_expn != $new_expn) {
       $new_expn_escaped = addslashes($new_expn);
-      DB::query("UPDATE pm_map set boss_config='{$new_expn_escaped}' where id={$info["id"]}");
+      DB::query("UPDATE pm_map set boss_config='{$new_expn_escaped}' where id={$id}");
     }
   } else {
     $json_ret = [];
@@ -300,12 +300,11 @@ function insert_map_info($info)
   $last_id = intval($last_id['id']);
   $new_id = $last_id + 1;
 
-  $expn_escaped = addslashes($expn);
-  DB::query("INSERT INTO pm_map (
+  DB::query(pm_sql("INSERT INTO pm_map (
     id, name, site, is_enabled, min_level, max_level, boss_config
   ) VALUES (
-    $new_id, '$name', '$site', $kg, $minlevel, $maxlevel, '$expn_escaped'
-  )");
+    %d, %s, %s, %d, %d, %d, %s
+  )", $new_id, $name, $site, $kg, $minlevel, $maxlevel, $expn));
 
   return $new_id;
 }
@@ -498,7 +497,7 @@ function add_pokemon_to_map($map_id, $pokemon_type_id)
   $new_mapid = implode(',', $map_ids);
 
   // 更新数据库（成功时返回数据由 dispatch 统一封装，失败保持错误信封退出）
-  $result = DB::query("UPDATE pm_data SET mapid = '{$new_mapid}' WHERE id = {$pokemon_type_id}");
+  $result = DB::query(pm_sql("UPDATE pm_data SET mapid=%s WHERE id=%d", $new_mapid, $pokemon_type_id));
 
   if ($result) {
     return [];
@@ -548,7 +547,7 @@ function remove_pokemon_from_map($map_id, $pokemon_type_id)
   $new_mapid = implode(',', $map_ids);
 
   // 更新数据库（成功时返回数据由 dispatch 统一封装，失败保持错误信封退出）
-  $result = DB::query("UPDATE pm_data SET mapid = '{$new_mapid}' WHERE id = {$pokemon_type_id}");
+  $result = DB::query(pm_sql("UPDATE pm_data SET mapid=%s WHERE id=%d", $new_mapid, $pokemon_type_id));
 
   if ($result) {
     return [];

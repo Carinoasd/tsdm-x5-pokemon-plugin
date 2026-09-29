@@ -10,15 +10,14 @@ register_shutdown_function(function() {
     if ($error !== null && in_array($error['type'], [E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR])) {
         echo json_encode([
             'success' => false,
-            'error' => 'Fatal Error: ' . $error['message'],
-            'file' => basename($error['file']),
-            'line' => $error['line'],
+            'error' => 'Internal Server Error',
             'timestamp' => time()
         ], JSON_UNESCAPED_UNICODE);
     }
 });
 
 function api_send_error($message, $code = 500, $extra = []) {
+    http_response_code($code);
     $response = array_merge([
         'success' => false,
         'error' => $message,
@@ -30,20 +29,16 @@ function api_send_error($message, $code = 500, $extra = []) {
 }
 
 set_exception_handler(function($e) {
-    api_send_error('Internal Server Error: ' . $e->getMessage(), 500, [
-        'file' => basename($e->getFile()),
-        'line' => $e->getLine()
-    ]);
+    error_log('[Pokemon API] ' . $e);
+    api_send_error('Internal Server Error', 500);
 });
 
 set_error_handler(function($errno, $errstr, $errfile, $errline) {
     if (!(error_reporting() & $errno)) {
         return false;
     }
-    api_send_error("PHP Error [$errno]: $errstr", 500, [
-        'file' => basename($errfile),
-        'line' => $errline
-    ]);
+    error_log("[Pokemon API] $errfile:$errline - $errstr");
+    api_send_error('Internal Server Error', 500);
 });
 
 $endpoint = isset($_GET['endpoint']) ? $_GET['endpoint'] : '';

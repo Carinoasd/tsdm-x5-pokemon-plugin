@@ -28,6 +28,11 @@ require_once __DIR__ . '/constants.php';
 // 此前仅经路由访问时未加载 utils.php，调用即 500
 require_once __DIR__ . '/utils.php';
 
+// Test helpers must be explicitly enabled by the development environment.
+if (getenv('PM_ENABLE_TEST_API') !== '1') {
+    api_error('API endpoint not found', 404);
+}
+
 global $_G;
 
 $action = get_param('action', '');
