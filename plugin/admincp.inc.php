@@ -1,7 +1,7 @@
 <?php
 defined('IN_DISCUZ') || exit('Access Denied');
 
-// 管理后台暴露全站配置改写、SQL 控制台与文件读取能力，入口仅限：
+// 管理后台暴露全站配置改写能力，入口仅限：
 // 1. 管理员（adminid=1 或管理用户组 groupid=1）；
 // 2. 「宠物中心」板块的版主——按板块名查 fid 后核对 forum_moderator，
 //    其它板块的版主与超级版主不放行，避免权限放大到论坛本体；
@@ -37,6 +37,12 @@ if (!$is_admin && !$is_pokemon_staff) {
 // Handle AJAX API calls from admin WASM
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     header('Content-Type: application/json; charset=utf-8');
+    // 管理动作可改写全站宠物数据，必须来自本站页面（防 CSRF）
+    require_once __DIR__ . '/security.php';
+    if (!pm_formhash_ok()) {
+        echo json_encode(['success' => false, 'reason' => 'formhash 校验失败，请刷新页面后重试'], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
     $action = isset($_POST['action']) ? $_POST['action'] : '';
     if (!$action) {
         $raw = file_get_contents('php://input');
@@ -101,9 +107,24 @@ window.__dioxus_hmr_disabled = true;
 window.__dioxus_no_hot_reload = true;
 (function() {
   const _fetch = window.fetch;
+  const formhash = '<?php echo FORMHASH; ?>';
   window.fetch = function(url, opts) {
     if (typeof url === 'string' && url.includes('/_dioxus'))
       return Promise.resolve(new Response('{}', {status:200,headers:{'Content-Type':'application/json'}}));
+    // 同源请求带上 formhash，服务端据此拒绝跨站伪造的请求
+    const target = new URL(url instanceof Request ? url.url : String(url), location.href);
+    if (target.origin === location.origin) {
+      if (url instanceof Request) {
+        const headers = new Headers(url.headers);
+        headers.set('X-Pm-Formhash', formhash);
+        return _fetch.call(this, new Request(url, {headers: headers}), opts);
+      }
+      const init = Object.assign({}, opts);
+      const headers = new Headers(init.headers || {});
+      headers.set('X-Pm-Formhash', formhash);
+      init.headers = headers;
+      return _fetch.call(this, url, init);
+    }
     return _fetch.apply(this, arguments);
   };
 })();

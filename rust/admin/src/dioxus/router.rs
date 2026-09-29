@@ -4,7 +4,6 @@ use crate::dioxus::state::AdminRoute;
 pub fn all_routes() -> &'static [(AdminRoute, &'static str)] {
     &[
         (AdminRoute::GlobalConfig, "全局配置"),
-        (AdminRoute::SqlConsole, "SQL 控制台"),
         (AdminRoute::PokemonData, "宠物数据"),
         (AdminRoute::ItemData, "道具数据"),
         (AdminRoute::MapData, "地图设定"),

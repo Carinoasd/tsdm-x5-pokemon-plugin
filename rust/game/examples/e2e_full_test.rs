@@ -81,10 +81,11 @@ struct TestContext {
 }
 
 impl TestContext {
-    fn new(base_url: &str, cookie_jar: Arc<Jar>) -> Self {
+    fn new(base_url: &str, cookie_jar: Arc<Jar>, formhash: &str) -> Self {
         let client = reqwest::Client::builder()
             .danger_accept_invalid_certs(true)
             .cookie_provider(cookie_jar)
+            .default_headers(formhash_headers(formhash))
             .timeout(Duration::from_secs(30))
             .build()
             .unwrap();
@@ -502,7 +503,7 @@ impl TestContext {
     }
 }
 
-async fn login_discuz(base_url: &str) -> Result<Arc<Jar>> {
+async fn login_discuz(base_url: &str) -> Result<(Arc<Jar>, String)> {
     println!("🔐 Logging in to Discuz...");
 
     let jar = Arc::new(Jar::default());
@@ -550,10 +551,38 @@ async fn login_discuz(base_url: &str) -> Result<Arc<Jar>> {
     println!("   ✅ Login successful");
 
     let plugin_home = format!("{}/plugin.php?id=pokemon:pokemon", base_url);
-    client.get(&plugin_home).send().await?;
+    let home_html = client.get(&plugin_home).send().await?.text().await?;
+    let session_formhash = extract_session_formhash(&home_html)
+        .ok_or_else(|| anyhow::anyhow!("plugin page has no session formhash"))?;
     println!("   ✅ Plugin session initialized");
 
-    Ok(jar)
+    Ok((jar, session_formhash))
+}
+
+/// 登录后的会话 formhash（页面退出链接与游戏页 fetch 包装里都有）。
+/// 插件 API 与管理接口要求以 X-Pm-Formhash 头回传，防 CSRF。
+fn extract_session_formhash(html: &str) -> Option<String> {
+    for marker in ["const formhash = '", "formhash="] {
+        if let Some(pos) = html.find(marker) {
+            let hash: String = html[pos + marker.len()..]
+                .chars()
+                .take_while(|c| c.is_ascii_hexdigit())
+                .collect();
+            if !hash.is_empty() {
+                return Some(hash);
+            }
+        }
+    }
+    None
+}
+
+fn formhash_headers(formhash: &str) -> reqwest::header::HeaderMap {
+    let mut headers = reqwest::header::HeaderMap::new();
+    headers.insert(
+        "X-Pm-Formhash",
+        reqwest::header::HeaderValue::from_str(formhash).expect("formhash is ascii hex"),
+    );
+    headers
 }
 
 fn extract_formhash(html: &str) -> Option<String> {
@@ -588,8 +617,8 @@ async fn main() -> Result<()> {
     println!("🌐 Target: {}", base_url);
     println!();
 
-    let cookie_jar = login_discuz(&base_url).await?;
-    let ctx = TestContext::new(&base_url, cookie_jar);
+    let (cookie_jar, formhash) = login_discuz(&base_url).await?;
+    let ctx = TestContext::new(&base_url, cookie_jar, &formhash);
 
     let mut passed = 0;
     let mut failed = 0;

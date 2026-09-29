@@ -567,22 +567,6 @@ pub async fn set_global_config(config: GlobalConfigType) -> Result<GlobalConfigT
     }
 }
 
-pub async fn run_sql(sql: String) -> Result<String> {
-    let data = fetch(
-        "run::sql_console",
-        vec![("sql".to_string(), sql)].into_iter().collect(),
-    )
-    .await?;
-
-    match data.data.and_then(|items| items.into_iter().next()) {
-        Some(RetStruct::RawResult(result)) => Ok(result.raw),
-        Some(other) => Err(anyhow!("返回的数据包中包含了错误的信息 {:?}", other)),
-        None => Err(anyhow!(data
-            .reason
-            .unwrap_or_else(|| "未知错误".to_string()))),
-    }
-}
-
 pub async fn count_item_type() -> Result<u64> {
     let data = fetch("count::item_type", HashMap::new()).await?;
 

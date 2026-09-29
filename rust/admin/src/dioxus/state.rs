@@ -1,4 +1,3 @@
-use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::dioxus::prelude::*;
@@ -12,7 +11,6 @@ use _utils::types::{
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum AdminRoute {
     GlobalConfig,
-    SqlConsole,
     PokemonData,
     ItemData,
     MapData,
@@ -71,19 +69,6 @@ impl GlobalConfigState {
     pub fn is_dirty(&self) -> bool {
         self.current != self.saved
     }
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct SqlHistoryEntry {
-    pub executed_at: DateTime<Utc>,
-    pub sql: String,
-    pub result: Result<String, String>,
-}
-
-#[derive(Clone, Debug, PartialEq, Default)]
-pub struct SqlConsoleState {
-    pub console: String,
-    pub history: Vec<SqlHistoryEntry>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -530,8 +515,6 @@ pub static ADMIN_TOASTS: GlobalSignal<Vec<AdminToast>> = Signal::global(Vec::new
 pub static ADMIN_TOAST_COUNTER: GlobalSignal<u64> = Signal::global(|| 0);
 pub static ADMIN_GLOBAL_CONFIG: GlobalSignal<GlobalConfigState> =
     Signal::global(GlobalConfigState::default);
-pub static ADMIN_SQL_CONSOLE: GlobalSignal<SqlConsoleState> =
-    Signal::global(SqlConsoleState::default);
 pub static ADMIN_ITEM_DATA: GlobalSignal<ListPageState<ItemType>> =
     Signal::global(|| ListPageState::with_filters(item_filters()));
 pub static ADMIN_MAP_DATA: GlobalSignal<ListPageState<MapInfo>> =
@@ -638,45 +621,4 @@ pub fn reset_global_config_to_saved() {
     let saved = ADMIN_GLOBAL_CONFIG.read().saved.clone();
     let mut state = ADMIN_GLOBAL_CONFIG.write();
     state.current = saved;
-}
-
-pub fn set_sql_console_input(value: String) {
-    ADMIN_SQL_CONSOLE.write().console = value;
-}
-
-/// SQL 控制台只读模式的语句判定：忽略前导注释与空白后，
-/// 仅放行 SELECT/SHOW/DESCRIBE/DESC/EXPLAIN 起头的语句。
-pub fn is_read_only_sql(sql: &str) -> bool {
-    let mut rest = sql.trim_start();
-    loop {
-        if let Some(tail) = rest.strip_prefix("--") {
-            rest = tail.split_once('\n').map(|(_, r)| r).unwrap_or("");
-        } else if let Some(tail) = rest.strip_prefix('#') {
-            rest = tail.split_once('\n').map(|(_, r)| r).unwrap_or("");
-        } else if let Some(tail) = rest.strip_prefix("/*") {
-            rest = match tail.find("*/") {
-                Some(idx) => &tail[idx + 2..],
-                None => "",
-            };
-        } else {
-            break;
-        }
-        rest = rest.trim_start();
-    }
-    let first_word = rest
-        .split(|c: char| c.is_whitespace() || c == '(')
-        .next()
-        .unwrap_or("");
-    matches!(
-        first_word.to_lowercase().as_str(),
-        "select" | "show" | "describe" | "desc" | "explain"
-    )
-}
-
-pub fn clear_sql_console_input() {
-    ADMIN_SQL_CONSOLE.write().console.clear();
-}
-
-pub fn push_sql_history(entry: SqlHistoryEntry) {
-    ADMIN_SQL_CONSOLE.write().history.push(entry);
 }

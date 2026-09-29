@@ -10,7 +10,7 @@ pub fn AdminLayout(
     children: Element,
 ) -> Element {
     let main_class = match current {
-        AdminRoute::GlobalConfig | AdminRoute::SqlConsole => "admin-scrollable",
+        AdminRoute::GlobalConfig => "admin-scrollable",
         _ => "",
     };
 

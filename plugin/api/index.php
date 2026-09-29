@@ -437,6 +437,13 @@ function validate_optional_param(array $input, $key, $default = null, $type = 's
     return validate_required_param($input, $key, $type, $options);
 }
 
+// 游戏与管理接口会改写玩家数据（购买、放生、改金钱等），必须来自本站页面（防 CSRF）。
+// 前端页面的 fetch 包装会自动带 X-Pm-Formhash；图片类端点（badge/avatar/badges）不经过本文件。
+require_once __DIR__ . '/../security.php';
+if (!pm_formhash_ok()) {
+    api_error('formhash 校验失败，请刷新页面后重试', 403);
+}
+
 // 如果是通过路由加载的API文件，不返回404
 if (!defined('API_ROUTED')) {
     // 404响应（仅在直接访问 index.php 时）
