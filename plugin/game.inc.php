@@ -46,9 +46,24 @@ window.__dioxus_hmr_disabled = true;
 window.__dioxus_no_hot_reload = true;
 (function() {
   const _fetch = window.fetch;
+  const formhash = '<?php echo FORMHASH; ?>';
   window.fetch = function(url, opts) {
     if (typeof url === 'string' && url.includes('/_dioxus'))
       return Promise.resolve(new Response('{}', {status:200,headers:{'Content-Type':'application/json'}}));
+    // 同源请求带上 formhash，服务端据此拒绝跨站伪造的请求
+    const target = new URL(url instanceof Request ? url.url : String(url), location.href);
+    if (target.origin === location.origin) {
+      if (url instanceof Request) {
+        const headers = new Headers(url.headers);
+        headers.set('X-Pm-Formhash', formhash);
+        return _fetch.call(this, new Request(url, {headers: headers}), opts);
+      }
+      const init = Object.assign({}, opts);
+      const headers = new Headers(init.headers || {});
+      headers.set('X-Pm-Formhash', formhash);
+      init.headers = headers;
+      return _fetch.call(this, url, init);
+    }
     return _fetch.apply(this, arguments);
   };
 })();

@@ -2,8 +2,25 @@
 
 function run_sql_console($sql)
 {
+  require_once __DIR__ . '/../../security.php';
+
+  $denied = pm_sql_console_denied($sql);
+  if ($denied !== '') {
+    pm_sql_console_log($sql, 'denied');
+    exit(json_encode(["success" => false, "reason" => $denied], JSON_UNESCAPED_UNICODE));
+  }
+
+  // 非管理员的查询放进只读事务，数据库层面再挡一次写入
+  $read_only = !pm_is_full_admin();
+  if ($read_only) {
+    DB::query('START TRANSACTION READ ONLY');
+  }
   $query = DB::query($sql, 'SILENT');
+  pm_sql_console_log($sql, $query === false ? 'failed' : 'ok');
   if ($query === false) {
+    if ($read_only) {
+      DB::query('ROLLBACK');
+    }
     $json_ret = [];
     $json_ret["success"] = false;
     $json_ret["reason"] = "SQL 执行失败，请检查语法和表名";
@@ -19,6 +36,9 @@ function run_sql_console($sql)
     foreach ($rows as $data) {
       $result[] = $data;
     }
+  }
+  if ($read_only) {
+    DB::query('COMMIT');
   }
 
   $encoded = json_encode($result, JSON_UNESCAPED_UNICODE);

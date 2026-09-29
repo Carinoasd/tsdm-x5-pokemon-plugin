@@ -67,6 +67,9 @@ class DB {
     static function insert_id() { return self::$l->insert_id; }
 }
 DB::init();
+$_G = ["uid" => 1, "username" => "admin", "adminid" => 1, "groupid" => 1, "clientip" => "127.0.0.1",
+       "timestamp" => time(), "config" => ["db" => [1 => ["tablepre" => "pre_"]]]];
+function writelog($file, $log) {}
 $_SERVER = ["REQUEST_METHOD" => "POST"];
 parse_str(\'''' + qs + '''\', $_POST);
 ob_start();
@@ -495,16 +498,20 @@ def http_admin_tests():
         _, text = req2(f"{base}/member.php?mod=logging&action=login", data=body)
         check_true(f"login as {label}", any(c.name.endswith("auth") for c in cookie_jar),
                    f"cookies={[c.name for c in cookie_jar]}")
-        req2(f"{base}/plugin.php?id=pokemon:pokemon")
+        # 插件 API 与管理接口要求 X-Pm-Formhash（防 CSRF），取登录后的会话 formhash
+        _, home = req2(f"{base}/plugin.php?id=pokemon:pokemon")
+        m = _re.search(r"const formhash = '([0-9a-f]+)'", home) or _re.search(r'formhash=([0-9a-f]+)', home)
+        return m.group(1) if m else ""
 
-    _discuz_login("admin", "admin123", cj, "admin")
+    admin_hash = _discuz_login("admin", "admin123", cj, "admin")
 
-    def admin_post(action, extra=None):
+    def admin_post(action, extra=None, formhash=None):
         payload = {"action": action}
         payload.update(extra or {})
         status, text = req(f"{base}/plugin.php?id=pokemon:pokemon&index=admin",
                            data=json.dumps(payload).encode(),
-                           headers={"Content-Type": "application/json"})
+                           headers={"Content-Type": "application/json",
+                                    "X-Pm-Formhash": admin_hash if formhash is None else formhash})
         try:
             return status, json.loads(text)
         except json.JSONDecodeError:
@@ -539,15 +546,30 @@ def http_admin_tests():
         sql(f"INSERT INTO pre_forum_moderator (uid, fid) VALUES ({mod_uid}, 990)")
 
         mod_cj = http.cookiejar.CookieJar()
-        _discuz_login("e2e_center_mod", "e2emod123", mod_cj, "center moderator")
+        mod_hash = _discuz_login("e2e_center_mod", "e2emod123", mod_cj, "center moderator")
         mod_opener = urllib.request.build_opener(
             urllib.request.HTTPCookieProcessor(mod_cj),
             urllib.request.HTTPSHandler(context=ctx))
+
+        def mod_post(payload):
+            try:
+                r = mod_opener.open(urllib.request.Request(
+                    f"{base}/plugin.php?id=pokemon:pokemon&index=admin",
+                    data=json.dumps(payload).encode(),
+                    headers={"Content-Type": "application/json", "X-Pm-Formhash": mod_hash}), timeout=30)
+                text = r.read().decode("utf-8", "replace")
+            except urllib.error.HTTPError as e:
+                text = e.read().decode("utf-8", "replace")
+            try:
+                return json.loads(text)
+            except json.JSONDecodeError:
+                return {"_raw": text[:300]}
+
         try:
             r = mod_opener.open(urllib.request.Request(
                 f"{base}/plugin.php?id=pokemon:pokemon&index=admin",
                 data=json.dumps({"action": "count::pokemon_type"}).encode(),
-                headers={"Content-Type": "application/json"}), timeout=30)
+                headers={"Content-Type": "application/json", "X-Pm-Formhash": mod_hash}), timeout=30)
             mod_text = r.read().decode("utf-8", "replace")
             mod_status = r.status
         except urllib.error.HTTPError as e:
@@ -562,6 +584,21 @@ def http_admin_tests():
                        f"body={mod_text[:120]!r}")
         except json.JSONDecodeError:
             pass
+
+        # SQL 控制台对非管理员服务端强制只读，且只能查 pm_* 表
+        test("moderator sql_console SELECT pm_config",
+             mod_post({"action": "run::sql_console", "sql": "SELECT * FROM pm_config LIMIT 1;"}))
+        before = sql_scalar("SELECT COUNT(*) FROM pm_config")
+        test("moderator sql_console DELETE rejected",
+             mod_post({"action": "run::sql_console", "sql": "DELETE FROM pm_config"}), expect_success=False)
+        check_true("moderator DELETE left pm_config intact",
+                   sql_scalar("SELECT COUNT(*) FROM pm_config") == before, f"before={before}")
+        test("moderator sql_console core table rejected",
+             mod_post({"action": "run::sql_console", "sql": "SELECT uid, password FROM pre_common_member LIMIT 1"}),
+             expect_success=False)
+        test("moderator sql_console EXPLAIN ANALYZE UPDATE rejected",
+             mod_post({"action": "run::sql_console", "sql": "EXPLAIN ANALYZE UPDATE pm_config SET id = id"}),
+             expect_success=False)
 
     # 普通用户（非版主、非管理员）必须仍被拒
     _pw2 = _hashlib.md5((_hashlib.md5("e2euser123".encode()).hexdigest() + _salt).encode()).hexdigest()
@@ -589,6 +626,14 @@ def http_admin_tests():
         check_true("plain member admin POST rejected (no JSON envelope)",
                    '"success":true' not in plain_text, f"status={plain_status} body={plain_text[:120]!r}")
 
+    # CSRF：管理接口与游戏 API 缺 formhash 或 formhash 错误都必须拒绝
+    status, out = admin_post("count::pokemon_type", formhash="")
+    test("admin POST without formhash rejected", out if isinstance(out, dict) else {"_raw": out}, expect_success=False)
+    status, out = admin_post("count::pokemon_type", formhash="00000000")
+    test("admin POST with wrong formhash rejected", out if isinstance(out, dict) else {"_raw": out}, expect_success=False)
+    status, text = req(f"{base}/plugin.php?id=pokemon:pokemon&endpoint=boss&action=get_config&map_id=1")
+    check_true("game API without formhash rejected", '"success":true' not in text, f"status={status} body={text[:120]!r}")
+
     # representative dispatch actions over the wire
     status, out = admin_post("count::pokemon_type")
     test("HTTP count::pokemon_type", out if isinstance(out, dict) else {"_raw": out})
@@ -612,7 +657,8 @@ def http_admin_tests():
     test("HTTP get_wild_pokemons_for_map", out if isinstance(out, dict) else {"_raw": out})
 
     # boss endpoint via pokemon.inc.php routing
-    status, text = req(f"{base}/plugin.php?id=pokemon:pokemon&endpoint=boss&action=get_config&map_id=1")
+    status, text = req(f"{base}/plugin.php?id=pokemon:pokemon&endpoint=boss&action=get_config&map_id=1",
+                       headers={"X-Pm-Formhash": admin_hash})
     try:
         boss = json.loads(text)
         ok = isinstance(boss, dict) and boss.get("success") is True and "boss_config" in boss
