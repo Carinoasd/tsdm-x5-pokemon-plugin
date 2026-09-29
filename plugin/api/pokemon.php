@@ -637,7 +637,7 @@ function api_get_pokemon_detail()
     ));
     $skills = [];
 
-    foreach ($sk_rows as $sk) {
+    foreach ($skill_rows as $sk) {
         $skills[] = [
             'type_id' => (int) $sk['skillid'],
             'pp' => (int) $sk['skillnum'],
@@ -687,6 +687,7 @@ function api_get_pokemon_detail()
 
     api_success([
         'id' => (int) $pm['id'],
+        'site' => (int) $pm['site'],
         'name' => $info ? $info['name'] : '???',
         'nickname' => $pm['nickname'] ? $pm['nickname'] : null,
         'type_id' => $pmno,

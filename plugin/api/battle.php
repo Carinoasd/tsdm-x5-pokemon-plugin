@@ -1250,6 +1250,7 @@ function build_battle_response($myusersdata, $mypokemon, $map = null, $is_boss =
         'map_name' => $map ? $map['name'] : '',
         'turn' => $is_in_battle ? 1 : 0,
         'status' => $is_in_battle ? 'active' : 'idle',
+        'message' => '',
         'my_pokemon' => [
             'id' => (int)$mypokemon['species_id'],
             'instance_id' => (int)$mypokemon['id'],  // 数据库唯一 ID
@@ -1267,6 +1268,7 @@ function build_battle_response($myusersdata, $mypokemon, $map = null, $is_boss =
             'max_hp' => 0,
             'gender' => 0,
             'is_shiny' => false,
+            'boss_multiplier' => 1.0,
         ],
     ];
 

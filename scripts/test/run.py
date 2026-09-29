@@ -123,6 +123,7 @@ OLD_COLUMN_NAMES = {
     "pnclevel": "pm_data → dropped",
     "captmin": "pm_itemdata → dropped",
     "ppkallow": "pm_itemdata → dropped",
+    "boxcapacity": "pm_usersdata → never a real column (boxnum holds the capacity)",
 }
 
 SAFE_CONTEXTS = [

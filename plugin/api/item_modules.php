@@ -249,17 +249,17 @@ function box($petid, $itemname)
     if (!$user_data) {
         // 创建用户数据
         DB::query(pm_sql(
-            "INSERT INTO " . pm_table('pm_usersdata') . " (uid, boxcapacity) VALUES (%d, %d)",
+            "INSERT INTO " . pm_table('pm_usersdata') . " (uid, boxnum) VALUES (%d, %d)",
             $uid,
             $capacity_increase
         ));
     } else {
-        // 增加容量
-        $current_capacity = isset($user_data['boxcapacity']) ? (int)$user_data['boxcapacity'] : 0;
+        // 增加容量：容量判定读的是 boxnum（battle.php / shop.php），写 boxcapacity 不会生效
+        $current_capacity = isset($user_data['boxnum']) ? (int)$user_data['boxnum'] : 0;
         $new_capacity = $current_capacity + $capacity_increase;
 
         DB::query(pm_sql(
-            "UPDATE " . pm_table('pm_usersdata') . " SET boxcapacity = %d WHERE uid = %d",
+            "UPDATE " . pm_table('pm_usersdata') . " SET boxnum = %d WHERE uid = %d",
             $new_capacity,
             $uid
         ));
