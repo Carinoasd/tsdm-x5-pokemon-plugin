@@ -1457,11 +1457,11 @@ function api_equip_item()
         api_error('No items available', 400);
     }
 
-    // 检查该装备是否已被其他宝可梦使用
+    // 同一背包装备记录只能占用一个槽位，也要检查当前宠物。
     $equipped_on = DB::fetch_first(pm_sql(
         "SELECT id, nickname FROM " . pm_table('pm_mypm') . "
-WHERE (equipmentid1=%d OR equipmentid2=%d OR equipmentid3=%d OR equipmentid4=%d) AND id!=%d AND uid=%d",
-        $myitem_id, $myitem_id, $myitem_id, $myitem_id, $pet_id, $uid
+WHERE (equipmentid1=%d OR equipmentid2=%d OR equipmentid3=%d OR equipmentid4=%d) AND uid=%d",
+        $myitem_id, $myitem_id, $myitem_id, $myitem_id, $uid
     ));
 
     if ($equipped_on) {
