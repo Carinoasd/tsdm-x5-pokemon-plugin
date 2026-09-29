@@ -4,7 +4,7 @@ use crate::dioxus::{
     components::{layout::AdminLayout, toast::AdminToastProvider},
     pages::{
         EvolutionDataPage, GlobalConfigPage, ItemDataPage, MapDataPage, PokemonDataPage,
-        SkillDataPage, SqlConsolePage, UserDataPage,
+        SkillDataPage, UserDataPage,
     },
     state::{AdminRoute, ADMIN_BUSY},
 };
@@ -17,9 +17,6 @@ pub fn App() -> Element {
     let content = match route() {
         AdminRoute::GlobalConfig => rsx! {
             GlobalConfigPage {}
-        },
-        AdminRoute::SqlConsole => rsx! {
-            SqlConsolePage {}
         },
         AdminRoute::PokemonData => rsx! {
             PokemonDataPage {}

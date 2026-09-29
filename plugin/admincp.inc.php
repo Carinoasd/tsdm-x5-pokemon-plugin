@@ -1,7 +1,7 @@
 <?php
 defined('IN_DISCUZ') || exit('Access Denied');
 
-// 管理后台暴露全站配置改写、SQL 控制台与文件读取能力，入口仅限：
+// 管理后台暴露全站配置改写能力，入口仅限：
 // 1. 管理员（adminid=1 或管理用户组 groupid=1）；
 // 2. 「宠物中心」板块的版主——按板块名查 fid 后核对 forum_moderator，
 //    其它板块的版主与超级版主不放行，避免权限放大到论坛本体；
@@ -37,7 +37,7 @@ if (!$is_admin && !$is_pokemon_staff) {
 // Handle AJAX API calls from admin WASM
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     header('Content-Type: application/json; charset=utf-8');
-    // 管理动作可改写全站宠物数据与执行 SQL，必须来自本站页面（防 CSRF）
+    // 管理动作可改写全站宠物数据，必须来自本站页面（防 CSRF）
     require_once __DIR__ . '/security.php';
     if (!pm_formhash_ok()) {
         echo json_encode(['success' => false, 'reason' => 'formhash 校验失败，请刷新页面后重试'], JSON_UNESCAPED_UNICODE);

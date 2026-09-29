@@ -1,4 +1,3 @@
-use chrono::{Local, Timelike, Utc};
 use std::env::consts;
 
 use crate::dioxus::prelude::*;
@@ -8,18 +7,14 @@ use crate::{
     dioxus::{
         components::{
             form_fields::NewsAnnouncementsField, icon::IconName, icon_button::IconButton,
-            json_panel::JsonPanel,
         },
-        pages::shared::{ActionModal, ConfirmActionModal},
         state::{
             begin_global_config_request, finish_global_config_attempt, finish_global_config_load,
-            is_read_only_sql, push_sql_history, reset_global_config_to_saved, set_busy, set_notice,
-            set_sql_console_input, update_global_config, AdminNoticeLevel, SqlHistoryEntry,
-            ADMIN_BUSY, ADMIN_GLOBAL_CONFIG, ADMIN_SQL_CONSOLE,
+            reset_global_config_to_saved, set_busy, set_notice, update_global_config,
+            AdminNoticeLevel, ADMIN_BUSY, ADMIN_GLOBAL_CONFIG,
         },
         utils::{
-            api::{get_global_config, run_sql, set_global_config},
-            clipboard::copy_to_clipboard,
+            api::{get_global_config, set_global_config},
             json_tree::{ExpandState, JsonTree, JsonTreeMode},
         },
     },
@@ -33,9 +28,6 @@ pub fn GlobalConfigPage() -> Element {
     let config_for_bottom_save = config.clone();
     let is_busy = *ADMIN_BUSY.read();
     let is_dirty = state.is_dirty();
-
-    // SQL 控制台 modal 状态
-    let mut show_sql_console = use_signal(|| false);
 
     use_effect(move || {
         let state = ADMIN_GLOBAL_CONFIG.read().clone();
@@ -326,25 +318,6 @@ pub fn GlobalConfigPage() -> Element {
                         }),
                     }
                 }
-
-                Section { title: "高级设置", open: false,
-                    p { class: "field-hint",
-                        "高级页签入口仍保留在左侧导航与工具区内；具体业务页面请通过左侧导航进入。"
-                    }
-                    div { class: "admin-actions",
-                        button {
-                            class: "admin-btn admin-btn--primary",
-                            onclick: move |_| show_sql_console.set(true),
-                            "打开 SQL 控制台"
-                        }
-                    }
-                }
-            }
-
-            // SQL 控制台 Modal
-            SqlConsoleModal {
-                show: show_sql_console(),
-                on_close: move |_| show_sql_console.set(false),
             }
 
             div { class: "admin-list-bottom-dock",
@@ -583,274 +556,6 @@ fn NumberRangeField(
                     oninput: move |event| {
                         if let Ok(next_max) = event.value().parse::<u64>() {
                             on_change.call((min_value.min(next_max), next_max.max(min_value)));
-                        }
-                    },
-                }
-            }
-        }
-    }
-}
-
-// SQL 控制台 Modal 组件
-#[component]
-fn SqlConsoleModal(show: bool, on_close: EventHandler<()>) -> Element {
-    let sql_state = ADMIN_SQL_CONSOLE.read().clone();
-    let is_busy = *ADMIN_BUSY.read();
-    let input = sql_state.console.clone();
-    let input_for_copy = input.clone();
-    let history = sql_state.history.clone();
-    // 与 SQL 控制台页面保持一致的安全策略：默认只读，写语句需二次确认。
-    let mut read_only = use_signal(|| true);
-    let mut pending_write = use_signal(|| None::<String>);
-
-    let execute_sql = move |sql: String| {
-        set_busy(true);
-        spawn(async move {
-            let executed_at = Utc::now();
-            match run_sql(sql.clone()).await {
-                Ok(result) => {
-                    push_sql_history(SqlHistoryEntry {
-                        executed_at,
-                        sql,
-                        result: Ok(result),
-                    });
-                    set_notice(AdminNoticeLevel::Success, "SQL 执行完成");
-                }
-                Err(error) => {
-                    push_sql_history(SqlHistoryEntry {
-                        executed_at,
-                        sql,
-                        result: Err(error.to_string()),
-                    });
-                    set_notice(
-                        AdminNoticeLevel::Error,
-                        format!("执行 SQL 时出现错误: {}", error),
-                    );
-                }
-            }
-            set_busy(false);
-        });
-    };
-    let execute_sql_confirmed = execute_sql;
-    let pending_sql = pending_write();
-    let pending_preview = pending_sql.as_ref().map(|sql| {
-        let head: String = sql.chars().take(200).collect();
-        if sql.chars().count() > 200 {
-            format!("{}…", head)
-        } else {
-            head
-        }
-    });
-
-    rsx! {
-        if show {
-            ActionModal { title: "SQL 控制台".to_string(), on_close,
-                div { class: "admin-card admin-sql-editor",
-                    label { class: "field-label", "SQL" }
-                    label { class: "sql-readonly-toggle",
-                        input {
-                            r#type: "checkbox",
-                            checked: read_only(),
-                            onchange: move |event| read_only.set(event.checked()),
-                        }
-                        "只读模式（仅允许查询语句）"
-                    }
-                    textarea {
-                        class: "admin-textarea admin-textarea--code",
-                        rows: "6",
-                        placeholder: "SELECT * FROM pm_config LIMIT 10;",
-                        value: "{input}",
-                        oninput: move |event| set_sql_console_input(event.value()),
-                    }
-                    div { class: "admin-actions",
-                        button {
-                            class: "admin-btn admin-btn--primary",
-                            disabled: is_busy || input.trim().is_empty(),
-                            onclick: move |_| {
-                                let sql = ADMIN_SQL_CONSOLE.read().console.trim().to_string();
-                                if sql.is_empty() {
-                                    return;
-                                }
-                                if read_only() && !is_read_only_sql(&sql) {
-                                    set_notice(
-                                        AdminNoticeLevel::Error,
-                                        "只读模式下仅允许 SELECT/SHOW/DESCRIBE/EXPLAIN 查询语句",
-                                    );
-                                    return;
-                                }
-                                if !read_only() {
-                                    pending_write.set(Some(sql));
-                                    return;
-                                }
-                                execute_sql(sql);
-                            },
-                            if is_busy {
-                                "执行中..."
-                            } else {
-                                "执行"
-                            }
-                        }
-                        button {
-                            class: "admin-btn",
-                            disabled: input.is_empty(),
-                            onclick: move |_| {
-                                match copy_to_clipboard(&input_for_copy) {
-                                    Ok(()) => {
-                                        set_notice(AdminNoticeLevel::Info, "SQL 已复制到剪贴板");
-                                    }
-                                    Err(error) => {
-                                        set_notice(
-                                            AdminNoticeLevel::Error,
-                                            format!("复制失败: {}", error),
-                                        );
-                                    }
-                                }
-                            },
-                            "复制"
-                        }
-                        button {
-                            class: "admin-btn",
-                            disabled: input.is_empty(),
-                            onclick: move |_| set_sql_console_input(String::new()),
-                            "清空"
-                        }
-                    }
-                }
-
-                div { class: "admin-card admin-sql-history",
-                    div { class: "card-header",
-                        h3 { "执行历史" }
-                        span { class: "history-count", "{history.len()} 条" }
-                    }
-                    if history.is_empty() {
-                        p { class: "empty-hint", "暂无执行记录。" }
-                    } else {
-                        div { class: "history-list",
-                            for entry in history.into_iter().rev() {
-                                SqlHistoryModalCard {
-                                    key: "sql-{entry.executed_at.timestamp_millis()}",
-                                    entry,
-                                }
-                            }
-                        }
-                    }
-                }
-
-                if let Some(sql) = pending_sql {
-                    ConfirmActionModal {
-                        title: "确认执行写操作".to_string(),
-                        message: format!(
-                            "只读模式已关闭，以下语句可能修改或删除数据，确认执行吗？\n\n{}",
-                            pending_preview.unwrap_or_default(),
-                        ),
-                        confirm_text: "确认执行",
-                        disabled: is_busy,
-                        on_confirm: move |_| {
-                            pending_write.set(None);
-                            execute_sql_confirmed(sql.clone());
-                        },
-                        on_close: move |_| pending_write.set(None),
-                    }
-                }
-            }
-        }
-    }
-}
-
-#[component]
-fn SqlHistoryModalCard(entry: SqlHistoryEntry) -> Element {
-    // 显示时转为浏览器本地时区（存储仍为 UTC）
-    let executed_local = entry.executed_at.with_timezone(&Local);
-    let timestamp = format!(
-        "{:02}:{:02}:{:02}",
-        executed_local.hour(),
-        executed_local.minute(),
-        executed_local.second()
-    );
-    let is_ok = entry.result.is_ok();
-    let sql_copy = entry.sql.clone();
-
-    rsx! {
-        details {
-            class: if is_ok { "history-item is-success" } else { "history-item is-error" },
-            open: true,
-            summary { class: "history-summary",
-                span { class: "history-status",
-                    if is_ok {
-                        span {
-                            class: "admin-icon admin-icon--sm",
-                            dangerous_inner_html: "✓",
-                        }
-                    } else {
-                        span {
-                            class: "admin-icon admin-icon--sm",
-                            dangerous_inner_html: "✕",
-                        }
-                    }
-                }
-                span { class: "history-time", "{timestamp}" }
-            }
-            div { class: "history-body",
-                div { class: "history-toolbar",
-                    button {
-                        class: "admin-btn admin-btn--ghost",
-                        onclick: move |_| {
-                            match copy_to_clipboard(&sql_copy) {
-                                Ok(()) => {
-                                    set_notice(AdminNoticeLevel::Info, "SQL 已复制到剪贴板");
-                                }
-                                Err(error) => {
-                                    set_notice(
-                                        AdminNoticeLevel::Error,
-                                        format!("复制失败: {}", error),
-                                    );
-                                }
-                            }
-                        },
-                        "复制 SQL"
-                    }
-                }
-                pre { class: "history-sql", "{entry.sql}" }
-                match &entry.result {
-                    Ok(result) => {
-                        let copy_result = result.clone();
-                        let parsed_value = serde_json::from_str::<serde_json::Value>(result).ok();
-                        rsx! {
-                            div { class: "history-toolbar",
-                                button {
-                                    class: "admin-btn admin-btn--ghost",
-                                    onclick: move |_| {
-                                        match copy_to_clipboard(&copy_result) {
-                                            Ok(()) => {
-                                                set_notice(
-                                                    AdminNoticeLevel::Info,
-                                                    "结果已复制到剪贴板",
-                                                );
-                                            }
-                                            Err(error) => {
-                                                set_notice(
-                                                    AdminNoticeLevel::Error,
-                                                    format!("复制失败: {}", error),
-                                                );
-                                            }
-                                        }
-                                    },
-                                    "复制结果"
-                                }
-                            }
-                            if let Some(json_value) = parsed_value {
-                                div { class: "history-result-wrapper",
-                                    JsonPanel { value: json_value }
-                                }
-                            } else {
-                                pre { "{result}" }
-                            }
-                        }
-                    }
-                    Err(error) => rsx! {
-                        div { class: "history-result history-result--error",
-                            strong { "执行失败" }
-                            p { "{error}" }
                         }
                     },
                 }

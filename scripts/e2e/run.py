@@ -67,9 +67,6 @@ class DB {
     static function insert_id() { return self::$l->insert_id; }
 }
 DB::init();
-$_G = ["uid" => 1, "username" => "admin", "adminid" => 1, "groupid" => 1, "clientip" => "127.0.0.1",
-       "timestamp" => time(), "config" => ["db" => [1 => ["tablepre" => "pre_"]]]];
-function writelog($file, $log) {}
 $_SERVER = ["REQUEST_METHOD" => "POST"];
 parse_str(\'''' + qs + '''\', $_POST);
 ob_start();
@@ -433,14 +430,9 @@ if scratch_species_id:
     test("remove_pokemon_from_map (not present) fails", run_api("remove_pokemon_from_map", {"map_id": "1", "pokemon_type_id": str(scratch_species_id)}), expect_success=False)
     run_api("delete::pokemon_type", {"id": str(scratch_species_id)})
 
-# ============ 15. SQL console ============
-print("\n-- SQL Console --")
-res = run_api("run::sql_console", {"sql": "SELECT 1 AS v"})
-test("run::sql_console (SELECT 1)", res)
-if res.get("success") and res.get("data"):
-    raw = str(res["data"][0].get("raw", ""))
-    check_true("sql_console returns row", '"v"' in raw or "1" in raw, f"raw={raw[:120]}")
-test("run::sql_console (bad SQL) fails", run_api("run::sql_console", {"sql": "SELEC nope"}), expect_success=False)
+# ============ 15. SQL console (removed) ============
+print("\n-- SQL Console (removed) --")
+test("run::sql_console is no longer dispatched", run_api("run::sql_console", {"sql": "SELECT 1 AS v"}), expect_success=False)
 
 # ============ 16. Dispatch negatives ============
 print("\n-- Dispatch Negatives --")
@@ -585,20 +577,12 @@ def http_admin_tests():
         except json.JSONDecodeError:
             pass
 
-        # SQL 控制台对非管理员服务端强制只读，且只能查 pm_* 表
-        test("moderator sql_console SELECT pm_config",
-             mod_post({"action": "run::sql_console", "sql": "SELECT * FROM pm_config LIMIT 1;"}))
+        # SQL 控制台已移除，版主与管理员都不能再执行 SQL
         before = sql_scalar("SELECT COUNT(*) FROM pm_config")
-        test("moderator sql_console DELETE rejected",
+        test("moderator sql_console is gone",
              mod_post({"action": "run::sql_console", "sql": "DELETE FROM pm_config"}), expect_success=False)
-        check_true("moderator DELETE left pm_config intact",
+        check_true("pm_config intact after moderator sql_console attempt",
                    sql_scalar("SELECT COUNT(*) FROM pm_config") == before, f"before={before}")
-        test("moderator sql_console core table rejected",
-             mod_post({"action": "run::sql_console", "sql": "SELECT uid, password FROM pre_common_member LIMIT 1"}),
-             expect_success=False)
-        test("moderator sql_console EXPLAIN ANALYZE UPDATE rejected",
-             mod_post({"action": "run::sql_console", "sql": "EXPLAIN ANALYZE UPDATE pm_config SET id = id"}),
-             expect_success=False)
 
     # 普通用户（非版主、非管理员）必须仍被拒
     _pw2 = _hashlib.md5((_hashlib.md5("e2euser123".encode()).hexdigest() + _salt).encode()).hexdigest()
@@ -633,6 +617,9 @@ def http_admin_tests():
     test("admin POST with wrong formhash rejected", out if isinstance(out, dict) else {"_raw": out}, expect_success=False)
     status, text = req(f"{base}/plugin.php?id=pokemon:pokemon&endpoint=boss&action=get_config&map_id=1")
     check_true("game API without formhash rejected", '"success":true' not in text, f"status={status} body={text[:120]!r}")
+
+    status, out = admin_post("run::sql_console", {"sql": "SELECT 1"})
+    test("admin sql_console is gone", out if isinstance(out, dict) else {"_raw": out}, expect_success=False)
 
     # representative dispatch actions over the wire
     status, out = admin_post("count::pokemon_type")
