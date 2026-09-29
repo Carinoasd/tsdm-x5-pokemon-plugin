@@ -223,6 +223,23 @@ def test_seed_data_columns(schema):
                 ok(f"{sf.name}: {tname} columns valid", f"{len(cols_in_insert)} cols")
 
 
+def test_passive_pokemon_replacement():
+    print("\n=== Passive Pokemon replacement regression ===")
+    import shutil
+    import subprocess
+    php = shutil.which("php")
+    if not php:
+        fail("php CLI not installed — passive replacement tests are required")
+        return
+    suite = ROOT / "scripts" / "test" / "passive_pokemon_replacement.php"
+    result = subprocess.run([php, str(suite)], capture_output=True, text=True)
+    print(result.stdout.rstrip())
+    if result.returncode:
+        fail("passive replacement regression", result.stderr.strip())
+    else:
+        ok("passive replacement regression")
+
+
 def test_migration_coverage():
     print("\n=== Migration script coverage ===")
     if not MIGRATION_SQL.exists():
@@ -301,6 +318,7 @@ def main():
     if schema:
         test_stale_columns(schema)
         test_seed_data_columns(schema)
+    test_passive_pokemon_replacement()
     test_migration_coverage()
     test_php_syntax()
 
