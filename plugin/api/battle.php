@@ -2612,6 +2612,18 @@ function api_switch_pokemon()
 }
 
 /**
+ * 回滚 api_replace_pokemon 的事务并以给定错误终止请求。
+ *
+ * api_error() 会直接 exit；宿主若为常驻进程（如 FrankenPHP worker），
+ * 连接不会随请求关闭，未提交事务必须在此显式回滚，不能依赖连接断开。
+ */
+function pm_abort_battle_transaction($message, $status = 400)
+{
+    DB::query("ROLLBACK");
+    api_error($message, $status);
+}
+
+/**
  * 被动替换上场宠物（宠物被打死后替换，不反击）
  * 用于野怪攻击后我方宠物倒下的情况
  */
@@ -2625,75 +2637,111 @@ function api_replace_pokemon()
     $pokemon_id = isset($input['pokemon_id']) ? intval($input['pokemon_id']) : 0;
 
     $myusersdata = api_my_usersdata($_G['uid']);
-    $mypokemon = api_my_pokemon($_G['username']);
 
     if (empty($myusersdata['npcid']) || $myusersdata['npcid'] <= 0) {
         api_error('没有进行中的战斗', 400);
     }
 
-    if (!$mypokemon) {
-        api_error('没有上场宠物', 400);
-    }
-    if ($mypokemon['hp'] > 0) {
-        api_error('当前宠物尚未倒下，请使用主动切换', 400);
-    }
-
-    $current_pet_id = intval($mypokemon['id']);
-
-    // 如果指定了 pokemon_id，验证该宠物是否可用
-    if ($pokemon_id > 0) {
-        // 检查指定的宠物是否存在且可用
-        $specified_pet = DB::fetch_first(pm_sql(
-            "SELECT * FROM " . pm_table('pm_mypm') . "
-            WHERE uid = %d AND id = %d AND site < 3 AND hp > 0 AND state != 0",
-            $_G['uid'],
-            $pokemon_id
-        ));
-
-        if (!$specified_pet) {
-            api_error('指定的宠物不可用', 400);
-        }
-
-        if ($specified_pet['id'] == $current_pet_id) {
-            api_error('不能切换到当前上场的宠物', 400);
-        }
-
-        $next_pokemon = $specified_pet;
-    } else {
-        // 没有指定 pokemon_id，自动选择第一个可用宠物
-        $all_pokemon_rows = DB::fetch_all(pm_sql(
-            "SELECT * FROM " . pm_table('pm_mypm') . "
-            WHERE uid = %d AND site < 3 AND hp > 0 AND state != 0
-            ORDER BY site ASC, id ASC",
+    // 以战斗状态行（pm_usersdata，每用户一行）的排他锁串行化同账号的替换：
+    // 两个并发替换只有一个能完成换位，另一个在锁内重读时会发现上场宠物
+    // 已被换成健康的新宠物而走「尚未倒下」拒绝；野怪的战斗结算（如
+    // clear_battle_state）也要先写这一行，同样被此锁挡在事务之外。
+    DB::query("START TRANSACTION");
+    // 事务体内的任何异常（含数据库错误）都要显式回滚：常驻 worker 的连接
+    // 不随请求关闭，未提交事务和行锁泄漏会阻塞该用户后续的所有战斗操作。
+    // api_error() 走 exit 语义，其回滚由 pm_abort_battle_transaction() 负责。
+    try {
+        $battle_owner = DB::fetch_first(pm_sql(
+            "SELECT uid FROM " . pm_table('pm_usersdata') . " WHERE uid = %d FOR UPDATE",
             $_G['uid']
         ));
+        if (!$battle_owner) {
+            pm_abort_battle_transaction('没有进行中的战斗');
+        }
 
-        $available_pokemon = [];
+        // 锁内重读：并发请求可能已在本请求预检后改变了战斗或上场宠物
+        $myusersdata = api_my_usersdata($_G['uid']);
+        if (empty($myusersdata['npcid']) || $myusersdata['npcid'] <= 0) {
+            pm_abort_battle_transaction('没有进行中的战斗');
+        }
+        $mypokemon = api_my_pokemon($_G['username']);
+        if (!$mypokemon) {
+            pm_abort_battle_transaction('没有上场宠物');
+        }
+        if ($mypokemon['hp'] > 0) {
+            pm_abort_battle_transaction('当前宠物尚未倒下，请使用主动切换');
+        }
 
-        foreach ($all_pokemon_rows as $pet) {
-            $pet_id = intval($pet['id']);
-            // 排除当前上场的宠物
-            if ($pet_id !== $current_pet_id) {
-                $available_pokemon[] = $pet;
+        $current_pet_id = intval($mypokemon['id']);
+
+        // 如果指定了 pokemon_id，验证该宠物是否可用
+        if ($pokemon_id > 0) {
+            // 检查指定的宠物是否存在且可用
+            $specified_pet = DB::fetch_first(pm_sql(
+                "SELECT * FROM " . pm_table('pm_mypm') . "
+                WHERE uid = %d AND id = %d AND site < 3 AND hp > 0 AND state != 0",
+                $_G['uid'],
+                $pokemon_id
+            ));
+
+            if (!$specified_pet) {
+                pm_abort_battle_transaction('指定的宠物不可用');
             }
+
+            if ($specified_pet['id'] == $current_pet_id) {
+                pm_abort_battle_transaction('不能切换到当前上场的宠物');
+            }
+
+            $next_pokemon = $specified_pet;
+        } else {
+            // 没有指定 pokemon_id，自动选择第一个可用宠物
+            $all_pokemon_rows = DB::fetch_all(pm_sql(
+                "SELECT * FROM " . pm_table('pm_mypm') . "
+                WHERE uid = %d AND site < 3 AND hp > 0 AND state != 0
+                ORDER BY site ASC, id ASC",
+                $_G['uid']
+            ));
+
+            $available_pokemon = [];
+
+            foreach ($all_pokemon_rows as $pet) {
+                $pet_id = intval($pet['id']);
+                // 排除当前上场的宠物
+                if ($pet_id !== $current_pet_id) {
+                    $available_pokemon[] = $pet;
+                }
+            }
+
+            if (empty($available_pokemon)) {
+                pm_abort_battle_transaction('没有可用的替补宠物');
+            }
+
+            $next_pokemon = $available_pokemon[0];
         }
 
-        if (empty($available_pokemon)) {
-            api_error('没有可用的替补宠物', 400);
+        // 交换 site 值：当前宠物变为 site=2，新宠物变为 site=1。
+        // 两笔写入都带资格条件：读到宠物之后、写入之前，宠物可能被并发操作
+        // 装箱、打倒或移动；条件不满足则 0 行受影响，升位失败会整体回滚。
+        DB::query(pm_sql(
+            "UPDATE " . pm_table('pm_mypm') . "
+SET site = 2 WHERE id = %d AND uid = %d AND site = 1",
+            $current_pet_id,
+            $_G['uid']
+        ));
+        DB::query(pm_sql(
+            "UPDATE " . pm_table('pm_mypm') . "
+SET site = 1 WHERE id = %d AND uid = %d AND site < 3 AND hp > 0 AND state != 0",
+            intval($next_pokemon['id']),
+            $_G['uid']
+        ));
+        if (!DB::affected_rows()) {
+            pm_abort_battle_transaction($pokemon_id > 0 ? '指定的宠物不可用' : '没有可用的替补宠物');
         }
-
-        $next_pokemon = $available_pokemon[0];
+        DB::query("COMMIT");
+    } catch (Throwable $txn_error) {
+        DB::query("ROLLBACK");
+        throw $txn_error;
     }
-
-    // 交换 site 值：当前宠物变为 site=2，新宠物变为 site=1
-    DB::query(pm_sql(
-        "UPDATE " . pm_table('pm_mypm') . " SET site = 2 WHERE id = %d",
-        $current_pet_id
-    ));
-    DB::query(pm_sql(
-        "UPDATE " . pm_table('pm_mypm') . " SET site = 1 WHERE id = %d",
-        intval($next_pokemon['id'])
-    ));
 
     // 被动切换不进行野怪反击，直接返回响应
     $new_mypokemon = api_my_pokemon($_G['username']);
