@@ -6,6 +6,7 @@ Runs without Docker. Validates that:
 2. No PHP file references old (renamed) column names in SQL contexts
 3. Seed data INSERT statements use columns that exist in the schema
 4. The migration script covers all renamed columns
+5. Equipment occupancy checks reject repeated use of the same inventory row
 
 Usage: python scripts/test/run.py
 """
@@ -293,6 +294,23 @@ def test_php_syntax():
         ok(f"php -l passed", f"{len(php_files)} files")
 
 
+def test_equipment_occupancy():
+    print("\n=== Equipment occupancy regression ===")
+    import shutil
+    import subprocess
+    php = shutil.which("php")
+    if not php:
+        fail("php CLI not installed — equipment occupancy tests are required")
+        return
+    suite = ROOT / "scripts" / "test" / "equipment_occupancy.php"
+    result = subprocess.run([php, str(suite)], capture_output=True, text=True)
+    print(result.stdout.rstrip())
+    if result.returncode:
+        fail("equipment occupancy regression", result.stderr.strip())
+    else:
+        ok("equipment occupancy regression")
+
+
 def main():
     print("TSDM Pokemon Plugin — Static Test Suite")
     print("=" * 60)
@@ -303,6 +321,7 @@ def main():
         test_seed_data_columns(schema)
     test_migration_coverage()
     test_php_syntax()
+    test_equipment_occupancy()
 
     print("\n" + "=" * 60)
     print(f"Results: {PASS} passed, {FAIL} failed, {WARN} warnings")
