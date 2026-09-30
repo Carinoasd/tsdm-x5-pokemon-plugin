@@ -274,6 +274,23 @@ def test_migration_coverage():
         warn("migration does not log")
 
 
+def test_learned_skill_authorization():
+    print("\n=== Learned skill authorization regression ===")
+    import shutil
+    import subprocess
+    php = shutil.which("php")
+    if not php:
+        fail("php CLI not installed — learned skill authorization tests are required")
+        return
+    suite = ROOT / "scripts" / "test" / "learned_skill_authorization.php"
+    result = subprocess.run([php, str(suite)], capture_output=True, text=True)
+    print(result.stdout.rstrip())
+    if result.returncode:
+        fail("learned skill authorization regression", result.stderr.strip())
+    else:
+        ok("learned skill authorization regression")
+
+
 def test_php_syntax():
     print("\n=== PHP syntax check ===")
     import shutil
@@ -320,6 +337,7 @@ def main():
         test_stale_columns(schema)
         test_seed_data_columns(schema)
     test_migration_coverage()
+    test_learned_skill_authorization()
     test_php_syntax()
     test_equipment_occupancy()
 

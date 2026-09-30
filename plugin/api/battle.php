@@ -282,6 +282,28 @@ function api_use_skill()
         api_error('No active battle found', 400);
     }
 
+    // 先确认当前宠物已学会技能且 PP 可用，再进入战斗计算。
+    $skilldata = null;
+    $myskill = null;
+    if ($skill_id > 0) {
+        $skilldata = DB::fetch_first(pm_sql("SELECT * FROM " . pm_table('pm_skill') . " WHERE id = %d", $skill_id));
+        if (!$skilldata) {
+            api_error('技能不存在', 404);
+        }
+
+        $myskill = DB::fetch_first(pm_sql(
+            "SELECT * FROM " . pm_table('pm_myskill') . "
+            WHERE skillid = %d AND uid = %d AND petid = %d",
+            $skill_id, $_G['uid'], $mypokemon['id']
+        ));
+        if (!$myskill) {
+            api_error('当前宠物尚未学会该技能', 400);
+        }
+        if ($myskill['skillnum'] <= 0 && $skilldata['max_uses'] != 0) {
+            api_error('Skill PP is depleted', 400);
+        }
+    }
+
     // 获取地图信息
     $map = null;
 
@@ -311,26 +333,12 @@ function api_use_skill()
     $skill_category = 0;
 
     if ($skill_id > 0) {
-        $skilldata = DB::fetch_first(pm_sql("SELECT * FROM " . pm_table('pm_skill') . " WHERE id = %d", $skill_id));
-        if ($skilldata) {
-            $skillname = $skilldata['name'];
-            $power = intval($skilldata['power']) ?: 40;
-            // pm_skill 的属性列是 element（曾误用不存在的 sx 列导致技能属性恒为宠物自身属性）
-            $skill_type = $skilldata['element'] ?: $mydata['xs'];
-            // pm_skill.category 存中文（'物攻'/'特攻'），intval 恒为 0，需按字符串判断
-            $skill_category = api_normalize_skill_category($skilldata['category']);
-
-            // 检查PP值
-            $myskill = DB::fetch_first(pm_sql(
-                "SELECT * FROM " . pm_table('pm_myskill') . "
-                WHERE skillid = %d AND uid = %d AND petid = %d",
-                $skill_id, $_G['uid'], $mypokemon['id']
-            ));
-
-            if ($myskill && $myskill['skillnum'] <= 0 && $skilldata['max_uses'] != 0) {
-                api_error('Skill PP is depleted', 400);
-            }
-        }
+        $skillname = $skilldata['name'];
+        $power = intval($skilldata['power']) ?: 40;
+        // pm_skill 的属性列是 element（曾误用不存在的 sx 列导致技能属性恒为宠物自身属性）
+        $skill_type = $skilldata['element'] ?: $mydata['xs'];
+        // pm_skill.category 存中文（'物攻'/'特攻'），intval 恒为 0，需按字符串判断
+        $skill_category = api_normalize_skill_category($skilldata['category']);
     }
 
     // 决定先手
