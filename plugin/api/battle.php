@@ -2609,6 +2609,13 @@ function api_replace_pokemon()
         api_error('没有进行中的战斗', 400);
     }
 
+    if (!$mypokemon) {
+        api_error('没有上场宠物', 400);
+    }
+    if ($mypokemon['hp'] > 0) {
+        api_error('当前宠物尚未倒下，请使用主动切换', 400);
+    }
+
     $current_pet_id = intval($mypokemon['id']);
 
     // 如果指定了 pokemon_id，验证该宠物是否可用
