@@ -1048,6 +1048,7 @@ fn site_options() -> Vec<(String, String)> {
 /// 状态选项（使用 serde 名称）
 fn status_options() -> Vec<(String, String)> {
     vec![
+        ("critical".to_string(), "濒危".to_string()),
         ("normal".to_string(), "正常".to_string()),
         ("sick1".to_string(), "生病阶段一".to_string()),
         ("sick2".to_string(), "生病阶段二".to_string()),
@@ -1067,7 +1068,9 @@ fn status_options() -> Vec<(String, String)> {
         ("self_love2".to_string(), "自恋阶段二".to_string()),
         ("angry1".to_string(), "愤怒阶段一".to_string()),
         ("angry2".to_string(), "愤怒阶段二".to_string()),
-        ("dead".to_string(), "死亡".to_string()),
+        ("dead".to_string(), "虚弱阶段一".to_string()),
+        ("weak2".to_string(), "虚弱阶段二".to_string()),
+        ("weak3".to_string(), "虚弱阶段三".to_string()),
     ]
 }
 

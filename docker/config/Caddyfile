@@ -13,6 +13,33 @@ localhost {
 	file_server
 
 	route {
+		# Check private paths before try_files can rewrite them to index.php.
+		@forbidden {
+			path /config/*
+			path /uc_client/data/* /uc_server/data/*
+			path /data/restore/* /data/log/* /data/back3/* /data/sysdata/*
+		}
+		respond @forbidden 403
+
+		# A PHP PATH_INFO suffix must never qualify as a plugin asset.
+		@source_php {
+			path /source /source/*
+			path_regexp source_php (?i)\.php
+		}
+		respond @source_php 403
+
+		# Only published frontend assets are public inside source/.
+		@private_source {
+			path /source /source/*
+			not path_regexp plugin_assets (?i)^/source/plugin/pokemon/(wasm/.*\.(js|wasm|css)|images/.*\.(gif|jpg|png|svg|bmp))$
+		}
+		respond @private_source 403
+
+		@php_in_upload {
+			path /data/*.php /static/*.php /template/*.php /attachment/*.php
+		}
+		respond @php_in_upload 403
+
 		@topic path_regexp topic ^/topic-(.+)\.html$
 		rewrite @topic /portal.php?mod=topic&topic={re.topic.1}
 
@@ -42,19 +69,6 @@ localhost {
 
 		try_files {path} {path}/ /index.php?{query}
 	}
-
-	@forbidden {
-		path /config/*
-		path /uc_client/data/* /uc_server/data/*
-		path /data/restore/* /data/log/* /data/back3/* /data/sysdata/*
-		path /source/*
-	}
-	respond @forbidden 403
-
-	@php_in_upload {
-		path /data/*.php /static/*.php /template/*.php /attachment/*.php
-	}
-	respond @php_in_upload 403
 
 	tls /caddy_certs/localhost.crt /caddy_certs/localhost.key
 }

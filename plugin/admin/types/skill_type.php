@@ -14,25 +14,30 @@ function translate_skill_type_raw_to_id($str)
 
 function translate_skill_type_obj_to_raw($obj)
 {
-  if (isset($obj["physical_damage"])) {
-    return [
-      '物攻',
-      translate_kind_id_to_chinese_kind($obj["physical_damage"][0]),
-      intval($obj["physical_damage"][1])
-    ];
-  } else if (isset($obj["special_damage"])) {
-    return [
-      '特攻',
-      translate_kind_id_to_chinese_kind($obj["special_damage"][0]),
-      intval($obj["special_damage"][1])
-    ];
-  } else {
-    return [
-      '其他',
-      translate_kind_id_to_chinese_kind($obj["others"][0]),
-      intval($obj["others"][1])
-    ];
+  // pm_skill 仅能保存 category/element/power。拒绝尚无存储或战斗实现的
+  // tagged 效果，避免将治疗等效果静默写成空属性、零威力的「其他」。
+  $categories = [
+    'physical_damage' => '物攻',
+    'special_damage' => '特攻',
+    'others' => '其他',
+  ];
+  if (is_array($obj) && count($obj) === 1) {
+    foreach ($categories as $key => $category) {
+      $effect = $obj[$key] ?? null;
+      if (!is_array($effect) || count($effect) !== 2 || !isset($effect[0], $effect[1])) {
+        continue;
+      }
+      $element = translate_kind_id_to_chinese_kind($effect[0]);
+      if ($element !== null && is_numeric($effect[1]) && $effect[1] >= 0) {
+        return [$category, $element, intval($effect[1])];
+      }
+    }
   }
+
+  exit(json_encode([
+    'success' => false,
+    'reason' => '技能效果无效；当前仅支持物理伤害、特殊伤害和其他技能效果',
+  ], JSON_UNESCAPED_UNICODE));
 }
 
 function new_skill_effect($type, $pokemon_kind, $num)

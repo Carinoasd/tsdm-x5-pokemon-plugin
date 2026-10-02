@@ -54,17 +54,6 @@ fn EffectTypeSelectField(
                     selected: value == "special_damage",
                     "特殊伤害"
                 }
-                option { value: "stat_boost", selected: value == "stat_boost", "能力变化" }
-                option {
-                    value: "inflict_status",
-                    selected: value == "inflict_status",
-                    "状态效果"
-                }
-                option { value: "heal", selected: value == "heal", "治疗" }
-                option { value: "priority", selected: value == "priority", "先制/后制" }
-                option { value: "recoil", selected: value == "recoil", "反伤" }
-                option { value: "one_hit_ko", selected: value == "one_hit_ko", "一击必杀" }
-                option { value: "fixed_damage", selected: value == "fixed_damage", "固定伤害" }
                 option { value: "others", selected: value == "others", "其他" }
             }
         }
@@ -1151,30 +1140,6 @@ fn create_skill_effect(effect_type: &str) -> Result<SkillEffect, ()> {
             kind: PokemonKind::Normal,
             power: 20,
         }),
-        "stat_boost" => Ok(SkillEffect::StatBoost {
-            stat: StatType::Attack,
-            stages: 1,
-            target: Target::MySelf,
-        }),
-        "inflict_status" => Ok(SkillEffect::InflictStatus {
-            effect: StatusEffect::Burn,
-            chance: 10,
-        }),
-        "heal" => Ok(SkillEffect::Heal { percent: 50 }),
-        "priority" => Ok(SkillEffect::Priority {
-            kind: PokemonKind::Normal,
-            power: 40,
-            priority: 1,
-        }),
-        "recoil" => Ok(SkillEffect::Recoil {
-            kind: PokemonKind::Normal,
-            power: 120,
-            recoil_percent: 25,
-        }),
-        "one_hit_ko" => Ok(SkillEffect::OneHitKO {
-            kind: PokemonKind::Normal,
-        }),
-        "fixed_damage" => Ok(SkillEffect::FixedDamage { damage: 40 }),
         "others" => Ok(SkillEffect::Others {
             kind: PokemonKind::Normal,
             power: 20,

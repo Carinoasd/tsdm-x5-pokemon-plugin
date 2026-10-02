@@ -82,7 +82,15 @@ function build_battle_response($user, $pokemon)
 function calculate_rewards(...$args) { $GLOBALS['calls']['rewards']++; return ['experience' => 1]; }
 function clear_battle_state($uid) { $GLOBALS['calls']['clear']++; $GLOBALS['user']['npcid'] = 0; }
 function apply_rewards($uid, $pokemon, $rewards) { $GLOBALS['calls']['apply']++; return null; }
-function handle_my_pokemon_fainted($uid, $id) { $GLOBALS['calls']['fainted']++; return [false, true]; }
+function handle_my_pokemon_fainted($uid, $id)
+{
+    $GLOBALS['calls']['fainted']++;
+    if (!$GLOBALS['has_replacements']) {
+        clear_battle_state($uid);
+        return [true, false];
+    }
+    return [false, true];
+}
 
 class DB
 {
@@ -178,8 +186,9 @@ function reset_battle()
     $GLOBALS['user'] = ['npcid' => 25, 'level' => 10, 'hp' => 100, 'hpg' => 100, 'strength' => 1];
     $GLOBALS['speed'] = 20; // 20/19 test both attack orders without random evasion.
     $GLOBALS['counter_damage'] = 1;
+    $GLOBALS['has_replacements'] = true;
     $GLOBALS['calls'] = array_fill_keys(['data', 'stats', 'damage', 'counter', 'rewards', 'apply', 'clear', 'fainted'], 0);
-    DB::$pet = ['id' => 10, 'uid' => 7, 'species_id' => 1, 'hp' => 100, 'level' => 10, 'nickname' => 'Active'];
+    DB::$pet = ['id' => 10, 'uid' => 7, 'species_id' => 1, 'hp' => 100, 'state' => 1, 'level' => 10, 'nickname' => 'Active'];
     DB::$skills = [4 => ['id' => 4, 'name' => 'Learned move', 'power' => 40, 'max_uses' => 10, 'element' => 'normal', 'category' => '物攻']];
     DB::$learned = [['id' => 20, 'skillid' => 4, 'uid' => 7, 'petid' => 10, 'skillnum' => 2]];
     DB::$writes = [];
@@ -351,6 +360,41 @@ run_case('Refund never exceeds the skill PP cap', function () {
 run_case('No active battle retains existing error', function () {
     $GLOBALS['user']['npcid'] = 0;
     rejected_turn(400, 'No active battle found');
+});
+
+run_case('Fast pet fainting preserves damage while a reserve can continue', function () {
+    DB::$pet['hp'] = 1;
+    $data = response(200);
+    check($data['status'] === 'defeat' && $data['can_continue_switch'] === true && $data['battle_over'] === false, 'Expected a pending replacement');
+    check($GLOBALS['user']['hp'] === 90 && $data['wild_pokemon']['hp'] === 90, 'Damage dealt before fainting was lost');
+    check(DB::$pet['hp'] === 0 && DB::$learned[0]['skillnum'] === 1, 'Completed attack did not consume PP or faint the pet');
+    check($GLOBALS['calls']['clear'] === 0 && $GLOBALS['calls']['apply'] === 0, 'Pending replacement ended the battle');
+});
+run_case('Last pet fainting does not restore a cleared battle', function () {
+    DB::$pet['hp'] = 1;
+    $GLOBALS['has_replacements'] = false;
+    $data = response(200);
+    check($data['battle_over'] === true && $data['can_continue_switch'] === false, 'Last pet defeat did not end battle');
+    check($GLOBALS['user']['npcid'] === 0 && $GLOBALS['calls']['clear'] === 1, 'Defeat did not clear battle state');
+    foreach (DB::$writes as $sql) {
+        check(strpos($sql, 'UPDATE pm_usersdata SET hp') === false, 'Defeat wrote HP back into a cleared battle');
+    }
+});
+foreach ([0, 4] as $skill_id) {
+    run_case("Fainted pet cannot win with skill $skill_id while awaiting replacement", function () use ($skill_id) {
+        DB::$pet['hp'] = 0;
+        $GLOBALS['user']['hp'] = 1;
+        $GLOBALS['input']['skill_id'] = $skill_id;
+        rejected_turn(400, '当前宠物已倒下，请先更换宠物');
+    });
+}
+run_case('Critical state cannot attack with positive stored HP', function () {
+    DB::$pet['state'] = '0';
+    rejected_turn(400, '当前宠物已倒下，请先更换宠物');
+});
+run_case('Missing active pet is rejected before combat', function () {
+    DB::$pet = false;
+    rejected_turn(400, '没有上场宠物');
 });
 
 echo "Learned skill authorization tests: $passed passed, $failed failed.\n";

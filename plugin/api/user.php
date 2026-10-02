@@ -411,7 +411,7 @@ function api_heal_pokemon()
 {
     require_login();
 
-    global $_G, $statehp;
+    global $_G;
 
     $uid = validate_uid($_G['uid']);
     $pokemon_id = validate_id(get_param('pokemon_id', 0), 'pokemon_id');
@@ -450,20 +450,8 @@ function api_heal_pokemon()
     // 治疗免费
     $cost = 0;
 
-    // 使用统一计算函数获取最大 HP
-    $petmaxhp = api_calculate_pokemon_max_hp($pokemon_data);
-
-    // 计算装备加成
-    api_parse_pet_wear_items($pokemon_data, false, $petmaxhp);
-
-    // 验证并纠正 HP（确保 HP 在 [0, max_hp] 范围内）
-    $pokemon_data['hp'] = strval($petmaxhp);
-    $hp_validation = api_validate_and_correct_hp($pokemon_data, $petmaxhp, $petmaxhp);
-    $petmaxhp = $hp_validation['hp'];
-
     // 处理宠物状态
     $timestamp = time();
-    $state_sql = '';
     $needs_healing = false;
 
     // 负面状态列表（需要治疗的异常状态）
@@ -490,6 +478,12 @@ function api_heal_pokemon()
         // 负面状态需要治疗
         $needs_healing = true;
     }
+
+    // 先恢复状态，再计算治疗后的最大 HP；统一函数已包含装备加成。
+    if ($needs_healing) {
+        $pokemon_data['state'] = 1;
+    }
+    $petmaxhp = api_calculate_pokemon_max_hp($pokemon_data);
 
     if ($needs_healing) {
         DB::query(pm_sql(
@@ -548,7 +542,7 @@ function api_heal_and_flee()
 {
     require_login();
 
-    global $_G, $statehp;
+    global $_G;
 
     $uid = validate_uid($_G['uid']);
     $pokemon_id = validate_id(get_param('pokemon_id', 0), 'pokemon_id');
@@ -587,18 +581,7 @@ function api_heal_and_flee()
 
     $cost = 0;
 
-    // 使用统一计算函数获取最大 HP
-    $petmaxhp = api_calculate_pokemon_max_hp($pokemon_data);
-
-    api_parse_pet_wear_items($pokemon_data, false, $petmaxhp);
-
-    // 验证并纠正 HP（确保 HP 在 [0, max_hp] 范围内）
-    $pokemon_data['hp'] = strval($petmaxhp);
-    $hp_validation = api_validate_and_correct_hp($pokemon_data, $petmaxhp, $petmaxhp);
-    $petmaxhp = $hp_validation['hp'];
-
     $timestamp = time();
-    $state_sql = '';
     $needs_healing = false;
 
     // 负面状态列表（需要治疗的异常状态，20-22 为虚弱状态）
@@ -612,6 +595,12 @@ function api_heal_and_flee()
         // 负面状态需要治疗
         $needs_healing = true;
     }
+
+    // 先恢复状态，再计算治疗后的最大 HP；统一函数已包含装备加成。
+    if ($needs_healing) {
+        $pokemon_data['state'] = 1;
+    }
+    $petmaxhp = api_calculate_pokemon_max_hp($pokemon_data);
 
     if ($needs_healing) {
         DB::query(pm_sql(

@@ -99,6 +99,8 @@ function get_skill_type($id)
 
 function set_skill_type($info)
 {
+  // 在任何字段写入前验证效果，防止失败时留下部分修改。
+  $effect = translate_skill_type_obj_to_raw($info["effect"] ?? null);
   $id = intval($info["id"]);
   if ($query = DB::fetch_first("SELECT * from pm_skill where id=$id")) {
     // 提前检查，available_pokemons 必须是一个数字数组
@@ -133,7 +135,6 @@ function set_skill_type($info)
       DB::query("UPDATE pm_skill set max_uses='{$info["use_times_limit"]}' where id=$id");
     }
 
-    $effect = translate_skill_type_obj_to_raw($info["effect"]);
     $category = $effect[0];
     $pokemon_type = $effect[1];
     $damage = intval($effect[2]);
@@ -156,6 +157,7 @@ function set_skill_type($info)
 
 function insert_skill_type($info)
 {
+  $effect = translate_skill_type_obj_to_raw($info["effect"] ?? null);
   // 提前检查，available_pokemons 必须是一个数字数组
   if (!is_array($info["available_pokemons"])) {
     $json_ret = [];
@@ -178,7 +180,6 @@ function insert_skill_type($info)
   $lv = intval($info["min_level_limit"]);
   $num = intval($info["use_times_limit"]);
 
-  $effect = translate_skill_type_obj_to_raw($info["effect"]);
   $category = $effect[0];
   $tn = $effect[1];
   $powr = intval($effect[2]);

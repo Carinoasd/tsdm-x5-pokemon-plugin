@@ -379,6 +379,23 @@ def test_party_pokemon_moves():
         ok("party moves regression")
 
 
+def test_php_regression(name, filename):
+    print(f"\n=== {name} ===")
+    import shutil
+    import subprocess
+    php = shutil.which("php")
+    if not php:
+        fail(f"php CLI not installed — {name} is required")
+        return
+    suite = ROOT / "scripts" / "test" / filename
+    result = subprocess.run([php, str(suite)], capture_output=True, text=True, encoding="utf-8")
+    print(result.stdout.rstrip())
+    if result.returncode:
+        fail(name, result.stderr.strip())
+    else:
+        ok(name)
+
+
 def main():
     print("TSDM Pokemon Plugin — Static Test Suite")
     print("=" * 60)
@@ -394,6 +411,9 @@ def main():
     test_learned_skill_authorization()
     test_php_syntax()
     test_equipment_occupancy()
+    test_php_regression("Captured Pokemon attributes regression", "captured_pokemon_attributes.php")
+    test_php_regression("Healing regression", "healing.php")
+    test_php_regression("Admin data regression", "admin_regressions.php")
 
     print("\n" + "=" * 60)
     print(f"Results: {PASS} passed, {FAIL} failed, {WARN} warnings")

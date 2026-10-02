@@ -301,6 +301,14 @@ function api_use_skill()
         api_error('No active battle found', 400);
     }
 
+    // 倒下后有替补时仍保留战斗状态，但当前宠物不能继续出招或领取胜利奖励。
+    if (!$mypokemon) {
+        api_error('没有上场宠物', 400);
+    }
+    if ((int)$mypokemon['hp'] <= 0 || (int)$mypokemon['state'] === 0) {
+        api_error('当前宠物已倒下，请先更换宠物', 400);
+    }
+
     // 先确认当前宠物已学会技能，并原子预扣 PP，再进入战斗计算。
     // 预扣是条件 UPDATE（skillnum > 0 才扣减）：并发请求只有一个能扣到，
     // 扣不到说明 PP 已被并发回合消耗，直接拒绝，不产生任何战斗写入。
@@ -621,8 +629,8 @@ function api_use_skill()
         }
     }
 
-    // 更新野怪HP
-    if ($battle_status === 'active') {
+    // 等待替补上场也是同一场战斗，必须保留首发倒下前已造成的伤害。
+    if ($battle_status === 'active' || $can_switch) {
         DB::query(pm_sql(
             "UPDATE " . pm_table('pm_usersdata') . " SET hp = %d WHERE uid = %d",
             intval($npc_hp),
@@ -1885,15 +1893,11 @@ function api_capture_pokemon()
         $spdefg = rand(0, 31);
         $sdg = rand(0, 31);
 
-        // 随机性别
-        $sexrand = rand(1, 1000);
-        if ($sexrand <= $npc['sex']) {
-            $sex = 1;
-        } elseif ($npc['sex'] < 0) {
-            $sex = 0;
-        } else {
-            $sex = 2;
-        }
+        // 保留遭遇时的性别和闪光属性。allure 的性别为 0/1，宠物表为 1/2；
+        // 无性别种族仍使用 sex=0。
+        $stored_attr = intval($myusersdata['allure']);
+        $sex = $npc['sex'] < 0 ? 0 : (($stored_attr >> 1) & 1) + 1;
+        $is_shiny = $stored_attr & 1;
 
         // 检查是否有首位宠物
         $has_first = DB::result_first(pm_sql(
@@ -1920,15 +1924,15 @@ function api_capture_pokemon()
 
         // 插入新宠物（itemevolve 是 pm_mypm 的列而 pm_data 没有，固定写 0）
         DB::query(pm_sql("INSERT INTO " . pm_table('pm_mypm') . "
-            (uid, pmname, nickname, species_id, level, exp, sex, sx, hp,
+            (uid, pmname, nickname, species_id, level, exp, sex, is_shiny, sx, hp,
              hpg, atkg, defg, spatkg, spdefg, sdg,
              good, itemevolve, ballid, site, state, statetime, gduptime, initialuid)
             VALUES (
-                %d, %s, %s, %d, %d, %d, %d, %s,
+                %d, %s, %s, %d, %d, %d, %d, %d, %s,
                 %d, %d, %d, %d, %d, %d, %d,
                 70, 0, %d, %d, 1, %d, %d, %d
             )",
-            $_G['uid'], $npc['name'], $npc['name'], $npc['id'], $npc_level, $initial_exp, $sex, $npc['xs'],
+            $_G['uid'], $npc['name'], $npc['name'], $npc['id'], $npc_level, $initial_exp, $sex, $is_shiny, $npc['xs'],
             $npc_hp, $hpg, $atkg, $defg, $spatkg, $spdefg, $sdg,
             $my_ball['ballid'], $site, time(), time(), $_G['uid']
         ));
@@ -2549,7 +2553,7 @@ SET site = 1 WHERE id = %d AND uid = %d AND site < 3 AND hp > 0 AND state != 0",
 
             // 使用新宠物的数据计算防御（而不是旧宠物）
             $next_pokemon_data = pm_data($next_pokemon['species_id']);
-            list(, $next_hp,, $next_mdef,, $next_mspdef,) = battle_calc_my_stats($next_pokemon_data, $next_pokemon);
+            list(,, $next_mdef,, $next_mspdef) = battle_calc_my_stats($next_pokemon_data, $next_pokemon);
 
             $counter_damage = calculate_counter_damage_legacy(
                 $myusersdata['level'],
@@ -2561,7 +2565,7 @@ SET site = 1 WHERE id = %d AND uid = %d AND site < 3 AND hp > 0 AND state != 0",
             );
 
             // 使用新宠物的 HP 作为起点
-            $my_hp = $next_hp - $counter_damage;
+            $my_hp = $next_pokemon['hp'] - $counter_damage;
             if ($my_hp < 0) $my_hp = 0;
 
             // 验证并纠正 HP

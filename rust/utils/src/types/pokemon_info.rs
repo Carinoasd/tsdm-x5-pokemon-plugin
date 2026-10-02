@@ -26,6 +26,8 @@ pub struct PokemonSkillInfo {
 #[derive(Clone, Copy, Debug, PartialEq, EnumString, Display, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PokemonStatus {
+    #[strum(to_string = "濒危")]
+    Critical,
     #[strum(to_string = "正常")]
     Normal,
     #[strum(to_string = "生病阶段一")]
@@ -64,8 +66,13 @@ pub enum PokemonStatus {
     Angry1,
     #[strum(to_string = "愤怒阶段二")]
     Angry2,
-    #[strum(to_string = "死亡")]
+    // Keep the legacy wire name for state 20.
+    #[strum(to_string = "虚弱阶段一")]
     Dead,
+    #[strum(to_string = "虚弱阶段二")]
+    Weak2,
+    #[strum(to_string = "虚弱阶段三")]
+    Weak3,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -116,6 +123,28 @@ impl Default for PokemonInfo {
 
             skills: vec![],
             armor_slots_id: (None, None, None, None),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::PokemonStatus;
+
+    #[test]
+    fn critical_and_weak_statuses_round_trip_with_admin_api() {
+        for (wire, status) in [
+            ("critical", PokemonStatus::Critical),
+            ("dead", PokemonStatus::Dead),
+            ("weak2", PokemonStatus::Weak2),
+            ("weak3", PokemonStatus::Weak3),
+        ] {
+            let value = serde_json::Value::String(wire.to_string());
+            assert_eq!(
+                serde_json::from_value::<PokemonStatus>(value.clone()).unwrap(),
+                status
+            );
+            assert_eq!(serde_json::to_value(status).unwrap(), value);
         }
     }
 }
