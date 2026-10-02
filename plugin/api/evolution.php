@@ -16,6 +16,7 @@ if (!defined('IN_DISCUZ')) {
 
 // 加载API辅助函数
 require_once __DIR__ . '/index.php';
+require_once __DIR__ . '/utils.php';
 
 global $_G;
 
@@ -49,7 +50,7 @@ function api_check_evolution()
 {
     require_login();
 
-    $pet_id_param = get_param('petid', 0);
+    $pet_id_param = get_param('pet_id', get_param('petid', 0));
     if (!$pet_id_param) {
         api_error('Missing parameter: petid', 400);
     }
@@ -71,7 +72,7 @@ function api_check_evolution()
     // 获取宠物的进化信息
     $evolution_info = DB::fetch_first(pm_sql(
         "SELECT * FROM " . pm_table('pm_evolution') . "
-        WHERE from_id = %d",
+        WHERE from_id = %d ORDER BY priority, id LIMIT 1",
         $pet['species_id']
     ));
 
@@ -79,7 +80,19 @@ function api_check_evolution()
         api_success([
             'can_evolve' => false,
             'reason' => 'This Pokemon cannot evolve',
-            'current_form' => $pet['species_id'],
+            'pokemon_id' => $pet_id,
+            'current_form' => (int) $pet['species_id'],
+            'target_form' => (int) $pet['species_id'],
+            'evolution_method' => '',
+            'conditions' => [
+                'can_evolve' => false,
+                'reason' => 'This Pokemon cannot evolve',
+                'details' => [
+                    'level_requirement' => null,
+                    'item_requirement' => null,
+                    'intimacy_requirement' => null,
+                ],
+            ],
         ]);
     }
 
@@ -92,6 +105,7 @@ function api_check_evolution()
         'current_form' => (int) $pet['species_id'],
         'target_form' => (int) $evolution_info['to_id'],
         'conditions' => $conditions,
+        'reason' => $conditions['reason'],
         'evolution_method' => $evolution_info['method'],
     ]);
 }
@@ -113,55 +127,80 @@ function api_evolve_pokemon()
     global $_G;
     $uid = validate_uid($_G['uid']);
 
-    // 获取宠物信息
-    $pet = DB::fetch_first(
-        "SELECT * FROM " . pm_table('pm_mypm') . "
-        WHERE id = $pet_id AND uid = $uid"
-    );
+    // 与队伍和商店变更使用相同锁顺序；进化与道具消耗必须一同提交。
+    DB::query("START TRANSACTION");
+    try {
+        $owner = DB::fetch_first(pm_sql(
+            "SELECT uid FROM " . pm_table('pm_usersdata') . " WHERE uid = %d FOR UPDATE", $uid
+        ));
+        if (!$owner) {
+            api_my_usersdata($uid);
+            $owner = DB::fetch_first(pm_sql(
+                "SELECT uid FROM " . pm_table('pm_usersdata') . " WHERE uid = %d FOR UPDATE", $uid
+            ));
+            if (!$owner) {
+                pm_abort_battle_transaction('User state not found', 500);
+            }
+        }
+        $pet = DB::fetch_first(pm_sql(
+            "SELECT * FROM " . pm_table('pm_mypm') . " WHERE id = %d AND uid = %d FOR UPDATE",
+            $pet_id, $uid
+        ));
+        if (!$pet) {
+            pm_abort_battle_transaction('Pokemon not found', 404);
+        }
 
-    if (!$pet) {
-        api_error('Pokemon not found', 404);
+        $evolution_info = DB::fetch_first(pm_sql(
+            "SELECT * FROM " . pm_table('pm_evolution') . " WHERE from_id = %d ORDER BY priority, id LIMIT 1",
+            $pet['species_id']
+        ));
+        if (!$evolution_info) {
+            pm_abort_battle_transaction('This Pokemon cannot evolve', 400);
+        }
+
+        $conditions = check_evolution_conditions($pet, $evolution_info);
+        if (!$conditions['can_evolve']) {
+            pm_abort_battle_transaction('Evolution conditions not met: ' . $conditions['reason'], 400);
+        }
+
+        $new_type_id = (int) $evolution_info['to_id'];
+        $new_base_info = DB::fetch_first(pm_sql(
+            "SELECT * FROM " . pm_table('pm_data') . " WHERE id = %d",
+            $new_type_id
+        ));
+        if (!$new_base_info) {
+            pm_abort_battle_transaction("Evolution target not found: pm_data id=$new_type_id", 500);
+        }
+
+        if ($evolution_info['method'] === 'item') {
+            $item = DB::fetch_first(pm_sql(
+                "SELECT id FROM " . pm_table('pm_myitem') . " WHERE uid = %d AND itemid = %s AND nums > 0 ORDER BY id LIMIT 1 FOR UPDATE",
+                $uid, strval((int) $evolution_info['condition_value'])
+            ));
+            if (!$item) {
+                pm_abort_battle_transaction('Required evolution item is no longer available', 409);
+            }
+            DB::query(pm_sql(
+                "UPDATE " . pm_table('pm_myitem') . " SET nums = nums - 1 WHERE id = %d AND uid = %d AND nums > 0",
+                $item['id'], $uid
+            ));
+            if (!DB::affected_rows()) {
+                pm_abort_battle_transaction('Required evolution item is no longer available', 409);
+            }
+        }
+
+        $evolved_pet = $pet;
+        $evolved_pet['species_id'] = $new_type_id;
+        $new_max_hp = api_calculate_pokemon_max_hp($evolved_pet, $new_base_info);
+        DB::query(pm_sql(
+            "UPDATE " . pm_table('pm_mypm') . " SET species_id = %d, hp = %d, pmname = %s, nickname = %s WHERE id = %d AND uid = %d",
+            $new_type_id, $new_max_hp, $new_base_info['name'], $new_base_info['name'], $pet_id, $uid
+        ));
+        DB::query("COMMIT");
+    } catch (Throwable $error) {
+        DB::query("ROLLBACK");
+        throw $error;
     }
-
-    // 获取进化信息
-    $evolution_info = DB::fetch_first(pm_sql(
-        "SELECT * FROM " . pm_table('pm_evolution') . "
-        WHERE from_id = %d",
-        $pet['species_id']
-    ));
-
-    if (!$evolution_info) {
-        api_error('This Pokemon cannot evolve', 400);
-    }
-
-    // 检查进化条件
-    $conditions = check_evolution_conditions($pet, $evolution_info);
-    if (!$conditions['can_evolve']) {
-        api_error('Evolution conditions not met: ' . $conditions['reason'], 400);
-    }
-
-    // 执行进化
-    $new_type_id = $evolution_info['to_id'];
-
-    // 获取新形态的基础信息
-    $new_base_info = DB::fetch_first(pm_sql(
-        "SELECT * FROM " . pm_table('pm_data') . " WHERE id = %d",
-        $new_type_id
-    ));
-
-    if (!$new_base_info) {
-        api_error("Evolution target not found: pm_data id=$new_type_id", 500);
-    }
-
-    $new_max_hp = calculate_max_hp($new_base_info, $pet['level']);
-
-    // 更新宠物形态
-    DB::query("UPDATE " . pm_table('pm_mypm') . " SET
-        species_id = $new_type_id,
-        hp = $new_max_hp,
-        pmname = '" . addslashes($new_base_info['name']) . "',
-        nickname = '" . addslashes($new_base_info['name']) . "'
-        WHERE id = $pet_id");
 
     api_success([
         'message' => 'Evolution successful!',
@@ -182,7 +221,7 @@ function api_get_available_evolutions()
 {
     require_login();
 
-    $pet_id = (int) get_param('petid', 0);
+    $pet_id = (int) get_param('pet_id', get_param('petid', 0));
     if (!$pet_id) {
         api_error('Missing parameter: petid', 400);
     }
@@ -205,7 +244,7 @@ function api_get_available_evolutions()
     // 获取所有可能的进化路线
     $rows = DB::fetch_all(pm_sql(
         "SELECT * FROM " . pm_table('pm_evolution') . "
-        WHERE from_id = %d",
+        WHERE from_id = %d ORDER BY priority, id",
         $pet['species_id']
     ));
 
@@ -245,6 +284,22 @@ function check_evolution_conditions($pet, $evolution_info)
 
     $cond_type = isset($evolution_info['method']) ? $evolution_info['method'] : '';
     $cond_value = isset($evolution_info['condition_value']) ? $evolution_info['condition_value'] : '';
+
+    // 同一目标的多行规则代表复合条件；单规则执行器不能只应用其中一行。
+    $rule_count = (int) DB::result_first(pm_sql(
+        "SELECT COUNT(*) FROM " . pm_table('pm_evolution') . " WHERE from_id = %d AND to_id = %d",
+        $evolution_info['from_id'], $evolution_info['to_id']
+    ));
+    if ($rule_count > 1) {
+        $can_evolve = false;
+        $unmet_reasons[] = 'Multiple evolution conditions are not supported';
+    }
+
+    // 尚未实现的规则不能被当作无条件进化。
+    if (!in_array($cond_type, ['level', 'item', 'good'], true)) {
+        $can_evolve = false;
+        $unmet_reasons[] = 'Unsupported evolution method: ' . $cond_type;
+    }
 
     // 检查等级条件
     if ($cond_type === 'level') {
@@ -300,16 +355,7 @@ function check_user_has_item($uid, $item_id)
         $uid, strval($item_id)
     ));
 
-    return $item !== null;
-}
-
-/**
- * 计算最大HP（简化版）
- */
-function calculate_max_hp($base_info, $level)
-{
-    $base_hp = (int) $base_info['hp'];
-    return floor(($level / 100.0) * (2 * $base_hp + 31) + $level + 10);
+    return !empty($item);
 }
 
 /**

@@ -82,7 +82,7 @@ function set_item_type($info)
 
   if ($query = DB::fetch_first("SELECT * from pm_itemdata where id=$id")) {
     if ($query['name'] != $info["name"]) {
-      DB::query("UPDATE pm_itemdata set name='" . $info["name"] . "' where id=$id");
+      DB::query("UPDATE pm_itemdata set name='" . addslashes($info["name"]) . "' where id=$id");
     }
 
     if ($query['tpname'] != $info["img_name"]) {
@@ -90,7 +90,7 @@ function set_item_type($info)
     }
 
     if ($query['description'] != $info["description"]) {
-      DB::query("UPDATE pm_itemdata set description='" . $info["description"] . "' where id=$id");
+      DB::query("UPDATE pm_itemdata set description='" . addslashes($info["description"]) . "' where id=$id");
     }
 
     if (boolval($query['shop']) != boolval($info["is_selling"])) {
@@ -192,9 +192,9 @@ function set_item_type($info)
 
 function insert_item_type($info)
 {
-  $name = strval($info["name"]);
+  $name = addslashes(strval($info["name"]));
   $tpname = strval($info["img_name"]);
-  $txt = strval($info["description"]);
+  $txt = addslashes(strval($info["description"]));
   $shop = boolval($info["is_selling"]) ? 1 : 0;
   $money = intval($info["price"]);
   $tag = translate_item_tag_id_to_db_raw($info["tag"]);
@@ -228,7 +228,7 @@ function insert_item_type($info)
   }
 
   $lvask = intval($info["limits"]["min_level"]);
-  $xsask = translate_chinese_kind_to_kind_id($info["limits"]["kind_require"]);
+  $xsask = translate_kind_id_to_chinese_kind($info["limits"]["kind_require"]) ?? '';
   $addhp = intval($info["effects"]["add_hit_points"]);
   $addexp = intval($info["effects"]["add_experience"]);
   $addlv = intval($info["effects"]["add_level"]);

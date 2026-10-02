@@ -414,6 +414,11 @@ def main():
     test_php_regression("Captured Pokemon attributes regression", "captured_pokemon_attributes.php")
     test_php_regression("Healing regression", "healing.php")
     test_php_regression("Admin data regression", "admin_regressions.php")
+    test_php_regression("Request parsing and user statistics regression", "request_and_stats.php")
+    test_php_regression("Admin data round-trip regression", "admin_round_trips.php")
+    test_php_regression("Shop transaction regression", "shop_transactions.php")
+    test_php_regression("Hunger item regression", "item_hunger.php")
+    test_php_regression("Pokemon progression regression", "progression_regressions.php")
 
     print("\n" + "=" * 60)
     print(f"Results: {PASS} passed, {FAIL} failed, {WARN} warnings")

@@ -22,10 +22,10 @@ function new_evolution_limit_type(
     case 'comp_atk_def':
       switch ($val) {
         case '<':
-          $ret["compare_attack_and_defense"] = 'greater';
+          $ret["compare_attack_and_defense"] = 'less';
           break;
         case '>':
-          $ret["compare_attack_and_defense"] = 'less';
+          $ret["compare_attack_and_defense"] = 'greater';
           break;
         case '=':
           $ret["compare_attack_and_defense"] = 'equal';

@@ -82,6 +82,35 @@ function translate_map_full_name_to_alpha($str)
   }
 }
 
+/** Convert both current and legacy admin mode payloads to the stored map fields. */
+function translate_map_mode_to_db_fields($info, $current_experience = 0)
+{
+  $mode = $info['mode'] ?? null;
+  $data = is_array($mode) ? ($mode['data'] ?? []) : $info;
+  $mode_type = is_array($mode) ? ($mode['mode'] ?? '') : $mode;
+  $experience = max(0, intval($data['experience'] ?? $current_experience));
+
+  if ($mode_type === 'boss' || $mode_type === 'hybrid') {
+    $boss_config = ['bosses' => $data['bosses'] ?? []];
+    return [
+      $mode_type === 'boss' ? -1 : $experience,
+      json_encode($boss_config, JSON_UNESCAPED_UNICODE),
+      true,
+    ];
+  }
+  if ($mode_type === 'wild') {
+    return [$experience, strval(max(0, intval($data['experience_increase_times'] ?? 0))), false];
+  }
+
+  // Older clients send the Boss configuration directly instead of a mode tag.
+  $has_boss_config = !empty($info['boss_config']['bosses']);
+  return [
+    $current_experience,
+    $has_boss_config ? json_encode($info['boss_config'], JSON_UNESCAPED_UNICODE) : '',
+    $has_boss_config,
+  ];
+}
+
 function new_map_info(
   $id,
   $name,
