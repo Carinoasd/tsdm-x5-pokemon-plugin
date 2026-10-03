@@ -68,6 +68,12 @@ class DB
             }
             return false;
         }
+        if (preg_match('/^SELECT m\.\*, i\.name FROM pm_myitem m LEFT JOIN pm_itemdata i ON m\.itemid=i\.id WHERE m\.id=(\d+)$/', $sql, $match)) {
+            foreach (self::$items as $item) {
+                if ($item['id'] === (int) $match[1]) return $item;
+            }
+            return false;
+        }
         if ($sql === 'SELECT * FROM pm_data WHERE id = 1') {
             return ['id' => 1];
         }
@@ -105,6 +111,15 @@ class DB
             foreach (self::$pets as &$pet) {
                 if (!$occupied && $pet['id'] === (int) $match[7] && $pet['uid'] === (int) $match[8] && (int) $pet[$match[5]] === 0) {
                     $pet[$match[5]] = $item_id;
+                    self::$affected = 1;
+                    self::$writes[] = $sql;
+                }
+            }
+            unset($pet);
+        } elseif (preg_match('/^UPDATE pm_mypm SET (equipmentid[1-4])=0 WHERE id=(\d+) AND uid=(\d+)$/', $sql, $match)) {
+            foreach (self::$pets as &$pet) {
+                if ($pet['id'] === (int) $match[2] && $pet['uid'] === (int) $match[3]) {
+                    $pet[$match[1]] = 0;
                     self::$affected = 1;
                     self::$writes[] = $sql;
                 }
@@ -174,7 +189,7 @@ function load_equip_endpoint($path)
         while (is_array($tokens[$name_index]) && $tokens[$name_index][0] === T_WHITESPACE) {
             $name_index++;
         }
-        if (!is_array($tokens[$name_index]) || $tokens[$name_index][1] !== 'api_equip_item') {
+        if (!is_array($tokens[$name_index]) || !in_array($tokens[$name_index][1], ['api_equip_item', 'api_unequip_item'], true)) {
             continue;
         }
         $source = '';
@@ -194,12 +209,14 @@ function load_equip_endpoint($path)
                     $started = true;
                 } elseif ($token === '}' && --$depth === 0 && $started) {
                     eval($source);
-                    return;
+                    break;
                 }
             }
         }
     }
-    throw new RuntimeException('api_equip_item was not found');
+    if (!function_exists('api_equip_item') || !function_exists('api_unequip_item')) {
+        throw new RuntimeException('Equipment endpoints were not found');
+    }
 }
 
 load_equip_endpoint(dirname(__DIR__, 2) . '/plugin/api/pokemon.php');
@@ -378,6 +395,40 @@ claim_race_case('Concurrent takeover of the explicit target slot loses the race'
     function () {
         verify(DB::$pets[0]['equipmentid2'] === 50, 'Losing request overwrote the rival equipment');
     });
+
+// Equipment changes must preserve fainting; living pets keep proportional HP.
+$fainted = $pet;
+$fainted['hp'] = 0;
+$fainted['state'] = 0;
+run_case('Equipping does not revive a fainted pet', $request, [$fainted], [$item], null, 0);
+foreach ([0, 1, 50, 125] as $hp) {
+    $GLOBALS['input'] = ['pokemon_id' => 7, 'slot_index' => 0];
+    $equipped = $pet;
+    $equipped['equipmentid1'] = 9;
+    $equipped['hp'] = $hp;
+    $equipped['state'] = $hp === 0 ? 0 : 1;
+    DB::$pets = [$equipped];
+    DB::$items = [$item];
+    DB::$writes = [];
+    try {
+        try {
+            api_unequip_item();
+            throw new RuntimeException('Unequip did not respond');
+        } catch (EquipmentResponse $response) {
+            verify($response->success, 'Unequip failed');
+            $expected_hp = $hp === 0 ? 0 : max(1, (int) round(100 * $hp / 125));
+            verify(DB::$pets[0]['hp'] === $expected_hp, 'Unequip changed fainting or HP ratio');
+            verify(DB::$pets[0]['equipmentid1'] === 0, 'Unequip did not clear the slot');
+            verify(DB::$pets[0]['state'] === $equipped['state'], 'Unequip changed state');
+            verify($response->data['new_hp'] === $expected_hp, 'Wrong HP in unequip response');
+        }
+        $passed++;
+        echo "PASS Unequip preserves HP $hp\n";
+    } catch (Throwable $error) {
+        $failed++;
+        echo "FAIL Unequip preserves HP $hp: {$error->getMessage()}\n";
+    }
+}
 
 echo "Equipment occupancy tests: $passed passed, $failed failed.\n";
 exit($failed === 0 ? 0 : 1);

@@ -16,6 +16,7 @@ if (!defined('IN_DISCUZ')) {
 
 // 加载API辅助函数
 require_once __DIR__ . '/index.php';
+require_once __DIR__ . '/utils.php';
 
 // 加载常量定义
 require_once __DIR__ . '/constants.php';
@@ -177,35 +178,41 @@ function api_buy_item()
     $price = validate_int_range($item['money'], 'item.money', 0, 999999999);
     $total_price = $price * $quantity;
 
-    // 获取用户金钱
-    $user = DB::fetch_first(
-        "SELECT money FROM " . pm_table('pm_usersdata') . " WHERE uid = $uid"
-    );
+    // 与宠物购买、队伍调整共用用户行锁，余额检查和发货一起提交。
+    DB::query("START TRANSACTION");
+    try {
+        $user = DB::fetch_first(pm_sql(
+            "SELECT money FROM " . pm_table('pm_usersdata') . " WHERE uid = %d FOR UPDATE",
+            $uid
+        ));
 
-    if (!$user) {
-        api_error('User not found', 404);
-    }
+        if (!$user) {
+            pm_abort_battle_transaction('User not found', 404);
+        }
+        if (!isset($user['money'])) {
+            pm_abort_battle_transaction('Invalid user data: missing money field', 500);
+        }
+        if (!is_numeric($user['money']) || (int) $user['money'] < 0 || (int) $user['money'] > 999999999) {
+            pm_abort_battle_transaction('Invalid user.money', 400);
+        }
+        $user_money = (int) $user['money'];
+        if ($user_money < $total_price) {
+            pm_abort_battle_transaction('Insufficient funds', 400);
+        }
 
-    if (!isset($user['money'])) {
-        api_error('Invalid user data: missing money field', 500);
-    }
+        DB::query(pm_sql(
+            "UPDATE " . pm_table('pm_usersdata') . " SET money = money - %d WHERE uid = %d",
+            $total_price,
+            $uid
+        ));
 
-    $user_money = validate_int_range($user['money'], 'user.money', 0, 999999999);
-
-    if ($user_money < $total_price) {
-        api_error('Insufficient funds', 400);
-    }
-
-    // 扣除金钱
-    DB::query(pm_sql(
-        "UPDATE " . pm_table('pm_usersdata') . " SET money = money - %d WHERE uid = %d",
-        $total_price,
-        $uid
-    ));
-
-    // 添加到用户背包
-    for ($i = 0; $i < $quantity; $i++) {
-        add_item_to_inventory($uid, $item_id);
+        for ($i = 0; $i < $quantity; $i++) {
+            add_item_to_inventory($uid, $item_id);
+        }
+        DB::query("COMMIT");
+    } catch (Throwable $e) {
+        DB::query("ROLLBACK");
+        throw $e;
     }
 
     api_success(array(
@@ -380,59 +387,59 @@ function api_buy_pet()
 
     $price = (int) $pokemon_data['money'];
 
-    $user = DB::fetch_first(pm_sql(
-        "SELECT * FROM " . pm_table('pm_usersdata') . " WHERE uid = %d",
-        $uid
-    ));
-
-    if (!$user) {
-        api_error('User data not found', 404);
-    }
-
-    $user_money = (int) $user['money'];
-
-    if ($user_money < $price) {
-        api_error('Insufficient funds', 400);
-    }
-
     require_once __DIR__ . '/pokemon_utils.php';
-
     $initial_level = 5;
 
-    $pokemon_count = DB::result_first(pm_sql(
-        "SELECT COUNT(*) FROM " . pm_table('pm_mypm') . " WHERE uid = %d",
-        $uid
-    ));
-
-    if ($pokemon_count >= (int)$user['boxnum']) {
-        api_error('箱子容量不足，请扩展！', 400);
-    }
-
-    $has_first = DB::result_first(pm_sql(
-        "SELECT COUNT(*) FROM " . pm_table('pm_mypm') . " WHERE uid = %d AND site = 1",
-        $uid
-    ));
-
-    if ($has_first == 0) {
-        $site = 1;
-    } else {
-        $bag_count = DB::result_first(pm_sql(
-            "SELECT COUNT(*) FROM " . pm_table('pm_mypm') . " WHERE uid = %d AND site < 3",
+    DB::query("START TRANSACTION");
+    try {
+        $user = DB::fetch_first(pm_sql(
+            "SELECT * FROM " . pm_table('pm_usersdata') . " WHERE uid = %d FOR UPDATE",
             $uid
         ));
-        $site = $bag_count >= 6 ? 3 : 2;
+
+        if (!$user) {
+            pm_abort_battle_transaction('User data not found', 404);
+        }
+        $user_money = (int) $user['money'];
+        if ($user_money < $price) {
+            pm_abort_battle_transaction('Insufficient funds', 400);
+        }
+
+        // 容量与首位检查必须在锁内，避免同时购买占用同一个空位。
+        $pokemon_count = DB::result_first(pm_sql(
+            "SELECT COUNT(*) FROM " . pm_table('pm_mypm') . " WHERE uid = %d",
+            $uid
+        ));
+        if ($pokemon_count >= (int) $user['boxnum']) {
+            pm_abort_battle_transaction('箱子容量不足，请扩展！', 400);
+        }
+
+        $has_first = DB::result_first(pm_sql(
+            "SELECT COUNT(*) FROM " . pm_table('pm_mypm') . " WHERE uid = %d AND site = 1",
+            $uid
+        ));
+        if ($has_first == 0) {
+            $site = 1;
+        } else {
+            $bag_count = DB::result_first(pm_sql(
+                "SELECT COUNT(*) FROM " . pm_table('pm_mypm') . " WHERE uid = %d AND site < 3",
+                $uid
+            ));
+            $site = $bag_count >= 6 ? 3 : 2;
+        }
+
+        $new_pokemon = create_new_pokemon_data($pokemon_data, $initial_level, $uid);
+        DB::query(build_pokemon_insert_sql($new_pokemon, $site));
+        DB::query(pm_sql(
+            "UPDATE " . pm_table('pm_usersdata') . " SET money = money - %d WHERE uid = %d",
+            $price,
+            $uid
+        ));
+        DB::query("COMMIT");
+    } catch (Throwable $e) {
+        DB::query("ROLLBACK");
+        throw $e;
     }
-
-    $new_pokemon = create_new_pokemon_data($pokemon_data, $initial_level, $uid);
-
-    $sql = build_pokemon_insert_sql($new_pokemon, $site);
-    DB::query($sql);
-
-    DB::query(pm_sql(
-        "UPDATE " . pm_table('pm_usersdata') . " SET money = money - %d WHERE uid = %d",
-        $price,
-        $uid
-    ));
 
     api_success(array(
         'message' => 'Purchase successful',

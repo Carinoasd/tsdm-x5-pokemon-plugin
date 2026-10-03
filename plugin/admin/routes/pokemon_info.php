@@ -1,15 +1,5 @@
 <?php
 
-function normalize_pokemon_status($status, $pokemon_id)
-{
-  $status = intval($status);
-  if ($status < 1 || $status > 20) {
-    DB::query("UPDATE pm_mypm set `state`='1' where `id`='$pokemon_id'");
-    return 1;
-  }
-  return $status;
-}
-
 function list_pokemon_info($uid, $from, $count)
 {
   $ret = [];
@@ -33,7 +23,7 @@ function list_pokemon_info($uid, $from, $count)
         intval($query['good']),
         intval($query['ballid']),
         intval($query['is_shiny']) == 1,
-        translate_pokemon_status_id_to_label(normalize_pokemon_status($query['state'], $pokemon_id)),
+        translate_pokemon_status_id_to_label(intval($query['state'])),
         translate_pokemon_sex_id_to_label(intval($query['sex'])),
         new_pokemon_attributes(
           intval($query['hpg']),
@@ -90,7 +80,7 @@ function get_pokemon_info($id)
       intval($query['good']),
       intval($query['ballid']),
       intval($query['is_shiny']) == 1,
-      translate_pokemon_status_id_to_label(normalize_pokemon_status($query['state'], $pokemon_id)),
+      translate_pokemon_status_id_to_label(intval($query['state'])),
       translate_pokemon_sex_id_to_label(intval($query['sex'])),
 
       new_pokemon_attributes(

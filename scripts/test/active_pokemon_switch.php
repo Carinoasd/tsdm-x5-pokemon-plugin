@@ -76,13 +76,18 @@ function pm_data($id)
 }
 function battle_calc_my_stats($data, $pokemon)
 {
-    return [150, 100, 20, 20, 20, 20];
+    return [150, 100, 25, 40, 35, 50];
 }
 function battle_calc_npc_stats($data, $user, $strength)
 {
     return [100, 30, 20, 20, 20, 20];
 }
-function calculate_counter_damage_legacy(...$args) { $GLOBALS['calls']['counter']++; return $GLOBALS['counter_damage']; }
+function calculate_counter_damage_legacy(...$args)
+{
+    $GLOBALS['calls']['counter']++;
+    $GLOBALS['counter_args'] = $args;
+    return $GLOBALS['counter_damage'];
+}
 function api_calculate_pokemon_max_hp($pokemon) { return 100; }
 function api_validate_and_correct_hp($pokemon, $hp, $max_hp) { return ['hp' => $hp]; }
 function build_battle_response($user, $pokemon) { return ['my_pokemon' => $pokemon, 'wild_pokemon' => ['hp' => $user['hp']]]; }
@@ -276,6 +281,7 @@ function reset_battle()
     $GLOBALS['input'] = ['pokemon_id' => 11];
     $GLOBALS['user'] = ['npcid' => 25, 'level' => 10, 'hp' => 90, 'hpg' => 100, 'strength' => 1];
     $GLOBALS['counter_damage'] = 10;
+    $GLOBALS['counter_args'] = [];
     $GLOBALS['calls'] = array_fill_keys(['pm_data', 'counter', 'clear'], 0);
     srand(3); // rand(1, 100) = 87 > 30，默认不触发反击
     DB::$pets = [
@@ -352,7 +358,9 @@ run_case('Automatic switch picks the first reserve', function () {
 run_case('Switch with surviving counterattack damages the new pet', function () {
     srand(7); // rand(1, 100) = 16 <= 30，触发反击
     switched_to(11, 1);
-    check($GLOBALS['calls']['counter'] === 1 && (int) DB::$pets[1]['hp'] === 90, 'Counter damage not applied to the new pet');
+    check($GLOBALS['calls']['counter'] === 1 && (int) DB::$pets[1]['hp'] === 70, 'Counter damage did not subtract from the new pet current HP');
+    check($GLOBALS['counter_args'][2] === 25 && $GLOBALS['counter_args'][4] === 35, 'Counterattack received the wrong defense stats');
+    check((int) DB::$pets[0]['hp'] === 100, 'Counterattack damaged the previous pet');
 });
 run_case('Counterattack defeats the new pet with reserves left', function () {
     srand(7);

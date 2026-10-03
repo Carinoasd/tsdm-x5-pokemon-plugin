@@ -99,7 +99,8 @@ function set_map_info($info)
     }
 
     if ($query['name'] != $info["name"]) {
-      DB::query("UPDATE pm_map set name='{$info["name"]}' where id={$info["id"]}");
+      $name = addslashes($info["name"]);
+      DB::query("UPDATE pm_map set name='$name' where id=$id");
     }
     if ($query['site'] != $info["area_type"]) {
       DB::query("UPDATE pm_map set site='{$info["area_type"]}' where id={$info["id"]}");
@@ -116,62 +117,11 @@ function set_map_info($info)
       DB::query("UPDATE pm_map set max_level={$info["max_level"]} where id={$info["id"]}");
     }
 
-    // 处理地图模式配置
-    // 使用 expn 字段存储 Boss 配置，不再使用 exp 字段
-    $map_mode = isset($info["mode"]) ? $info["mode"] : null;
-    $new_expn = "";  // Boss JSON 配置或空字符串
-    $has_boss_config = false;
-
-    if ($map_mode) {
-      if (is_string($map_mode)) {
-        $mode_type = $map_mode;
-        switch ($mode_type) {
-          case "wild":
-            $new_expn = "";
-            break;
-
-          case "boss":
-          case "hybrid":
-            $has_boss_config = true;
-            $boss_config = isset($info["bosses"]) ? ["bosses" => $info["bosses"]] : ["bosses" => []];
-            $new_expn = json_encode($boss_config, JSON_UNESCAPED_UNICODE);
-            break;
-
-          default:
-            $new_expn = "";
-            break;
-        }
-      } elseif (is_array($map_mode) && isset($map_mode["mode"])) {
-        $mode_type = $map_mode["mode"];
-        $mode_data = isset($map_mode["data"]) ? $map_mode["data"] : [];
-
-        switch ($mode_type) {
-          case "wild":
-            $new_expn = "";
-            break;
-
-          case "boss":
-          case "hybrid":
-            $has_boss_config = true;
-            $boss_config = isset($mode_data["bosses"]) ? ["bosses" => $mode_data["bosses"]] : ["bosses" => []];
-            $new_expn = json_encode($boss_config, JSON_UNESCAPED_UNICODE);
-            break;
-
-          default:
-            $new_expn = "";
-            break;
-        }
-      } else {
-        $has_boss_config = isset($info["boss_config"]) && !empty($info["boss_config"]["bosses"]);
-        $new_expn = $has_boss_config
-          ? json_encode($info["boss_config"], JSON_UNESCAPED_UNICODE)
-          : "";
-      }
-    } else {
-      $has_boss_config = isset($info["boss_config"]) && !empty($info["boss_config"]["bosses"]);
-      $new_expn = $has_boss_config
-        ? json_encode($info["boss_config"], JSON_UNESCAPED_UNICODE)
-        : "";
+    // experience=-1 identifies Boss-only maps; wild maps keep their numeric multiplier.
+    list($new_experience, $new_expn, $has_boss_config) =
+      translate_map_mode_to_db_fields($info, intval($query['experience']));
+    if (intval($query['experience']) !== $new_experience) {
+      DB::query("UPDATE pm_map set experience=$new_experience where id=$id");
     }
 
     // 如果是 Boss 配置，确保 expn 字段可以存储 JSON
@@ -225,68 +175,13 @@ function insert_map_info($info)
     exit(json_encode($json_ret, JSON_UNESCAPED_UNICODE));
   }
 
-  $name = strval($info["name"]);
+  $name = addslashes(strval($info["name"]));
   $site = strval($info["area_type"]);
   $kg = boolval($info["is_enabled"]) ? 1 : 0;
   $minlevel = intval($info["min_level"]);
   $maxlevel = intval($info["max_level"]);
 
-  // 处理地图模式配置
-  $map_mode = isset($info["mode"]) ? $info["mode"] : null;
-  $expn = "";  // Boss JSON 配置或空字符串
-  $has_boss_config = false;
-
-  if ($map_mode) {
-    if (is_string($map_mode)) {
-      $mode_type = $map_mode;
-      switch ($mode_type) {
-        case "wild":
-          $expn = "";
-          break;
-
-        case "boss":
-        case "hybrid":
-          $has_boss_config = true;
-          $boss_config = isset($info["bosses"]) ? ["bosses" => $info["bosses"]] : ["bosses" => []];
-          $expn = json_encode($boss_config, JSON_UNESCAPED_UNICODE);
-          break;
-
-        default:
-          $expn = "";
-          break;
-      }
-    } elseif (is_array($map_mode) && isset($map_mode["mode"])) {
-      $mode_type = $map_mode["mode"];
-      $mode_data = isset($map_mode["data"]) ? $map_mode["data"] : [];
-
-      switch ($mode_type) {
-        case "wild":
-          $expn = "";
-          break;
-
-        case "boss":
-        case "hybrid":
-          $has_boss_config = true;
-          $boss_config = isset($mode_data["bosses"]) ? ["bosses" => $mode_data["bosses"]] : ["bosses" => []];
-          $expn = json_encode($boss_config, JSON_UNESCAPED_UNICODE);
-          break;
-
-        default:
-          $expn = "";
-          break;
-      }
-    } else {
-      $has_boss_config = isset($info["boss_config"]) && !empty($info["boss_config"]["bosses"]);
-      $expn = $has_boss_config
-        ? json_encode($info["boss_config"], JSON_UNESCAPED_UNICODE)
-        : "";
-    }
-  } else {
-    $has_boss_config = isset($info["boss_config"]) && !empty($info["boss_config"]["bosses"]);
-    $expn = $has_boss_config
-      ? json_encode($info["boss_config"], JSON_UNESCAPED_UNICODE)
-      : "";
-  }
+  list($experience, $expn, $has_boss_config) = translate_map_mode_to_db_fields($info);
 
   // 如果是 Boss 配置，确保 expn 字段可以存储 JSON
   if ($has_boss_config) {
@@ -302,9 +197,9 @@ function insert_map_info($info)
 
   $expn_escaped = addslashes($expn);
   DB::query("INSERT INTO pm_map (
-    id, name, site, is_enabled, min_level, max_level, boss_config
+    id, name, site, is_enabled, min_level, max_level, experience, boss_config
   ) VALUES (
-    $new_id, '$name', '$site', $kg, $minlevel, $maxlevel, '$expn_escaped'
+    $new_id, '$name', '$site', $kg, $minlevel, $maxlevel, $experience, '$expn_escaped'
   )");
 
   return $new_id;

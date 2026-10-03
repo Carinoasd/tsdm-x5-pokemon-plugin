@@ -70,8 +70,8 @@ function yypg($petid, $itemname)
     $effects = json_decode(isset($item['effects']) ? $item['effects'] : '{}', true) ?: [];
     $heal_amount = isset($effects['hp']) ? (int)$effects['hp'] : 50;
 
-    // 饥饿状态是 5, 6
-    $negative_states = [5, 6];
+    // 饥饿、严重饥饿、饥饿昏迷都可以治疗。
+    $negative_states = [5, 6, 7];
     $state = (int)$pet['state'];
 
     if (!in_array($state, $negative_states)) {
@@ -93,6 +93,7 @@ function yypg($petid, $itemname)
     }
 
     // 解除饥饿状态并恢复HP
+    $pet['state'] = 1;
     $max_hp = api_calculate_pokemon_max_hp($pet);
     $new_hp = min($max_hp, (int)$pet['hp'] + $heal_amount);
 
@@ -197,27 +198,13 @@ function cap($petid, $itemname)
 }
 
 /**
- * 品质重洗药 - 重洗品质
+ * 品质重洗药 - 暂未支持
  */
 function quality($petid, $itemname)
 {
-    global $_G;
-    $uid = $_G['uid'];
-
-    $pet = DB::fetch_first(pm_sql(
-        "SELECT * FROM " . pm_table('pm_mypm') . " WHERE id = %d AND uid = %d",
-        $petid,
-        $uid
-    ));
-
-    if (!$pet) {
-        return 1;
-    }
-
-    // 随机生成新的品质 (1-31)
-    $new_quality = rand(1, 31);
-
-    return 0;
+    // X5 已没有旧版 quality 字段，尚未定义品质重洗如何作用于六项个体值。
+    // 返回无法使用，让调用方保留物品，避免报告成功却不产生任何效果。
+    return 1;
 }
 
 /**

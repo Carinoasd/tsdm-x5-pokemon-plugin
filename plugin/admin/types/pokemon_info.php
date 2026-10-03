@@ -41,6 +41,8 @@ function translate_pokemon_site_label_to_id($str)
 function translate_pokemon_status_id_to_label($id)
 {
   switch ($id) {
+    case 0:
+      return "critical";
     case 1:
       return "normal";
     case 2:
@@ -80,7 +82,12 @@ function translate_pokemon_status_id_to_label($id)
     case 19:
       return "angry2";
     case 20:
+      // 保留旧客户端的 wire 名称；游戏中此状态为虚弱阶段一。
       return "dead";
+    case 21:
+      return "weak2";
+    case 22:
+      return "weak3";
     default:
       $json_ret = [];
       $json_ret["success"] = false;
@@ -91,15 +98,17 @@ function translate_pokemon_status_id_to_label($id)
 
 function translate_pokemon_status_label_to_id($str)
 {
-  // 兼容直接以数字 ID（1-20）传入的情况
+  // 兼容直接以数字 ID（0-22）传入的情况
   if (is_int($str) || (is_string($str) && ctype_digit($str))) {
     $numeric_id = intval($str);
-    if ($numeric_id >= 1 && $numeric_id <= 20) {
+    if ($numeric_id >= 0 && $numeric_id <= 22) {
       return $numeric_id;
     }
   }
 
   switch ($str) {
+    case "critical":
+      return 0;
     case "normal":
       return 1;
     case "sick1":
@@ -140,6 +149,10 @@ function translate_pokemon_status_label_to_id($str)
       return 19;
     case "dead":
       return 20;
+    case "weak2":
+      return 21;
+    case "weak3":
+      return 22;
     default:
       $json_ret = [];
       $json_ret["success"] = false;

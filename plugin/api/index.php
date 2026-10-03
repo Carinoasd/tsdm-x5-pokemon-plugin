@@ -143,11 +143,13 @@ function require_login()
 // 获取请求参数
 function get_param($key, $default = null)
 {
-    $value = isset($_GET[$key]) ? $_GET[$key] : $default;
-    if ($value === null && isset($_POST[$key])) {
-        $value = $_POST[$key];
+    if (isset($_GET[$key])) {
+        return $_GET[$key];
     }
-    return $value;
+    if (isset($_POST[$key])) {
+        return $_POST[$key];
+    }
+    return $default;
 }
 
 // 获取JSON输入

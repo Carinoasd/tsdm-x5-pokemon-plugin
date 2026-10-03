@@ -887,6 +887,22 @@ function calculate_stats($pm, $info)
 }
 
 /**
+ * 判断种族是否在技能的完整 ID 列表中，兼容旧版 k 边界标记。
+ */
+function pokemon_can_learn_skill($available_pokemons, $species_id)
+{
+    $available_pokemons = trim((string) $available_pokemons);
+    if ($available_pokemons === '99999') {
+        return true;
+    }
+
+    // 与旧版列表接口保持一致：损坏数据中的 where 后缀不是种族列表。
+    $available_pokemons = explode('where', $available_pokemons)[0];
+    $species_ids = array_map('trim', explode(',', trim($available_pokemons, 'k')));
+    return in_array((string) (int) $species_id, $species_ids, true);
+}
+
+/**
  * 获取宠物可学习的技能列表
  *
  * 根据宠物ID和等级，返回该宠物可以学习的技能列表
@@ -961,28 +977,7 @@ function api_get_learnable_skills()
     foreach ($all_skills as $skill) {
         $pmid = isset($skill['available_pokemons']) ? $skill['available_pokemons'] : '';
 
-        // 检查是否是全局技能
-        $is_global = ($pmid === '99999');
-
-        // 处理 pmid 格式
-        $is_race_skill = false;
-
-        if (!$is_global && !empty($pmid)) {
-            // 去掉首尾的 k 字符
-            $pmid_clean = trim($pmid, 'k');
-
-            // 如果包含 "where" 说明数据损坏了，需要特殊处理
-            if (strpos($pmid_clean, 'where') !== false) {
-                // 只取 where 前面的部分
-                $pmid_clean = trim(explode('where', $pmid_clean)[0]);
-            }
-
-            // 按逗号分隔
-            $pmid_parts = array_filter(explode(',', $pmid_clean));
-            $is_race_skill = in_array((string)$pmno, $pmid_parts);
-        }
-
-        if (!$is_global && !$is_race_skill) {
+        if (!pokemon_can_learn_skill($pmid, $pmno)) {
             continue;
         }
 
@@ -1163,14 +1158,7 @@ function api_learn_skill()
     }
 
     // 检查宠物是否可以学习这个技能（种族或全局）
-    $can_learn = false;
-    $pmid = $skill['available_pokemons'];
-
-    if (strpos($pmid, (string)$pmno) !== false || $pmid === '99999') {
-        $can_learn = true;
-    }
-
-    if (!$can_learn) {
+    if (!pokemon_can_learn_skill($skill['available_pokemons'], $pmno)) {
         api_error('该宠物无法学习这个技能', 400, null, 'skill_not_learnable');
     }
 
@@ -1534,7 +1522,7 @@ WHERE pet.id=%d AND pet.uid=%d AND pet.$slot_field=0 AND occupier.id IS NULL",
     // 计算新的 HP（保持血量百分比）
     $new_maxhp = $full_stats['total_hp'];
     $new_hp = (int) round($new_maxhp * $hp_percent);
-    $new_hp = max(1, min($new_hp, $new_maxhp));
+    $new_hp = $old_hp <= 0 ? 0 : max(1, min($new_hp, $new_maxhp));
 
     // 更新数据库中的 hp
     DB::query(pm_sql(
@@ -1657,7 +1645,7 @@ SET $slot_field=0 WHERE id=%d AND uid=%d",
     // 计算新的 HP（保持血量百分比）
     $new_maxhp = $full_stats['total_hp'];
     $new_hp = (int) round($new_maxhp * $hp_percent);
-    $new_hp = max(1, min($new_hp, $new_maxhp));
+    $new_hp = $old_hp <= 0 ? 0 : max(1, min($new_hp, $new_maxhp));
 
     // 更新数据库中的 hp
     DB::query(pm_sql(

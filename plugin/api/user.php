@@ -281,7 +281,7 @@ function api_get_user_stats()
     $uid = validate_uid($_G['uid']);
 
     // 获取宠物统计
-    $pokemon_stats = DB::fetch_first(
+    $pokemon_stats = DB::fetch_first(pm_sql(
         "SELECT
  COUNT(*) as total,
             COUNT(CASE WHEN site=1 THEN 1 END) as active,
@@ -289,16 +289,16 @@ function api_get_user_stats()
             MAX(level) as max_level FROM " . pm_table('pm_mypm') . "
             WHERE uid=%d",
         $uid
-    );
+    ));
 
     // 获取物品统计
-    $item_stats = DB::fetch_first(
+    $item_stats = DB::fetch_first(pm_sql(
         "SELECT
  COUNT(*) as total_items,
             SUM(nums) as total_quantity FROM " . pm_table('pm_myitem') . "
             WHERE uid=%d",
         $uid
-    );
+    ));
 
     // 获取战斗统计（简化版）
     $battle_stats = [
@@ -411,7 +411,7 @@ function api_heal_pokemon()
 {
     require_login();
 
-    global $_G, $statehp;
+    global $_G;
 
     $uid = validate_uid($_G['uid']);
     $pokemon_id = validate_id(get_param('pokemon_id', 0), 'pokemon_id');
@@ -450,20 +450,8 @@ function api_heal_pokemon()
     // 治疗免费
     $cost = 0;
 
-    // 使用统一计算函数获取最大 HP
-    $petmaxhp = api_calculate_pokemon_max_hp($pokemon_data);
-
-    // 计算装备加成
-    api_parse_pet_wear_items($pokemon_data, false, $petmaxhp);
-
-    // 验证并纠正 HP（确保 HP 在 [0, max_hp] 范围内）
-    $pokemon_data['hp'] = strval($petmaxhp);
-    $hp_validation = api_validate_and_correct_hp($pokemon_data, $petmaxhp, $petmaxhp);
-    $petmaxhp = $hp_validation['hp'];
-
     // 处理宠物状态
     $timestamp = time();
-    $state_sql = '';
     $needs_healing = false;
 
     // 负面状态列表（需要治疗的异常状态）
@@ -490,6 +478,12 @@ function api_heal_pokemon()
         // 负面状态需要治疗
         $needs_healing = true;
     }
+
+    // 先恢复状态，再计算治疗后的最大 HP；统一函数已包含装备加成。
+    if ($needs_healing) {
+        $pokemon_data['state'] = 1;
+    }
+    $petmaxhp = api_calculate_pokemon_max_hp($pokemon_data);
 
     if ($needs_healing) {
         DB::query(pm_sql(
@@ -548,7 +542,7 @@ function api_heal_and_flee()
 {
     require_login();
 
-    global $_G, $statehp;
+    global $_G;
 
     $uid = validate_uid($_G['uid']);
     $pokemon_id = validate_id(get_param('pokemon_id', 0), 'pokemon_id');
@@ -587,18 +581,7 @@ function api_heal_and_flee()
 
     $cost = 0;
 
-    // 使用统一计算函数获取最大 HP
-    $petmaxhp = api_calculate_pokemon_max_hp($pokemon_data);
-
-    api_parse_pet_wear_items($pokemon_data, false, $petmaxhp);
-
-    // 验证并纠正 HP（确保 HP 在 [0, max_hp] 范围内）
-    $pokemon_data['hp'] = strval($petmaxhp);
-    $hp_validation = api_validate_and_correct_hp($pokemon_data, $petmaxhp, $petmaxhp);
-    $petmaxhp = $hp_validation['hp'];
-
     $timestamp = time();
-    $state_sql = '';
     $needs_healing = false;
 
     // 负面状态列表（需要治疗的异常状态，20-22 为虚弱状态）
@@ -612,6 +595,12 @@ function api_heal_and_flee()
         // 负面状态需要治疗
         $needs_healing = true;
     }
+
+    // 先恢复状态，再计算治疗后的最大 HP；统一函数已包含装备加成。
+    if ($needs_healing) {
+        $pokemon_data['state'] = 1;
+    }
+    $petmaxhp = api_calculate_pokemon_max_hp($pokemon_data);
 
     if ($needs_healing) {
         DB::query(pm_sql(
@@ -890,9 +879,6 @@ function api_use_item()
             $current_hp = (int) $pokemon['hp'];
             $current_state = (int) $pokemon['state'];
 
-            // 计算最大 HP（使用统一计算函数）
-            $max_hp = api_calculate_pokemon_max_hp($pokemon);
-
             // 如果是濒危状态（state=0），使用血瓶会转为虚弱状态
             // 如果已经是虚弱状态（state=20,21,22），使用血瓶会降级
             $new_state = $current_state;
@@ -907,7 +893,15 @@ function api_use_item()
                 // 虚弱状态降级
                 $new_state = downgrade_weak_state($current_state);
                 $state_changed = ($new_state !== $current_state);
+            } elseif (in_array($item_module, ['hunger', 'yypg'], true) && in_array($current_state, [5, 6, 7], true)) {
+                // 哞哞奶既回复 HP 也解除饥饿，满血时仍可用于治疗饥饿。
+                $new_state = 1;
+                $state_changed = true;
             }
+
+            // 状态会改变 HP 上限，按治疗后的状态计算本次回复量。
+            $pokemon['state'] = $new_state;
+            $max_hp = api_calculate_pokemon_max_hp($pokemon);
 
             if ($current_hp >= $max_hp && $addhp > 0 && !$state_changed) {
                 api_error("{$pokemon['nickname']}不需要增加 HP 了", 400);
@@ -951,6 +945,8 @@ function api_use_item()
             if ($state_changed) {
                 if ($current_state === 0) {
                     $message_parts[] = "脱离濒危状态，进入虚弱状态";
+                } elseif (in_array($current_state, [5, 6, 7], true)) {
+                    $message_parts[] = "饥饿状态已解除";
                 } elseif ($new_state === 1) {
                     $message_parts[] = "虚弱状态已完全恢复";
                 } else {
@@ -1114,10 +1110,11 @@ function api_get_usable_pokemon()
     }
 
     $item_type = $item_data['type'];
+    $item_module = api_get_item_module($item_data);
 
     // 获取用户所有宠物
     $all_pokemon = DB::fetch_all(pm_sql(
-        "SELECT id, species_id, nickname, level, hp, hpg, atkg, defg, spatkg, spdefg, sdg, hpn, atkn, defn, spatkn, spdefn, sdn, state FROM " . pm_table('pm_mypm') . " WHERE uid = %d",
+        "SELECT id, species_id, nickname, level, hp, hpg, atkg, defg, spatkg, spdefg, sdg, hpn, atkn, defn, spatkn, spdefn, sdn, state, is_shiny, equipmentid1, equipmentid2, equipmentid3, equipmentid4 FROM " . pm_table('pm_mypm') . " WHERE uid = %d",
         $uid
     ));
 
@@ -1146,8 +1143,10 @@ function api_get_usable_pokemon()
         $current_hp = (int) $pokemon['hp'];
 
         switch ($item_type) {
-            case '1': // 回复药 - 只有 HP < maxhp 的宠物可以使用
-                $can_use = $current_hp < $max_hp;
+            case '1': // 回复药也能治疗濒危、虚弱；哞哞奶还能解除饥饿。
+                $can_use = $current_hp < $max_hp
+                    || in_array($state, [0, 20, 21, 22], true)
+                    || (in_array($item_module, ['hunger', 'yypg'], true) && in_array($state, [5, 6, 7], true));
                 break;
             case '3': // 进化石 - 所有宠物都可以尝试使用，后端会验证进化条件
                 $can_use = true;
