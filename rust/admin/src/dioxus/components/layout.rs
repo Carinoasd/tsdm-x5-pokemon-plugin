@@ -22,6 +22,7 @@ pub fn AdminLayout(
         (AdminRoute::UserData, "用户数据"),
         (AdminRoute::EvolutionData, "进化路线"),
         (AdminRoute::SkillType, "技能数据"),
+        (AdminRoute::EffectData, "效果管理"),
     ];
 
     rsx! {
@@ -38,6 +39,7 @@ pub fn AdminLayout(
                     div { style: "width:100%;display:flex;flex-direction:column;align-items:stretch;padding:0 14px;box-sizing:border-box;",
                         for (route , label) in main_routes.iter() {
                             button {
+                                "data-testid": if *route == AdminRoute::EffectData { "nav-effects" } else if *route == AdminRoute::SkillType { "nav-skills" } else { "nav-admin" },
                                 style: if *route == current { "display:block;width:100%;margin:4px 0;padding:8px 6px;border:1px solid #2f6aa0;background:#2f6aa0;color:#fff;text-align:center;cursor:pointer;font-size:13px;" } else { "display:block;width:100%;margin:4px 0;padding:8px 6px;border:1px solid #c7d4e6;background:#fff;color:#234;text-align:center;cursor:pointer;font-size:13px;" },
                                 onclick: move |_| on_navigate.call(*route),
                                 "{label}"

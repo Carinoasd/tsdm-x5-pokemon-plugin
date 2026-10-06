@@ -3,7 +3,7 @@ use strum::IntoEnumIterator;
 use crate::dioxus::prelude::*;
 
 use super::form_fields::{
-    Col, FieldWrapper, FormSection, NumberField, Row, SelectField, TextAreaField, TextField,
+    Col, FieldWrapper, FormSection, NumberField, Row, SelectField, TextAreaField,
     UnsignedNumberField,
 };
 use crate::dioxus::{
@@ -15,10 +15,11 @@ use crate::dioxus::{
             set_busy, set_notice, AdminNoticeLevel, FilterConditionType, FilterFieldState,
             LogicalOperation, ADMIN_BUSY,
         },
-        utils::api::{filter_pokemon_type, get_pokemon_types_by_ids},
+        utils::api::{filter_pokemon_type, get_pokemon_types_by_ids, list_all_effect_data},
     },
 };
 use _utils::types::{
+    effect_data::EffectData,
     pokemon_type::PokemonKind,
     skill_type::{SkillEffect, SkillType, StatType, StatusEffect, Target},
 };
@@ -170,6 +171,7 @@ pub fn SkillTypeEditorModal(
     data: SkillType,
     save_text: String,
     disabled: bool,
+    error: Option<String>,
     on_save: EventHandler<SkillType>,
     on_close: EventHandler<()>,
 ) -> Element {
@@ -179,6 +181,45 @@ pub fn SkillTypeEditorModal(
     let mut available_pokemons_loaded = use_signal(|| false);
     let mut search_results = use_signal(Vec::<SearchResult>::new);
     let mut search_loading = use_signal(|| false);
+    let mut effect_templates = use_resource(move || async move {
+        list_all_effect_data()
+            .await
+            .map_err(|error| error.to_string())
+    });
+    let template_result = effect_templates.read().clone();
+    let selected_effect_id = draft.read().effect_id;
+    let current_power = skill_power(draft.read().effect);
+    let binding_changed =
+        selected_effect_id != data.effect_id || current_power != skill_power(data.effect);
+    let selected_template = template_result
+        .as_ref()
+        .and_then(|result| result.as_ref().ok())
+        .and_then(|items| items.iter().find(|effect| effect.id == selected_effect_id));
+    let binding_error = if selected_effect_id > 0 && binding_changed {
+        match &template_result {
+            None => Some("正在加载效果，请稍候".to_string()),
+            Some(Err(_)) => Some("请先重新加载效果列表，或解除绑定".to_string()),
+            Some(Ok(_)) => match selected_template {
+                Some(effect) => effect.binding_error(current_power).map(str::to_string),
+                None => Some("所选效果不存在，请重新选择".to_string()),
+            },
+        }
+    } else {
+        None
+    };
+    let existing_warning = if selected_effect_id > 0 && !binding_changed {
+        match selected_template {
+            Some(effect) => effect.binding_error(current_power).map(|reason| {
+                format!("已有绑定已保留：{reason}。可在效果管理中修正，或解除绑定。")
+            }),
+            None => Some(format!(
+                "已有绑定 #{} 已保留；未能加载该模板，请核对后再更换。",
+                selected_effect_id
+            )),
+        }
+    } else {
+        None
+    };
 
     // 加载可用宠物列表
     use_effect(move || {
@@ -231,13 +272,11 @@ pub fn SkillTypeEditorModal(
                             }
                         }
                         Col { span: 8,
-                            TextField {
-                                label: "名称".to_string(),
-                                value: draft.read().name.clone(),
-                                placeholder: Some("技能名称".to_string()),
-                                disabled,
-                                on_change: move |v| draft.write().name = v,
-                                help: None,
+                            div { class: "admin-field",
+                                label { class: "admin-field__label", r#for: "skill-name", "名称" }
+                                input { class: "admin-input", id: "skill-name", "data-testid": "skill-name", value: draft.read().name.clone(),
+                                    placeholder: "技能名称", disabled,
+                                    oninput: move |event| draft.write().name = event.value() }
                             }
                         }
                     }
@@ -401,7 +440,45 @@ pub fn SkillTypeEditorModal(
                     }
                 }
 
+                FormSection { title: "附加效果模板".to_string(),
+                    div { class: "admin-field",
+                        label { class: "admin-field__label", r#for: "skill-effect-id", "绑定效果" }
+                        select { class: "admin-input", id: "skill-effect-id", "data-testid": "skill-effect-id", value: "{selected_effect_id}", disabled,
+                            onchange: move |event| { if let Ok(id) = event.value().parse() { draft.write().effect_id = id; } },
+                            option { value: "0", selected: selected_effect_id == 0, "不绑定附加效果" }
+                            if selected_effect_id > 0 && selected_template.is_none() {
+                                option { value: "{selected_effect_id}", selected: true, "已有绑定 #{selected_effect_id}（保留）" }
+                            }
+                            if let Some(Ok(items)) = &template_result {
+                                for effect in items {
+                                    option { key: "effect-option-{effect.id}", value: "{effect.id}", selected: effect.id == selected_effect_id, disabled: effect.binding_error(current_power).is_some() && effect.id != selected_effect_id,
+                                        "#{effect.id} {effect.code} — {effect_usage(effect)}" }
+                                }
+                            }
+                        }
+                    }
+                    p { class: "admin-field__help", "威力为 0 的能力变化技使用「出招后」；伤害技的能力变化和异常状态使用「命中后」。" }
+                    if let Some(Err(message)) = &template_result {
+                        p { role: "alert", "data-testid": "skill-effect-load-error", "加载效果失败：{message}" }
+                    }
+                    if let Some(message) = binding_error.as_ref() {
+                        p { role: "alert", "data-testid": "skill-effect-error", "{message}" }
+                    }
+                    if let Some(message) = existing_warning {
+                        p { role: "status", "data-testid": "skill-effect-warning", "{message}" }
+                    }
+                    div { class: "admin-actions",
+                        button { class: "admin-btn", "data-testid": "skill-effect-refresh", disabled,
+                            onclick: move |_| effect_templates.restart(), "刷新效果列表" }
+                        button { class: "admin-btn", "data-testid": "skill-effect-unbind", disabled: disabled || selected_effect_id == 0,
+                            onclick: move |_| draft.write().effect_id = 0, "解除绑定" }
+                    }
+                }
+
                 // 操作按钮
+                if let Some(message) = error {
+                    p { role: "alert", "data-testid": "skill-error", "{message}" }
+                }
                 div { class: "admin-form-actions",
                     button {
                         class: "admin-btn",
@@ -411,13 +488,35 @@ pub fn SkillTypeEditorModal(
                     }
                     button {
                         class: "admin-btn admin-btn--primary",
-                        disabled,
+                        "data-testid": "skill-save",
+                        disabled: disabled || binding_error.is_some(),
                         onclick: move |_| on_save.call(draft.read().clone()),
                         "{save_text}"
                     }
                 }
             }
         }
+    }
+}
+
+fn skill_power(effect: SkillEffect) -> u64 {
+    match effect {
+        SkillEffect::PhysicalDamage { power, .. }
+        | SkillEffect::SpecialDamage { power, .. }
+        | SkillEffect::Others { power, .. }
+        | SkillEffect::Priority { power, .. }
+        | SkillEffect::Recoil { power, .. } => power,
+        _ => 0,
+    }
+}
+
+fn effect_usage(effect: &EffectData) -> &'static str {
+    if effect.binding_error(0).is_none() {
+        "威力 0 / 出招后"
+    } else if effect.binding_error(1).is_none() {
+        "伤害技 / 命中后"
+    } else {
+        "已有配置尚不支持"
     }
 }
 

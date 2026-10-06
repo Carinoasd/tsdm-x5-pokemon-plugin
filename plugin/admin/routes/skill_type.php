@@ -99,12 +99,47 @@ function get_skill_type($id)
   }
 }
 
+function validate_skill_effect_id($info, $power, $current_id = 0, $current_power = null)
+{
+  // Older clients do not know this field: only an explicit zero unbinds it.
+  if (!array_key_exists('effect_id', $info)) {
+    if ($current_power === null || intval($power) === intval($current_power)) return intval($current_id);
+    $value = intval($current_id);
+  } else {
+    $value = $info['effect_id'];
+  }
+  if ((!is_int($value) && !(is_string($value) && ctype_digit($value))) || $value < 0 || $value > 4294967295) {
+    exit(json_encode(['success' => false, 'reason' => 'effect_id 必须是非负整数'], JSON_UNESCAPED_UNICODE));
+  }
+  $effect_id = intval($value);
+  if ($effect_id > 0) {
+    $row = DB::fetch_first("SELECT * from pm_effect where id=$effect_id");
+    if (!$row) {
+      exit(json_encode(['success' => false, 'reason' => "effect_id #$effect_id 不存在（pm_effect）"], JSON_UNESCAPED_UNICODE));
+    }
+    // Preserve legacy bindings for unrelated edits, but validate a new binding
+    // or changed power before writing any other skill field.
+    if ($effect_id !== intval($current_id) || $current_power === null || intval($power) !== intval($current_power)) {
+      require_once __DIR__ . '/effect_data.php';
+      require_once __DIR__ . '/../../api/battle_core.php';
+      if (!effect_row_matches_skill_power($row, $power)) {
+        exit(json_encode(['success' => false, 'reason' => '技能威力与效果类型或触发时机不相容'], JSON_UNESCAPED_UNICODE));
+      }
+    }
+  }
+  return $effect_id;
+}
+
 function set_skill_type($info)
 {
+  if (!is_array($info)) {
+    exit(json_encode(['success' => false, 'reason' => '技能资料必须是对象'], JSON_UNESCAPED_UNICODE));
+  }
   // 在任何字段写入前验证效果，防止失败时留下部分修改。
   $effect = translate_skill_type_obj_to_raw($info["effect"] ?? null);
   $id = intval($info["id"]);
   if ($query = DB::fetch_first("SELECT * from pm_skill where id=$id")) {
+    $effect_id = validate_skill_effect_id($info, $effect[2], $query['effect_id'] ?? 0, $query['power']);
     // 提前检查，available_pokemons 必须是一个数字数组
     if (!is_array($info["available_pokemons"])) {
       $json_ret = [];
@@ -151,17 +186,7 @@ function set_skill_type($info)
     }
 
     // 战斗引擎 2.0：技能效果模板关联（0 = 无效果；非零时会校验该 pm_effect 行存在）
-    $effect_id = isset($info["effect_id"]) ? intval($info["effect_id"]) : 0;
     if ((isset($query['effect_id']) ? intval($query['effect_id']) : 0) != $effect_id) {
-      if ($effect_id > 0) {
-        $effect_row = DB::fetch_first("SELECT id from pm_effect where id=" . $effect_id);
-        if (!$effect_row) {
-          $json_ret = [];
-          $json_ret["success"] = false;
-          $json_ret["reason"] = "effect_id #$effect_id 不存在（pm_effect）";
-          exit(json_encode($json_ret, JSON_UNESCAPED_UNICODE));
-        }
-      }
       DB::query("UPDATE pm_skill set effect_id='$effect_id' where id=$id");
     }
   } else {
@@ -174,7 +199,11 @@ function set_skill_type($info)
 
 function insert_skill_type($info)
 {
+  if (!is_array($info)) {
+    exit(json_encode(['success' => false, 'reason' => '技能资料必须是对象'], JSON_UNESCAPED_UNICODE));
+  }
   $effect = translate_skill_type_obj_to_raw($info["effect"] ?? null);
+  $effect_id = validate_skill_effect_id($info, $effect[2]);
   // 提前检查，available_pokemons 必须是一个数字数组
   if (!is_array($info["available_pokemons"])) {
     $json_ret = [];
@@ -204,17 +233,6 @@ function insert_skill_type($info)
   $last_id = DB::fetch_first("SELECT id from pm_skill order by id desc limit 1");
   $last_id = intval($last_id['id']);
   $new_id = $last_id + 1;
-
-  $effect_id = isset($info["effect_id"]) ? intval($info["effect_id"]) : 0;
-  if ($effect_id > 0) {
-    $effect_row = DB::fetch_first("SELECT id from pm_effect where id=" . $effect_id);
-    if (!$effect_row) {
-      $json_ret = [];
-      $json_ret["success"] = false;
-      $json_ret["reason"] = "effect_id #$effect_id 不存在（pm_effect）";
-      exit(json_encode($json_ret, JSON_UNESCAPED_UNICODE));
-    }
-  }
 
   DB::query("INSERT INTO pm_skill (
     id, name, available_pokemons, description, level_required, max_uses, category, element, power, effect_id
@@ -281,6 +299,7 @@ function filter_skill_type($list)
                 );
 
                 $item["_TYPE"] = "skill_type";
+                $item["effect_id"] = isset($query['effect_id']) ? intval($query['effect_id']) : 0;
                 array_push($ret, $item);
               }
               return $ret;

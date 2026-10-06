@@ -13,6 +13,7 @@ $entity_map = [
     "user_info" => "user_data",
     "evolution_info" => "evolution_data",
     "skill_type" => "skill_type",
+    "effect_data" => "effect_data",
 ];
 
 function admin_dispatch($action, $params) {
