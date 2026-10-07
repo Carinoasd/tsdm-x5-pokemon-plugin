@@ -7,6 +7,7 @@ pub mod api_pokemon;
 pub mod api_shop;
 pub mod api_topics;
 pub mod api_user;
+pub mod effect_data;
 pub mod evolution_info;
 pub mod global_config;
 pub mod item_info;

@@ -3,8 +3,8 @@ use crate::dioxus::prelude::*;
 use crate::dioxus::{
     components::{layout::AdminLayout, toast::AdminToastProvider},
     pages::{
-        EvolutionDataPage, GlobalConfigPage, ItemDataPage, MapDataPage, PokemonDataPage,
-        SkillDataPage, UserDataPage,
+        EffectDataPage, EvolutionDataPage, GlobalConfigPage, ItemDataPage, MapDataPage,
+        PokemonDataPage, SkillDataPage, UserDataPage,
     },
     state::{AdminRoute, ADMIN_BUSY},
 };
@@ -35,6 +35,9 @@ pub fn App() -> Element {
         },
         AdminRoute::SkillType => rsx! {
             SkillDataPage {}
+        },
+        AdminRoute::EffectData => rsx! {
+            EffectDataPage {}
         },
     };
 

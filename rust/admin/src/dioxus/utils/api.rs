@@ -5,6 +5,7 @@ use std::collections::HashMap;
 use crate::dioxus::state::FilterPackage;
 use _utils::types::{
     api_map::WildPokemonInfo,
+    effect_data::EffectData,
     evolution_info::EvolutionInfo,
     global_config::GlobalConfigType,
     item_info::ItemInfo,
@@ -241,6 +242,7 @@ enum RetStruct {
     GetPokemonInfo(PokemonInfo),
     GetPokemonType(PokemonType),
     GetSkillType(SkillType),
+    GetEffectData(EffectData),
     GetItemInfo(ItemInfo),
     GetUserInfo(UserInfo),
     Count(CountResult),
@@ -360,6 +362,10 @@ impl<'de> Deserialize<'de> for RetStruct {
                             let item = SkillType::deserialize(data).map_err(A::Error::custom)?;
                             return Ok(RetStruct::GetSkillType(item));
                         }
+                        "effect_data" => {
+                            let item = EffectData::deserialize(data).map_err(A::Error::custom)?;
+                            return Ok(RetStruct::GetEffectData(item));
+                        }
                         "user_info" => {
                             let item = UserInfo::deserialize(data).map_err(A::Error::custom)?;
                             return Ok(RetStruct::GetUserInfo(item));
@@ -388,6 +394,9 @@ impl<'de> Deserialize<'de> for RetStruct {
                 }
                 if let Ok(item) = SkillType::deserialize(full_data.clone()) {
                     return Ok(RetStruct::GetSkillType(item));
+                }
+                if let Ok(item) = EffectData::deserialize(full_data.clone()) {
+                    return Ok(RetStruct::GetEffectData(item));
                 }
                 if let Ok(item) = ItemInfo::deserialize(full_data.clone()) {
                     return Ok(RetStruct::GetItemInfo(item));
@@ -1061,6 +1070,98 @@ pub async fn count_skill_type() -> Result<u64> {
         None => Err(anyhow!(data
             .reason
             .unwrap_or_else(|| "未知错误".to_string()))),
+    }
+}
+
+pub async fn list_effect_data(from: u64, count: u64) -> Result<Vec<EffectData>> {
+    let data = fetch(
+        "list::effect_data",
+        HashMap::from([
+            ("from".into(), from.to_string()),
+            ("count".into(), count.to_string()),
+        ]),
+    )
+    .await?;
+    if !data.success {
+        return Err(anyhow!(data
+            .reason
+            .unwrap_or_else(|| "加载效果失败".into())));
+    }
+    data.data
+        .ok_or_else(|| anyhow!("效果列表为空响应"))?
+        .into_iter()
+        .map(|item| match item {
+            RetStruct::GetEffectData(effect) => Ok(effect),
+            _ => Err(anyhow!("效果列表包含错误的数据类型")),
+        })
+        .collect()
+}
+
+pub async fn list_all_effect_data() -> Result<Vec<EffectData>> {
+    let mut effects = Vec::new();
+    loop {
+        let page = list_effect_data(effects.len() as u64, 100).await?;
+        let complete = page.len() < 100;
+        effects.extend(page);
+        if complete {
+            return Ok(effects);
+        }
+    }
+}
+
+fn effect_from_response(data: RetPackage) -> Result<EffectData> {
+    if !data.success {
+        return Err(anyhow!(data
+            .reason
+            .unwrap_or_else(|| "保存效果失败".into())));
+    }
+    match data.data.and_then(|items| items.into_iter().next()) {
+        Some(RetStruct::GetEffectData(effect)) => Ok(effect),
+        _ => Err(anyhow!("服务器没有返回效果数据")),
+    }
+}
+
+pub async fn get_effect_data(id: u64) -> Result<EffectData> {
+    effect_from_response(
+        fetch(
+            "get::effect_data",
+            HashMap::from([("id".into(), id.to_string())]),
+        )
+        .await?,
+    )
+}
+
+pub async fn save_effect_data(effect: EffectData) -> Result<EffectData> {
+    effect.validate().map_err(|error| anyhow!(error))?;
+    if let Some(error) = effect.editor_error() {
+        return Err(anyhow!(error));
+    }
+    let action = if effect.id == 0 {
+        "insert::effect_data"
+    } else {
+        "set::effect_data"
+    };
+    effect_from_response(
+        fetch(
+            action,
+            HashMap::from([("data".into(), serde_json::to_string(&effect)?)]),
+        )
+        .await?,
+    )
+}
+
+pub async fn delete_effect_data(id: u64) -> Result<()> {
+    let data = fetch(
+        "delete::effect_data",
+        HashMap::from([("id".into(), id.to_string())]),
+    )
+    .await?;
+    if data.success {
+        Ok(())
+    } else {
+        Err(anyhow!(data
+            .reason
+            .unwrap_or_else(|| "删除效果失败".into())))
     }
 }
 

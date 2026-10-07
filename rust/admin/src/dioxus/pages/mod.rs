@@ -1,3 +1,4 @@
+mod effect_data;
 mod evolution_data;
 mod global_config;
 mod item_data;
@@ -7,6 +8,7 @@ pub mod shared;
 mod skill_data;
 mod user_data;
 
+pub use effect_data::EffectDataPage;
 pub use evolution_data::EvolutionDataPage;
 pub use global_config::GlobalConfigPage;
 pub use item_data::ItemDataPage;
