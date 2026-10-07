@@ -423,6 +423,8 @@ def main():
     test_php_regression("Battle status and turn order regressions", "battle_core_regressions.php")
     test_php_regression("Admin input and public config regressions", "admin_input_regressions.php")
     test_php_regression("Battle turn endpoint regression", "battle_engine_turn.php")
+    test_php_regression("Battle action replay regression", "battle_actions.php")
+    test_php_regression("Inventory search regression", "inventory_search.php")
 
     print("\n" + "=" * 60)
     print(f"Results: {PASS} passed, {FAIL} failed, {WARN} warnings")

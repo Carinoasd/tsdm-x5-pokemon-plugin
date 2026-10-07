@@ -20,6 +20,7 @@ if (!defined('IN_DISCUZ')) {
  */
 function api_exception_handler($exception)
 {
+    if (function_exists('battle_action_rollback')) battle_action_rollback();
     // 记录详细错误到日志
     error_log(sprintf(
         "[API Exception] %s:%d - %s\nStack trace:\n%s",
@@ -65,6 +66,7 @@ function api_shutdown_handler()
 {
     $error = error_get_last();
     if ($error !== null && in_array($error['type'], [E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR])) {
+        if (function_exists('battle_action_rollback')) battle_action_rollback();
         error_log(sprintf(
             "[Fatal Error] %s:%d - %s",
             $error['file'],
@@ -96,16 +98,19 @@ header('Pragma: no-cache');
 // 统一响应格式
 function api_success($data = null)
 {
-    echo json_encode([
+    $response = [
         'success' => true,
         'data' => $data,
         'timestamp' => time()
-    ], JSON_UNESCAPED_UNICODE);
+    ];
+    if (function_exists('battle_action_finalize')) $response = battle_action_finalize($response);
+    echo json_encode($response, JSON_UNESCAPED_UNICODE);
     exit;
 }
 
 function api_error($message, $code = 400, $debug_info = null, $error_code = null)
 {
+    if (function_exists('battle_action_error')) battle_action_error($code);
     http_response_code($code);
     $response = [
         'success' => false,

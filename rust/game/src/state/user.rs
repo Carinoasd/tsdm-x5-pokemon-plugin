@@ -43,9 +43,14 @@ pub fn use_user_profile_state() {
                     let mut state = crate::state::USER_STATE.write();
                     state.profile = Some(data);
                     state.profile_loaded = true;
+                    drop(state);
 
-                    if npcid > 0 {
-                        drop(state);
+                    // 最后一击可能已结束战斗，但客户端尚未收到结果。
+                    // 按已加载的 uid 查待确认操作，先进入冒险页确认原请求。
+                    if crate::state::load_pending_battle().is_some() {
+                        *crate::components::layout::CURRENT_PAGE.write() =
+                            crate::components::layout::Page::Adventure;
+                    } else if npcid > 0 {
                         recover_battle();
                     }
                 }

@@ -15,8 +15,11 @@
 @use 'components/battle';
 @use 'components/modal';
 @use 'components/storage';
+@use 'components/inventory';
 @use 'components/popup';
 @use 'pages/welcome';
+@use 'components/mobile';
+@use 'components/battle-mobile';
 
 // =============================================================================
 // Scoped Reset & Global — 只影响 #main 内部

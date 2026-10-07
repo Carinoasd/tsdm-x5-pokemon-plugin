@@ -1,0 +1,95 @@
+// Keep all navigation and sidebar actions reachable inside the embedded game.
+// This module is standalone so it can also be compiled without styles-core.
+@media (max-width: 767px) {
+  #main {
+    .app-layout {
+      max-width: 100%;
+    }
+
+    .app-header {
+      flex-shrink: 0;
+
+      .header-inner {
+        height: auto;
+        flex-direction: column;
+        gap: 4px;
+        padding: 8px 8px 0;
+      }
+
+      .header-logo {
+        min-width: 0;
+
+        .logo-link {
+          gap: 8px;
+        }
+
+        .logo-mascot {
+          width: 32px;
+          height: 32px;
+        }
+
+        .logo-text {
+          font-size: 18px;
+          white-space: nowrap;
+        }
+      }
+
+      .header-nav {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 0;
+        width: 100%;
+
+        .nav-link {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          min-height: 44px;
+          padding: 8px 2px;
+          font-size: 14px;
+          white-space: nowrap;
+        }
+      }
+    }
+
+    .app-main {
+      flex-direction: column;
+      align-items: stretch;
+      gap: 16px;
+      margin-top: 12px;
+      padding: 0 12px 16px;
+      overflow-x: hidden;
+      overflow-y: auto;
+
+      > .app-content {
+        flex: 0 0 auto;
+        width: 100%;
+        min-height: 420px;
+        overflow: visible;
+      }
+
+      .page-container {
+        height: auto;
+        min-height: 420px;
+        overflow: visible;
+      }
+    }
+
+    .app-sidebar {
+      width: 100%;
+
+      .sidebar-card-header {
+        height: 44px;
+      }
+
+      .sidebar-arrow-btn {
+        width: 44px;
+        height: 44px;
+      }
+    }
+
+    .app-footer {
+      flex-shrink: 0;
+    }
+  }
+}

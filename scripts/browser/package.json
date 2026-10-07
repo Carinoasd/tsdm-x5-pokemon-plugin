@@ -1,0 +1,12 @@
+{
+  "name": "pokemon-admin-browser-tests",
+  "private": true,
+  "scripts": {
+    "test": "node battle-actions.cjs && node storage-inventory.cjs",
+    "test:battle": "node battle-actions.cjs",
+    "test:inventory": "node storage-inventory.cjs"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.62.1"
+  }
+}

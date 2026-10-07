@@ -1,7 +1,40 @@
 use crate::prelude::*;
 use web_sys::window;
 
-use _utils::types::api_battle::BattleScene;
+use _utils::types::api_battle::{BattleScene, PendingBattleAction};
+
+fn pending_storage_key() -> Option<String> {
+    let uid = crate::state::USER_STATE
+        .read()
+        .profile
+        .as_ref()
+        .map(|p| p.uid)
+        .unwrap_or(0);
+    (uid > 0).then(|| format!("pokemon_pending_battle_{uid}"))
+}
+
+pub fn save_pending_battle(action: Option<&PendingBattleAction>) {
+    let Some(key) = pending_storage_key() else {
+        return;
+    };
+    if let Some(window) = window() {
+        if let Ok(Some(storage)) = window.session_storage() {
+            if let Some(action) = action {
+                if let Ok(value) = serde_json::to_string(action) {
+                    let _ = storage.set_item(&key, &value);
+                }
+            } else {
+                let _ = storage.remove_item(&key);
+            }
+        }
+    }
+}
+
+pub fn load_pending_battle() -> Option<PendingBattleAction> {
+    let storage = window()?.session_storage().ok()??;
+    let value = storage.get_item(&pending_storage_key()?).ok()??;
+    serde_json::from_str(&value).ok()
+}
 
 #[derive(Clone, PartialEq, Default)]
 pub struct BattleState {

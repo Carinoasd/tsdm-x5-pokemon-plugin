@@ -14,6 +14,7 @@ set_error_handler(function ($severity, $message, $file, $line) {
 });
 
 define('IN_DISCUZ', 1);
+require __DIR__ . '/../../plugin/api/battle_actions.php';
 require __DIR__ . '/../../plugin/api/battle_core.php';
 // pre-load the real helper so capture's runtime require_once (with eval-context __DIR__) no-ops
 require __DIR__ . '/../../plugin/api/pokemon_utils.php';
@@ -445,6 +446,7 @@ class DB
     {
         self::$logs[] = $sql;
         $sql = trim($sql);
+        if (strpos($sql, 'SHOW COLUMNS') === 0) return ['Field' => 'revision'];
         if (preg_match('/^SELECT uid FROM pm_usersdata WHERE uid = \d+ FOR UPDATE$/', $sql)) {
             if (self::$on_user_lock !== null && strpos($sql, 'FROM pm_usersdata') !== false) {
                 $callback = self::$on_user_lock;
@@ -1259,6 +1261,10 @@ try {
 check('battle log responds', isset($log) && $log !== null && $log['battle_id'] === $battle_id);
 check('log carries the event stream', is_array($log['events']) && count($log['events']) >= 3);
 check('log renders legacy-style lines', is_array($log['lines']) && count($log['lines']) >= 1);
+check('log groups translated messages by turn', count($log['turns']) > 0 && is_int($log['turns'][0]['turn']) && is_array($log['turns'][0]['lines']));
+$grouped_lines = [];
+foreach ($log['turns'] as $group) $grouped_lines = array_merge($grouped_lines, $group['lines']);
+check('grouped log preserves all rendered lines', $grouped_lines === $log['lines']);
 check('log exposes shareable bbcode', strpos($log['bbcode'], '[quote]') === 0 && strpos($log['bbcode'], '[/quote]') !== false);
 check('log reports the rules version', $log['rules_version'] === 2);
 // ownership: someone else's battle id must 404

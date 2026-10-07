@@ -39,6 +39,13 @@ function turn_events($result, $type, $side = null)
     }));
 }
 $max_rng = function ($min, $max) { return $max; };
+$untyped = turn_state();
+$untyped['sides']['ally'][0]['types'] = [];
+$untyped['sides']['enemy'][0]['types'] = [];
+check_turn(battle_core_resolve_move($untyped, ['type' => 'struggle'])['type'] === '普通', 'Missing species types use normal basic attack');
+check_turn(battle_core_resolve_move_for_side($untyped, 'enemy', ['power' => 40])['type'] === '普通', 'Missing species types use normal enemy skill fallback');
+$untyped_result = battle_core_apply_action($untyped, ['type' => 'struggle', 'enemy_move' => ['power' => 40]], $max_rng);
+check_turn($untyped_result['state']['sides']['ally'][0]['hp'] < 500 && $untyped_result['state']['sides']['enemy'][0]['hp'] < 500, 'Untyped species complete both actions without warnings');
 $boost = ['code' => 'stages_boost', 'kind' => 'move', 'hooks' => ['on_after_move'], 'params' => ['stat' => 'atk', 'stages' => 1], 'version' => 1];
 $passive = ['code' => 'stages_boost', 'kind' => 'ability', 'hooks' => ['on_switch_in'], 'params' => ['stat' => 'def', 'stages' => 1], 'version' => 1];
 

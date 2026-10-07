@@ -57,6 +57,10 @@ require_once __DIR__ . '/battle_core.php';
 // 加载 Boss 系统 API 函数
 require_once __DIR__ . '/boss.php';
 
+require_once __DIR__ . '/battle_actions.php';
+$stored_response = battle_action_begin($action);
+if ($stored_response !== null) api_json($stored_response);
+
 // recover 接口用于恢复战斗状态（需要依赖文件）
 if ($action === 'recover') {
     api_recover_battle();
@@ -146,6 +150,7 @@ function battle_ensure_tables()
         `kind` varchar(10) NOT NULL DEFAULT 'wild',
         `map_id` int(10) unsigned NOT NULL DEFAULT 0,
         `turn` int(10) unsigned NOT NULL DEFAULT 0,
+        `revision` int(10) unsigned NOT NULL DEFAULT 0,
         `phase` varchar(20) NOT NULL DEFAULT 'active',
         `result` varchar(10) NOT NULL DEFAULT '',
         `rng_seed` bigint(20) NOT NULL DEFAULT 0,
@@ -159,6 +164,25 @@ function battle_ensure_tables()
         PRIMARY KEY (`id`),
         KEY `idx_uid` (`uid`),
         KEY `idx_uid_phase` (`uid`, `phase`)
+    ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci");
+    // Old installations need the same revision column before any transaction.
+    $revision_column = DB::fetch_first("SHOW COLUMNS FROM " . pm_table('pm_battle') . " LIKE 'revision'");
+    if (!$revision_column) {
+        DB::query("ALTER TABLE " . pm_table('pm_battle') . " ADD COLUMN revision int(10) unsigned NOT NULL DEFAULT 0", 'SILENT');
+        if (!DB::fetch_first("SHOW COLUMNS FROM " . pm_table('pm_battle') . " LIKE 'revision'")) {
+            throw new RuntimeException('Battle revision migration failed');
+        }
+    }
+    DB::query("CREATE TABLE IF NOT EXISTS " . pm_table('pm_battle_action') . " (
+        `uid` mediumint(8) unsigned NOT NULL,
+        `request_id` varchar(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+        `action` varchar(24) NOT NULL,
+        `payload_hash` char(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+        `battle_id` bigint(20) unsigned NOT NULL DEFAULT 0,
+        `response_json` mediumtext DEFAULT NULL,
+        `created_at` int(10) unsigned NOT NULL DEFAULT 0,
+        PRIMARY KEY (`uid`, `request_id`),
+        KEY `idx_uid_created` (`uid`, `created_at`)
     ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci");
     DB::query("CREATE TABLE IF NOT EXISTS " . pm_table('pm_battle_unit') . " (
         `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
@@ -766,6 +790,12 @@ function battle_api_get_battle_log()
         }
     }
     $lines = battle_core_render_messages($events, $names, battle_lang());
+    $turn_events = [];
+    foreach ($events as $event) $turn_events[$event['turn']][] = $event;
+    $turns = [];
+    foreach ($turn_events as $turn => $group) {
+        $turns[] = ['turn' => intval($turn), 'lines' => battle_core_render_messages($group, $names, battle_lang())];
+    }
 
     // BBCode：可直接分享到帖子
     $bbcode = "[quote]" . ($battle['kind'] === 'boss' ? '[BOSS战]' : '[野外战斗]') . " 回合数 {$battle['turn']}
@@ -788,6 +818,7 @@ function battle_api_get_battle_log()
         'schema_version' => BATTLE_EVENT_SCHEMA_VERSION,
         'names' => $names,
         'lines' => $lines,
+        'turns' => $turns,
         'events' => $events,
         'bbcode' => $bbcode,
     ]);
@@ -1099,7 +1130,7 @@ function api_use_skill()
     // ===== 一回合一个事务 =====
     // 以 pm_usersdata 战斗状态行的排他锁串行化同账号并发回合（#69-71 同款锁点）。
     // api_error() 走 exit 语义，事务内的错误出口统一走 pm_abort_battle_transaction()。
-    DB::query("START TRANSACTION");
+    battle_action_transaction_begin();
     try {
         DB::fetch_first(pm_sql(
             "SELECT uid FROM " . pm_table('pm_usersdata') . " WHERE uid = %d FOR UPDATE",
@@ -1256,9 +1287,9 @@ function api_use_skill()
             $state = battle_persist_state($state, $turn_events);
         }
 
-        DB::query("COMMIT");
+        battle_action_transaction_commit();
     } catch (Throwable $txn_error) {
-        DB::query("ROLLBACK");
+        battle_action_transaction_rollback();
         throw $txn_error;
     }
 
@@ -1342,7 +1373,7 @@ function api_flee()
 
     battle_ensure_tables();
 
-    DB::query("START TRANSACTION");
+    battle_action_transaction_begin();
     try {
         DB::fetch_first(pm_sql(
             "SELECT uid FROM " . pm_table('pm_usersdata') . " WHERE uid = %d FOR UPDATE",
@@ -1426,9 +1457,9 @@ function api_flee()
             }
         }
 
-        DB::query("COMMIT");
+        battle_action_transaction_commit();
     } catch (Throwable $txn_error) {
-        DB::query("ROLLBACK");
+        battle_action_transaction_rollback();
         throw $txn_error;
     }
 
@@ -2345,7 +2376,7 @@ function api_capture_pokemon()
 
     // ===== 捕捉一个事务：扣球 / 插入宠物 / 战斗收尾原子化（#69-71 锁策略）=====
     try {
-        DB::query("START TRANSACTION");
+        battle_action_transaction_begin();
         DB::fetch_first(pm_sql(
             "SELECT uid FROM " . pm_table('pm_usersdata') . " WHERE uid = %d FOR UPDATE",
             $_G['uid']
@@ -2496,9 +2527,9 @@ function api_capture_pokemon()
             'hpg' => (int)$enemy['stats']['max_hp'],
         );
 
-        DB::query("COMMIT");
+        battle_action_transaction_commit();
     } catch (Throwable $txn_error) {
-        DB::query("ROLLBACK");
+        battle_action_transaction_rollback();
         throw $txn_error;
     }
 
@@ -2618,7 +2649,7 @@ function api_use_item_in_battle()
 
     // ===== 使用与反击一个事务（#69-71 锁策略）=====
     try {
-        DB::query("START TRANSACTION");
+        battle_action_transaction_begin();
         DB::fetch_first(pm_sql(
             "SELECT uid FROM " . pm_table('pm_usersdata') . " WHERE uid = %d FOR UPDATE",
             $_G['uid']
@@ -2698,9 +2729,9 @@ function api_use_item_in_battle()
         $battle['events'][] = array('turn' => $e['turn'], 'seq' => $e['seq'], 'type' => $e['type'], 'payload' => $e['payload']);
     }
 
-    DB::query("COMMIT");
+    battle_action_transaction_commit();
     } catch (Throwable $txn_error) {
-        DB::query("ROLLBACK");
+        battle_action_transaction_rollback();
         throw $txn_error;
     }
 
@@ -2771,7 +2802,7 @@ function api_use_item_on_skill_in_battle()
 
     // ===== 恢复与反击一个事务（#69-71 锁策略）=====
     try {
-        DB::query("START TRANSACTION");
+        battle_action_transaction_begin();
         DB::fetch_first(pm_sql(
             "SELECT uid FROM " . pm_table('pm_usersdata') . " WHERE uid = %d FOR UPDATE",
             $_G['uid']
@@ -2842,9 +2873,9 @@ function api_use_item_on_skill_in_battle()
             $battle['events'][] = array('turn' => $e['turn'], 'seq' => $e['seq'], 'type' => $e['type'], 'payload' => $e['payload']);
         }
 
-        DB::query("COMMIT");
+        battle_action_transaction_commit();
     } catch (Throwable $txn_error) {
-        DB::query("ROLLBACK");
+        battle_action_transaction_rollback();
         throw $txn_error;
     }
 
@@ -2858,13 +2889,12 @@ function api_get_battle_items()
     global $_G;
     $uid = validate_uid($_G['uid']);
 
-    // 旧库可能缺 module 列，先自愈；SELECT 亦不引用该列，api_get_item_module
-    // 会从行数据的 sitemname/tpname 回退解析模块名
+    // 旧库可能缺 module 列，先自愈，再同时支持新 module 与旧列回退。
     api_ensure_itemdata_module_column();
 
     // 获取用户的物品
     $my_items = DB::fetch_all(pm_sql(
-        "SELECT mi.*, i.type, i.sitemname, i.effects, i.name, i.tpname
+        "SELECT mi.*, i.type, i.module, i.sitemname, i.effects, i.name, i.tpname
          FROM " . pm_table('pm_myitem') . " mi
          INNER JOIN " . pm_table('pm_itemdata') . " i ON mi.itemid = i.id
          WHERE mi.uid = %d AND mi.nums > 0
@@ -2935,7 +2965,7 @@ function api_switch_pokemon()
     // 同账号的换宠与战斗结算，两笔 site 写入与野怪反击在同一个事务里生效，
     // 观察者不会看到「换了一半」或反击打到已经下场的宠物。
     battle_ensure_tables(); // 事务前建表：CREATE TABLE 在事务内会触发隐式提交（clear_battle_state 的联动更新需要 pm_battle）
-    DB::query("START TRANSACTION");
+    battle_action_transaction_begin();
     // 事务体内的任何异常（含数据库错误）都要显式回滚：常驻 worker 的连接
     // 不随请求关闭，未提交事务和行锁泄漏会阻塞该用户后续的所有战斗操作。
     // api_error() 走 exit 语义，其回滚由 pm_abort_battle_transaction() 负责。
@@ -3096,9 +3126,9 @@ SET site = 1 WHERE id = %d AND uid = %d AND site < 3 AND hp > 0 AND state != 0",
             $battle['can_continue_switch'] = false;
         }
 
-        DB::query("COMMIT");
+        battle_action_transaction_commit();
     } catch (Throwable $txn_error) {
-        DB::query("ROLLBACK");
+        battle_action_transaction_rollback();
         throw $txn_error;
     }
 
@@ -3129,7 +3159,7 @@ function api_replace_pokemon()
     // 已被换成健康的新宠物而走「尚未倒下」拒绝；野怪的战斗结算（如
     // clear_battle_state）也要先写这一行，同样被此锁挡在事务之外。
     battle_ensure_tables(); // 事务前建表：CREATE TABLE 在事务内会触发隐式提交（clear_battle_state 的联动更新需要 pm_battle）
-    DB::query("START TRANSACTION");
+    battle_action_transaction_begin();
     // 事务体内的任何异常（含数据库错误）都要显式回滚：常驻 worker 的连接
     // 不随请求关闭，未提交事务和行锁泄漏会阻塞该用户后续的所有战斗操作。
     // api_error() 走 exit 语义，其回滚由 pm_abort_battle_transaction() 负责。
@@ -3237,9 +3267,9 @@ SET site = 1 WHERE id = %d AND uid = %d AND site < 3 AND hp > 0 AND state != 0",
             }
         }
 
-        DB::query("COMMIT");
+        battle_action_transaction_commit();
     } catch (Throwable $txn_error) {
-        DB::query("ROLLBACK");
+        battle_action_transaction_rollback();
         throw $txn_error;
     }
 

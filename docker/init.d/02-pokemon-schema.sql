@@ -242,6 +242,7 @@ CREATE TABLE IF NOT EXISTS `pm_battle` (
     `kind` varchar(10) NOT NULL DEFAULT 'wild',
     `map_id` int(10) unsigned NOT NULL DEFAULT 0,
     `turn` int(10) unsigned NOT NULL DEFAULT 0,
+    `revision` int(10) unsigned NOT NULL DEFAULT 0,
     `phase` varchar(20) NOT NULL DEFAULT 'active',
     `result` varchar(10) NOT NULL DEFAULT '',
     `rng_seed` bigint(20) NOT NULL DEFAULT 0,
@@ -258,6 +259,18 @@ CREATE TABLE IF NOT EXISTS `pm_battle` (
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci;
 
 -- Battle engine 2.0: participating units (stats snapshot, stages, status, volatile, buffs)
+CREATE TABLE IF NOT EXISTS `pm_battle_action` (
+    `uid` mediumint(8) unsigned NOT NULL,
+    `request_id` varchar(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    `action` varchar(24) NOT NULL,
+    `payload_hash` char(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    `battle_id` bigint(20) unsigned NOT NULL DEFAULT 0,
+    `response_json` mediumtext DEFAULT NULL,
+    `created_at` int(10) unsigned NOT NULL DEFAULT 0,
+    PRIMARY KEY (`uid`, `request_id`),
+    KEY `idx_uid_created` (`uid`, `created_at`)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci;
+-- 战斗引擎 2.0 参战单位表 (X5 新增)
 CREATE TABLE IF NOT EXISTS `pm_battle_unit` (
     `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
     `battle_id` bigint(20) unsigned NOT NULL,

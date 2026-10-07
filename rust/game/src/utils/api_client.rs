@@ -10,13 +10,14 @@
 
 use anyhow::{anyhow, Result};
 use serde::{de::DeserializeOwned, Serialize};
+use std::{future::Future, task::Poll};
 
 use gloo_net::http::{Request, Response};
 
 // 导入API类型
 use _utils::types::api_battle::{
-    BattleItemsResponse, BattleScene, FleeRequest, StartBattleRequest, UseItemOnSkillRequest,
-    UseSkillRequest,
+    BattleItemsResponse, BattleLogResponse, BattleMutationResponse, BattleScene, FleeRequest,
+    PendingBattleAction, StartBattleRequest, UseItemOnSkillRequest, UseSkillRequest,
 };
 use _utils::types::api_config::{GlobalConfigData, GlobalConfigResponse};
 use _utils::types::api_evolution::{
@@ -43,6 +44,29 @@ use _utils::types::api_user::{
 #[derive(Clone, Copy)]
 pub struct NewApiClient {
     base_url: &'static str,
+}
+
+#[derive(Debug)]
+pub struct BattleActionError {
+    pub message: String,
+    /// 网络断线或响应不完整时，服务端可能已执行，必须保留原 request_id。
+    pub uncertain: bool,
+}
+
+pub(crate) async fn battle_timeout<T>(future: impl Future<Output = T>) -> Result<T> {
+    let mut operation = Box::pin(future);
+    let mut timeout = Box::pin(gloo_timers::future::TimeoutFuture::new(15_000));
+    std::future::poll_fn(move |context| {
+        if let Poll::Ready(value) = operation.as_mut().poll(context) {
+            return Poll::Ready(Ok(value));
+        }
+        if timeout.as_mut().poll(context).is_ready() {
+            Poll::Ready(Err(anyhow!("连接超时，请重试确认结果")))
+        } else {
+            Poll::Pending
+        }
+    })
+    .await
 }
 
 impl NewApiClient {
@@ -212,7 +236,7 @@ impl NewApiClient {
 
     /// 获取宠物列表
     pub async fn get_pokemon_list(&self) -> Result<PokemonListResponse> {
-        self.get("pokemon", "list", "").await
+        battle_timeout(self.get("pokemon", "list", "")).await?
     }
 
     /// 获取宠物详情
@@ -512,17 +536,84 @@ impl NewApiClient {
         if let Some(max) = max_level {
             params.push_str(&format!("&max_level={}", max));
         }
-        self.get("battle", "maps", &params).await
+        battle_timeout(self.get("battle", "maps", &params)).await?
     }
 
     /// 恢复战斗状态
     pub async fn recover_battle(&self) -> Result<BattleScene> {
-        self.get("battle", "recover", "").await
+        battle_timeout(self.get("battle", "recover", "")).await?
+    }
+
+    pub async fn recover_current_battle(&self) -> Result<Option<BattleScene>> {
+        battle_timeout(async {
+            let response = Request::get(&self.url("battle", "recover", ""))
+                .send()
+                .await
+                .map_err(|_| anyhow!("无法连接服务器"))?;
+            if response.status() == 404 {
+                return Ok(None);
+            }
+            let response = self.send_ok(async { Ok(response) }).await?;
+            self.parse_envelope(response).await.map(Some)
+        })
+        .await?
+    }
+
+    pub async fn get_battle_log(&self, battle_id: u64) -> Result<BattleLogResponse> {
+        battle_timeout(self.get("battle", "battle_log", &format!("&battle_id={battle_id}"))).await?
+    }
+
+    pub async fn perform_battle_action(
+        &self,
+        pending: &PendingBattleAction,
+    ) -> std::result::Result<BattleMutationResponse, BattleActionError> {
+        let uncertain = |message: String| BattleActionError {
+            message,
+            uncertain: true,
+        };
+        let request = Request::post(&self.url("battle", &pending.action, ""))
+            .json(&pending.request)
+            .map_err(|error| BattleActionError {
+                message: format!("无法建立请求：{error}"),
+                uncertain: false,
+            })?;
+        let (status, text) = battle_timeout(async {
+            let response = request.send().await?;
+            let status = response.status();
+            response.text().await.map(|text| (status, text))
+        })
+        .await
+        .map_err(|error| uncertain(error.to_string()))?
+        .map_err(|_| uncertain("连接中断，操作结果尚未确认。".into()))?;
+        if status == 401 || status == 403 {
+            return Err(uncertain(
+                "登录或验证已过期，请重新登录并刷新页面，再重试确认原操作结果。".into(),
+            ));
+        }
+        let envelope: PokemonApiResponse<serde_json::Value> = serde_json::from_str(&text)
+            .map_err(|_| uncertain("服务器响应不完整，操作结果尚未确认。".into()))?;
+        if status >= 500 {
+            return Err(uncertain("服务器暂时无法回应，操作结果尚未确认。".into()));
+        }
+        if !envelope.success || status >= 400 {
+            return Err(BattleActionError {
+                message: envelope
+                    .error
+                    .unwrap_or_else(|| "战斗状态已改变，请重新同步。".into()),
+                uncertain: false,
+            });
+        }
+        serde_json::from_value(envelope.data.unwrap_or(serde_json::Value::Null))
+            .map_err(|_| uncertain("服务器返回的战斗资料不完整。".into()))
     }
 
     /// 获取可以在战斗中使用的物品（只包含HP恢复和PP恢复道具）
     pub async fn get_battle_items(&self) -> Result<BattleItemsResponse> {
-        self.get("battle", "get_battle_items", "").await
+        battle_timeout(self.get("battle", "get_battle_items", "")).await?
+    }
+
+    pub async fn get_battle_balls(&self) -> Result<InventoryResponse> {
+        battle_timeout(self.get_user_inventory(Some(2), 1)).await?
     }
 
     // ============== Shop API ==============
@@ -607,6 +698,33 @@ impl NewApiClient {
             "user",
             "inventory",
             &format!("&page={}{}", page, type_param),
+        )
+        .await
+    }
+
+    pub async fn get_user_inventory_search(
+        &self,
+        item_type: Option<u32>,
+        page: u32,
+        search: &str,
+    ) -> Result<InventoryResponse> {
+        let encoded: String = search
+            .bytes()
+            .map(|byte| {
+                if byte.is_ascii_alphanumeric() || b"-._~".contains(&byte) {
+                    (byte as char).to_string()
+                } else {
+                    format!("%{byte:02X}")
+                }
+            })
+            .collect();
+        let category = item_type
+            .map(|value| format!("&type={value}"))
+            .unwrap_or_default();
+        self.get(
+            "user",
+            "inventory",
+            &format!("&page={page}{category}&search={encoded}"),
         )
         .await
     }

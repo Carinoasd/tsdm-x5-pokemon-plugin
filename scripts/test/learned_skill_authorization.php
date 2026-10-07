@@ -11,6 +11,7 @@ set_error_handler(function ($severity, $message, $file, $line) {
 
 // Load the pure battle-core (real engine math) before extracting endpoint fns.
 define('IN_DISCUZ', 1);
+require __DIR__ . '/../../plugin/api/battle_actions.php';
 require __DIR__ . '/../../plugin/api/battle_core.php';
 
 // Load actual endpoint functions without running the Discuz dispatcher.

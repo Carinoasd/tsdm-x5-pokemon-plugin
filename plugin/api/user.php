@@ -186,8 +186,13 @@ function api_get_inventory()
     global $_G;
     $uid = validate_uid($_G['uid']);
 
-    $page = (int) get_param('page', 1);
+    $page = max(1, (int) get_param('page', 1));
     $per_page = USER_ITEMS_PER_PAGE;
+    $search = get_param('search', '');
+    if (!is_scalar($search)) {
+        api_error('搜索名称格式错误', 400);
+    }
+    $search = trim((string)$search);
 
     // type=0 或未传参 表示查看全部，不限制类型
     // 使用 isset 来检测参数是否传递
@@ -204,6 +209,13 @@ function api_get_inventory()
     if ($has_type_param && $item_type > 0) {
         $where_params[] = "i.type = %d";
         $where_values[] = $item_type;
+    }
+
+    if ($search !== '') {
+        // Literal substring search before pagination; % and _ remain ordinary
+        // name characters, and FOUND_ROWS reports only matching usable stacks.
+        $where_params[] = "LOCATE(%s, i.name) > 0";
+        $where_values[] = $search;
     }
 
     $where_sql = "WHERE " . implode(' AND ', $where_params);

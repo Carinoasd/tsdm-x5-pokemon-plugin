@@ -831,7 +831,7 @@ function battle_core_counter_attack(&$state, &$events, $rng = null)
 function battle_core_resolve_move($state, $action)
 {
     $ally = battle_core_active_unit($state, 'ally');
-    $fallback_type = isset($action['fallback_type']) && $action['fallback_type'] !== '' ? $action['fallback_type'] : ($ally ? $ally['types'][0] : '普通');
+    $fallback_type = isset($action['fallback_type']) && $action['fallback_type'] !== '' ? $action['fallback_type'] : (!empty($ally['types'][0]) ? $ally['types'][0] : '普通');
     if (!isset($action['type']) || $action['type'] !== 'move' || empty($action['skill'])) {
         return [
             'id' => 0,
@@ -1012,7 +1012,7 @@ function battle_core_finish_turn(&$state, &$events, $ally_slot, $mounted, $rng =
 function battle_core_resolve_move_for_side($state, $side, $raw)
 {
     $unit = battle_core_active_unit($state, $side);
-    $fallback_type = $unit ? $unit['types'][0] : '普通';
+    $fallback_type = !empty($unit['types'][0]) ? $unit['types'][0] : '普通';
     return [
         'id' => isset($raw['id']) ? intval($raw['id']) : 0,
         'name' => isset($raw['name']) ? strval($raw['name']) : '',

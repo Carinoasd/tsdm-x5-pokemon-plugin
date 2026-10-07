@@ -7,6 +7,10 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct BattleScene {
     pub battle_id: String,
+    pub engine_battle_id: u64,
+    pub revision: u64,
+    pub phase: String,
+    pub events: Vec<BattleLogEvent>,
     pub map_id: u64,
     pub map_name: String,
     pub turn: u64,
@@ -55,6 +59,10 @@ impl<'de> Deserialize<'de> for BattleScene {
                 A: MapAccess<'de>,
             {
                 let mut battle_id: Option<String> = None;
+                let mut engine_battle_id = 0;
+                let mut revision = 0;
+                let mut phase = String::new();
+                let mut events = Vec::new();
                 let mut map_id: Option<u64> = None;
                 let mut map_name: Option<String> = None;
                 let mut turn: Option<u64> = None;
@@ -69,6 +77,10 @@ impl<'de> Deserialize<'de> for BattleScene {
 
                 while let Some(key) = map.next_key::<String>()? {
                     match key.as_str() {
+                        "engine_battle_id" => engine_battle_id = map.next_value()?,
+                        "revision" => revision = map.next_value()?,
+                        "phase" => phase = map.next_value()?,
+                        "events" => events = map.next_value()?,
                         "battle_id" => {
                             battle_id = Some(map.next_value()?);
                         }
@@ -100,10 +112,10 @@ impl<'de> Deserialize<'de> for BattleScene {
                             can_continue_switch = Some(map.next_value()?);
                         }
                         "rewards" => {
-                            rewards = Some(map.next_value()?);
+                            rewards = map.next_value()?;
                         }
                         "level_up" => {
-                            level_up = Some(map.next_value()?);
+                            level_up = map.next_value()?;
                         }
                         _ => {
                             map.next_value::<serde::de::IgnoredAny>()?;
@@ -131,6 +143,10 @@ impl<'de> Deserialize<'de> for BattleScene {
 
                 Ok(BattleScene {
                     battle_id,
+                    engine_battle_id,
+                    revision,
+                    phase,
+                    events,
                     map_id,
                     map_name,
                     turn,
@@ -351,6 +367,10 @@ pub struct SkillSelectionResponse {
     pub item_name: String,
     pub available_skills: Vec<PpRestoreSkill>,
     pub message: String,
+    #[serde(default)]
+    pub engine_battle_id: u64,
+    #[serde(default)]
+    pub revision: u64,
 }
 
 /// PP 恢复选择的是已学技能记录，不是技能种类。
@@ -374,6 +394,70 @@ pub struct UseItemOnSkillRequest {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct BattleItemsResponse {
     pub items: Vec<BattleItem>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct BattleLogEvent {
+    pub turn: u64,
+    pub seq: u64,
+    #[serde(rename = "type")]
+    pub event_type: String,
+    pub payload: serde_json::Value,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct BattleLogTurn {
+    pub turn: u64,
+    pub lines: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct BattleLogResponse {
+    pub battle_id: u64,
+    pub turn: u64,
+    pub phase: String,
+    pub result: String,
+    pub lines: Vec<String>,
+    #[serde(default)]
+    pub turns: Vec<BattleLogTurn>,
+    pub events: Vec<BattleLogEvent>,
+    pub bbcode: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct BattleMutationRequest {
+    pub request_id: String,
+    pub engine_battle_id: u64,
+    pub expected_revision: u64,
+    #[serde(flatten)]
+    pub fields: serde_json::Value,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PendingBattleAction {
+    pub action: String,
+    pub request: BattleMutationRequest,
+}
+
+impl PendingBattleAction {
+    pub fn new(action: &str, scene: Option<&BattleScene>, fields: serde_json::Value) -> Self {
+        Self {
+            action: action.to_string(),
+            request: BattleMutationRequest {
+                request_id: uuid::Uuid::new_v4().to_string(),
+                engine_battle_id: scene.map(|scene| scene.engine_battle_id).unwrap_or(0),
+                expected_revision: scene.map(|scene| scene.revision).unwrap_or(0),
+                fields,
+            },
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(untagged)]
+pub enum BattleMutationResponse {
+    Scene(Box<BattleScene>),
+    SkillSelection(SkillSelectionResponse),
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

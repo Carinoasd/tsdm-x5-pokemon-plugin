@@ -13,6 +13,7 @@ set_error_handler(function ($severity, $message, $file, $line) {
 // __DIR__ so the endpoint still loads its real pokemon_utils.php dependency.
 $source = __DIR__ . '/../../plugin/api/battle.php';
 define('IN_DISCUZ', 1);
+require __DIR__ . '/../../plugin/api/battle_actions.php';
 require __DIR__ . '/../../plugin/api/battle_core.php';
 require __DIR__ . '/../../plugin/api/pokemon_utils.php';
 

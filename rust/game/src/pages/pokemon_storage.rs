@@ -12,6 +12,10 @@ use crate::{
     utils::{
         api_client::NewApiClient,
         pokemon::{hp_class_storage, hp_health_status, hp_percent, is_weak_state},
+        storage_filters::{
+            matching_storage_ids, parse_level_range, selected_matching_ids, StorageEntry,
+            StorageFilters, StorageSort,
+        },
     },
 };
 use _utils::types::api_pokemon::PokemonBasic;
@@ -25,6 +29,11 @@ pub fn PokemonStorage() -> Element {
     let mut select_mode = use_signal::<bool>(|| false);
     let mut selected_ids = use_signal::<Vec<u64>>(Vec::new);
     let mut search_text = use_signal(String::new);
+    let mut type_filter = use_signal(String::new);
+    let mut min_level = use_signal(String::new);
+    let mut max_level = use_signal(String::new);
+    let mut shiny_filter = use_signal(String::new);
+    let mut sort_order = use_signal(StorageSort::default);
     // 仓库可能有多箱数百只宠物（旧数据 site 3..N），默认只渲染一部分
     const STORAGE_PAGE_SIZE: usize = 60;
     let mut visible_count = use_signal(|| STORAGE_PAGE_SIZE);
@@ -47,18 +56,43 @@ pub fn PokemonStorage() -> Element {
     };
 
     let keyword = search_text.read().trim().to_lowercase();
-    let filtered_storage: Vec<PokemonBasic> = storage_pokemons
+    let level_range = parse_level_range(&min_level.read(), &max_level.read());
+    let type_value = type_filter.read().clone();
+    let (min, max) = level_range.unwrap_or_default();
+    let filters = StorageFilters {
+        name: &keyword,
+        pokemon_type: &type_value,
+        min_level: min,
+        max_level: max,
+        shiny: match shiny_filter.read().as_str() {
+            "shiny" => Some(true),
+            "normal" => Some(false),
+            _ => None,
+        },
+        sort: *sort_order.read(),
+    };
+    let entries: Vec<_> = storage_pokemons
         .iter()
-        .filter(|p| {
-            if keyword.is_empty() {
-                true
-            } else {
-                let name = p.name.to_lowercase();
-                let nickname = p.nickname.as_deref().unwrap_or("").to_lowercase();
-                name.contains(&keyword) || nickname.contains(&keyword)
-            }
+        .map(|p| StorageEntry {
+            id: p.id,
+            name: &p.name,
+            nickname: p.nickname.as_deref(),
+            type_1: &p.base_info.type_1,
+            type_2: p.base_info.type_2.as_deref(),
+            level: p.level,
+            shiny: p.is_shiny,
         })
-        .cloned()
+        .collect();
+    let storage_pokemon_ids = if level_range.is_ok() {
+        matching_storage_ids(&entries, &filters)
+    } else {
+        Vec::new()
+    };
+    let by_id: std::collections::HashMap<_, _> =
+        storage_pokemons.iter().map(|p| (p.id, p)).collect();
+    let filtered_storage: Vec<PokemonBasic> = storage_pokemon_ids
+        .iter()
+        .filter_map(|id| by_id.get(id).map(|pokemon| (**pokemon).clone()))
         .collect();
     let shown_storage: Vec<PokemonBasic> = filtered_storage
         .iter()
@@ -67,7 +101,11 @@ pub fn PokemonStorage() -> Element {
         .collect();
 
     let storage_count = filtered_storage.len();
-    let storage_pokemon_ids: Vec<u64> = filtered_storage.iter().map(|p| p.id).collect();
+    let selected_count = selected_matching_ids(&selected_ids.read(), &storage_pokemon_ids).len();
+    let pokemon_types = [
+        "普通", "火", "水", "草", "电", "冰", "格斗", "毒", "地面", "飞行", "超能", "虫", "岩石",
+        "幽灵", "龙", "恶", "钢", "妖精",
+    ];
 
     let mut toggle_select = {
         let mut selected_ids = selected_ids;
@@ -82,8 +120,9 @@ pub fn PokemonStorage() -> Element {
         }
     };
 
-    let mut select_all = move || {
-        selected_ids.set(storage_pokemon_ids.clone());
+    let mut select_all = {
+        let matching_ids = storage_pokemon_ids.clone();
+        move || selected_ids.set(matching_ids.clone())
     };
 
     let mut exit_select_mode = {
@@ -99,7 +138,7 @@ pub fn PokemonStorage() -> Element {
         let mut select_mode = select_mode;
         let mut selected_ids = selected_ids;
         move || {
-            let ids = selected_ids.read().clone();
+            let ids = selected_matching_ids(&selected_ids.read(), &storage_pokemon_ids);
             if ids.is_empty() {
                 return;
             }
@@ -185,7 +224,7 @@ pub fn PokemonStorage() -> Element {
                         div { class: "panel-header",
                             div { class: "panel-header-left",
                                 span { class: "panel-title", "仓库宠物" }
-                                span { class: "panel-count", "{storage_count} 只" }
+                                span { class: "panel-count", id: "storage-result-count", "{storage_count} / {storage_pokemons.len()} 只" }
                             }
                             if *select_mode.read() {
                                 button {
@@ -203,28 +242,120 @@ pub fn PokemonStorage() -> Element {
                         }
                         div { class: "storage-search-bar",
                             input {
+                                id: "storage-search",
                                 class: "storage-search-input",
                                 r#type: "text",
                                 placeholder: "搜索名字 / 昵称",
                                 value: "{search_text.read()}",
                                 oninput: move |evt| {
                                     search_text.set(evt.value());
+                                    selected_ids.set(Vec::new());
                                     visible_count.set(STORAGE_PAGE_SIZE);
                                 }
+                            }
+                            div { class: "storage-filter-fields",
+                                label {
+                                    "属性"
+                                    select {
+                                        id: "storage-type-filter",
+                                        value: "{type_filter.read()}",
+                                        onchange: move |evt| {
+                                            type_filter.set(evt.value());
+                                            selected_ids.set(Vec::new());
+                                            visible_count.set(STORAGE_PAGE_SIZE);
+                                        },
+                                        option { value: "", "全部属性" }
+                                        for pokemon_type in pokemon_types {
+                                            option { value: "{pokemon_type}", "{pokemon_type}" }
+                                        }
+                                    }
+                                }
+                                label {
+                                    "最低等级"
+                                    input {
+                                        id: "storage-min-level", r#type: "number", min: "1", step: "1",
+                                        placeholder: "不限", value: "{min_level.read()}",
+                                        oninput: move |evt| {
+                                            min_level.set(evt.value());
+                                            selected_ids.set(Vec::new());
+                                            visible_count.set(STORAGE_PAGE_SIZE);
+                                        },
+                                    }
+                                }
+                                label {
+                                    "最高等级"
+                                    input {
+                                        id: "storage-max-level", r#type: "number", min: "1", step: "1",
+                                        placeholder: "不限", value: "{max_level.read()}",
+                                        oninput: move |evt| {
+                                            max_level.set(evt.value());
+                                            selected_ids.set(Vec::new());
+                                            visible_count.set(STORAGE_PAGE_SIZE);
+                                        },
+                                    }
+                                }
+                                label {
+                                    "闪光"
+                                    select {
+                                        id: "storage-shiny-filter", value: "{shiny_filter.read()}",
+                                        onchange: move |evt| {
+                                            shiny_filter.set(evt.value());
+                                            selected_ids.set(Vec::new());
+                                            visible_count.set(STORAGE_PAGE_SIZE);
+                                        },
+                                        option { value: "", "全部" }
+                                        option { value: "shiny", "仅闪光" }
+                                        option { value: "normal", "非闪光" }
+                                    }
+                                }
+                                label {
+                                    "排序"
+                                    select {
+                                        id: "storage-sort", value: sort_order.read().value(),
+                                        onchange: move |evt| {
+                                            sort_order.set(StorageSort::from_value(&evt.value()));
+                                            selected_ids.set(Vec::new());
+                                            visible_count.set(STORAGE_PAGE_SIZE);
+                                        },
+                                        option { value: "oldest", "取得较早优先" }
+                                        option { value: "newest", "最近取得优先" }
+                                        option { value: "level_asc", "等级从低到高" }
+                                        option { value: "level_desc", "等级从高到低" }
+                                    }
+                                }
+                                button {
+                                    id: "storage-clear-filters", class: "select-action-btn",
+                                    onclick: move |_| {
+                                        search_text.set(String::new());
+                                        type_filter.set(String::new());
+                                        min_level.set(String::new());
+                                        max_level.set(String::new());
+                                        shiny_filter.set(String::new());
+                                        sort_order.set(StorageSort::default());
+                                        selected_ids.set(Vec::new());
+                                        visible_count.set(STORAGE_PAGE_SIZE);
+                                    },
+                                    "清除筛选"
+                                }
+                            }
+                            if let Err(message) = level_range {
+                                p { class: "storage-filter-error", role: "alert", "{message}" }
                             }
                         }
                         if *select_mode.read() && !filtered_storage.is_empty() {
                             div { class: "select-actions-bar",
                                 button {
+                                    id: "storage-select-all",
                                     class: "select-action-btn",
                                     onclick: move |_| select_all(),
-                                    "全选"
+                                    "全选筛选结果 ({storage_count})"
                                 }
                                 button {
+                                    id: "storage-batch-release",
                                     class: "select-action-btn danger",
-                                    disabled: selected_ids.read().is_empty(),
+                                    disabled: selected_count == 0,
                                     onclick: move |_| batch_release(),
-                                    "放生 ({selected_ids.read().len()})"
+                                    "放生 ({selected_count})"
                                 }
                             }
                         }
@@ -233,7 +364,7 @@ pub fn PokemonStorage() -> Element {
                                 div { class: "panel-loading", "加载中..." }
                             } else if filtered_storage.is_empty() {
                                 div { class: "panel-empty",
-                                    if keyword.is_empty() {
+                                    if storage_pokemons.is_empty() {
                                         "仓库中没有宠物"
                                     } else {
                                         "没有匹配的宠物"
@@ -255,6 +386,7 @@ pub fn PokemonStorage() -> Element {
                                             let is_selected = selected_ids.read().contains(&pokemon_id);
                                             rsx! {
                                                 PokemonSlot {
+                                                    key: "{pokemon_id}",
                                                     pokemon: pokemon_clone,
                                                     display_name,
                                                     hp_percent,
@@ -274,6 +406,7 @@ pub fn PokemonStorage() -> Element {
                                     div { class: "storage-load-more",
                                         button {
                                             class: "select-action-btn",
+                                            id: "storage-load-more",
                                             onclick: move |_| {
                                                 let next = *visible_count.read() + STORAGE_PAGE_SIZE;
                                                 visible_count.set(next);
@@ -322,6 +455,9 @@ fn PokemonSlot(
     rsx! {
         div {
             class: "{slot_class}",
+            "data-pokemon-id": "{pokemon.id}",
+            "data-shiny": "{pokemon.is_shiny}",
+            title: "{display_name} · Lv.{pokemon.level}",
             onclick: move |evt: Event<MouseData>| {
                 if is_select_mode {
                     if let Some(handler) = &on_toggle_select {

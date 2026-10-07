@@ -1,5 +1,8 @@
 use crate::prelude::*;
 
+mod log;
+use log::BattleLogPanel;
+
 use crate::components::common::Modal;
 use crate::{
     components::{common::TypeBadge, layout::IMG_PATH, layout::IMG_PATH_REMOTE},
@@ -45,6 +48,7 @@ pub fn BattlePage(
     on_continue: EventHandler<()>,
 ) -> Element {
     let mut current_tab = use_signal(|| BattleTab::Skills);
+    let mut show_log = use_signal(|| false);
 
     // 统一的战斗事件 modal 状态
     // BattleEvent: None | SwitchPokemon | ReplacePokemon | BattleEnd
@@ -159,6 +163,11 @@ pub fn BattlePage(
         .is_some_and(|e| matches!(e, BattleEvent::BattleEnd));
     rsx! {
         div { class: "page-battle",
+            div { class: "battle-tools",
+                button { class: "btn btn-secondary", "data-testid": "battle-log-open",
+                    disabled: battle.engine_battle_id == 0,
+                    onclick: move |_| show_log.set(true), "查看战报 / 分享" }
+            }
             div { class: "battle-card",
                 div { class: "battle-card-body",
                     div { class: "battle-content-area",
@@ -177,7 +186,12 @@ pub fn BattlePage(
                             }
                             button {
                                 class: if *current_tab.read() == BattleTab::Items { "battle-tab active" } else { "battle-tab" },
-                                onclick: move |_| current_tab.set(BattleTab::Items),
+                                onclick: move |_| {
+                                    if *current_tab.read() == BattleTab::Items && !loading {
+                                        on_enter_items_tab.call(());
+                                    }
+                                    current_tab.set(BattleTab::Items);
+                                },
                                 if *current_tab.read() == BattleTab::Items {
                                     span { class: "tab-arrow left", ">" }
                                 }
@@ -188,7 +202,12 @@ pub fn BattlePage(
                             }
                             button {
                                 class: if *current_tab.read() == BattleTab::Capture { "battle-tab active" } else { "battle-tab" },
-                                onclick: move |_| current_tab.set(BattleTab::Capture),
+                                onclick: move |_| {
+                                    if *current_tab.read() == BattleTab::Capture && !loading {
+                                        on_enter_capture_tab.call(());
+                                    }
+                                    current_tab.set(BattleTab::Capture);
+                                },
                                 if *current_tab.read() == BattleTab::Capture {
                                     span { class: "tab-arrow left", ">" }
                                 }
@@ -297,10 +316,12 @@ pub fn BattlePage(
                                         ""
                                     };
                                     rsx! {
-                                        div {
+                                        button {
+                                            r#type: "button",
                                             class: "skill-selection-item",
                                             "data-testid": "pp-skill-{skill_id}",
                                             "aria-disabled": loading,
+                                            disabled: loading,
                                             onclick: move |_| {
                                                 if !loading {
                                                     on_select_skill.call(skill_id);
@@ -360,6 +381,7 @@ pub fn BattlePage(
                                     }
                                     button {
                                         class: "btn btn-primary",
+                                        disabled: loading,
                                         onclick: move |_| {
                                             battle_event.set(None);
                                             on_switch_pokemon.call(());
@@ -466,6 +488,8 @@ pub fn BattlePage(
                                 level_up: battle.level_up.clone(),
                                 my_pokemon_name: battle.my_pokemon.name.clone(),
                                 can_continue,
+                                loading,
+                                on_view_log: move |_| show_log.set(true),
                                 on_end: move |_| {
                                     battle_event.set(None);
                                     on_end.call(())
@@ -478,6 +502,9 @@ pub fn BattlePage(
                         },
                     }
                 }
+            }
+            if *show_log.read() {
+                BattleLogPanel { battle_id: battle.engine_battle_id, on_close: move |_| show_log.set(false) }
             }
         }
     }
@@ -706,6 +733,14 @@ fn ItemsTabContent(
                             let item_id = item_data.id;
                             let is_disabled = loading || !item_data.can_use_on(&my_pokemon);
                             let item_for_card = battle_item_for_card(item_data);
+                            let condition = if my_pokemon.hp <= 0 {
+                                "宠物已倒下，请先替换宠物。"
+                            } else if item_data.is_pp_restore() {
+                                if item_data.can_use_on(&my_pokemon) { "选择一个PP未满的技能，恢复后对方会反击。" }
+                                else { "所有技能PP已满，暂时不需要恢复。" }
+                            } else if item_data.can_use_on(&my_pokemon) {
+                                "恢复当前宠物的HP，使用后对方会反击。"
+                            } else { "当前HP已满，暂时不需要恢复。" }.to_string();
 
                             rsx! {
                                 BattleItemCard {
@@ -713,6 +748,8 @@ fn ItemsTabContent(
                                     on_click: move |_| on_use_item.call(item_id),
                                     show_tooltip: true,
                                     disabled: is_disabled,
+                                    busy: loading,
+                                    condition,
                                 }
                             }
                         }
@@ -730,8 +767,13 @@ fn battle_item_for_card(item: &BattleItem) -> InventoryItem {
         type_id: item.id,
         item_type: item.item_type,
         name: item.name.clone(),
-        description: if item.is_pp_restore() {
-            "恢复一个技能的PP".to_string()
+        description: if item.module == "pp99" {
+            "完全恢复一个技能的PP".to_string()
+        } else if item.is_pp_restore() {
+            format!(
+                "恢复一个技能的 {} 点PP",
+                item.module.trim_start_matches("pp")
+            )
         } else {
             format!("恢复 {} HP", item.addhp)
         },
@@ -773,6 +815,8 @@ fn CaptureTabContent(
                                     show_tooltip: true,
                                     is_ball: true,
                                     disabled: loading,
+                                    busy: loading,
+                                    condition: "用于捕捉当前野生宠物；捕捉失败时对方可能反击。".to_string(),
                                 }
                             }
                         }
@@ -790,9 +834,12 @@ fn BattleItemCard(
     show_tooltip: bool,
     #[props(default = false)] is_ball: bool,
     #[props(default = false)] disabled: bool,
+    #[props(default = false)] busy: bool,
+    #[props(default)] condition: String,
 ) -> Element {
     let mut tooltip_visible = use_signal(|| false);
     let mut tooltip_position = use_signal(|| (0.0f64, 0.0f64));
+    let mut details_open = use_signal(|| false);
 
     let image_src = if item.image.contains('.') {
         item.image.clone()
@@ -819,14 +866,15 @@ fn BattleItemCard(
 
     rsx! {
         div { class: "battle-item-card-wrapper",
-            div {
+            button {
+                r#type: "button",
                 class: card_class,
                 "data-testid": if is_ball { format!("battle-ball-{}", item.type_id) } else { format!("battle-item-{}", item.id) },
-                "aria-disabled": disabled,
+                disabled: busy,
+                "aria-label": format!("查看 {}", item.name),
+                "aria-disabled": busy,
                 onclick: move |_| {
-                    if !disabled {
-                        on_click.call(item_for_click.id);
-                    }
+                    if !busy { tooltip_visible.set(false); details_open.set(true); }
                 },
                 onmouseenter: move |evt: Event<MouseData>| {
                     if show_tooltip {
@@ -851,6 +899,27 @@ fn BattleItemCard(
                     item: item.clone(),
                     left: tooltip_position.read().0,
                     top: tooltip_position.read().1,
+                }
+            }
+            if *details_open.read() {
+                Modal {
+                    is_open: true, title: item.name.clone(),
+                    on_close: move |_| details_open.set(false),
+                    div { class: "battle-item-details", "data-testid": "battle-item-details",
+                        p { "效果：{item.description}" }
+                        p { "持有数量：{qty}" }
+                        p { "适用条件：{condition}" }
+                        button { class: "btn btn-primary", "data-testid": "battle-item-use",
+                            disabled: disabled || busy || qty <= 0,
+                            onclick: move |_| {
+                                if !disabled && !busy && qty > 0 {
+                                    details_open.set(false);
+                                    on_click.call(item_for_click.id);
+                                }
+                            },
+                            if is_ball { "使用精灵球" } else { "使用道具" }
+                        }
+                    }
                 }
             }
         }
@@ -914,8 +983,10 @@ fn BattleResultSection(
     level_up: Option<_utils::types::api_battle::LevelUpInfo>,
     my_pokemon_name: String,
     can_continue: bool,
+    loading: bool,
     on_end: EventHandler<()>,
     on_continue: EventHandler<()>,
+    on_view_log: EventHandler<()>,
 ) -> Element {
     let (result_text, result_class) = match status {
         BattleStatus::Victory => ("🎉 战斗胜利！", "victory"),
@@ -958,9 +1029,10 @@ fn BattleResultSection(
             }
 
             div { class: "battle-end-buttons",
-                button { class: "battle-end-btn", onclick: move |_| on_end.call(()), "返回冒险地图" }
+                button { class: "battle-end-btn", "data-testid": "battle-end-log", onclick: move |_| on_view_log.call(()), "查看 / 分享战报" }
+                button { class: "battle-end-btn", disabled: loading, onclick: move |_| on_end.call(()), "返回冒险地图" }
                 if can_continue {
-                    button { class: "battle-continue-btn", onclick: move |_| on_continue.call(()), "继续战斗" }
+                    button { class: "battle-continue-btn", disabled: loading, onclick: move |_| on_continue.call(()), "继续战斗" }
                 }
             }
         }
