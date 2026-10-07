@@ -18,6 +18,7 @@ pub fn SkillDataPage() -> Element {
     let has_more = !state.is_filtered && state.loaded_count < state.total_count;
     let is_busy = *ADMIN_BUSY.read();
     let mut editor_data = use_signal(|| None::<SkillType>);
+    let mut editor_error = use_signal(|| None::<String>);
     let mut show_filter_modal = use_signal(|| false);
 
     use_effect(move || {
@@ -82,6 +83,7 @@ pub fn SkillDataPage() -> Element {
                 create_title: "新增技能",
                 create_disabled: false,
                 on_create: move |_| {
+                    editor_error.set(None);
                     editor_data.set(Some(SkillType::default()));
                 },
                 reload_disabled: false,
@@ -159,6 +161,7 @@ pub fn SkillDataPage() -> Element {
                                     key: "skill-{item.id}",
                                     item,
                                     on_edit: move |payload: SkillType| {
+                                        editor_error.set(None);
                                         editor_data.set(Some(payload));
                                     },
                                 }
@@ -193,8 +196,10 @@ pub fn SkillDataPage() -> Element {
                     data: data.clone(),
                     save_text: if data.id > 0 { "保存修改" } else { "创建记录" },
                     disabled: is_busy,
+                    error: editor_error(),
                     on_save: move |payload: SkillType| {
-                        save_skill_payload(payload, editor_data);
+                        editor_error.set(None);
+                        save_skill_payload(payload, editor_data, editor_error);
                     },
                     on_close: move |_| {
                         if !*ADMIN_BUSY.read() {
@@ -215,9 +220,10 @@ fn SkillRow(item: SkillType, on_edit: EventHandler<SkillType>) -> Element {
     rsx! {
         tr {
             class: "admin-table-row--clickable",
-            onclick: move |_| on_edit.call(item_for_edit.clone()),
+            "data-testid": "skill-row-{item.id}",
             td { "{item.id}" }
-            td { "{item.name}" }
+            td { button { class: "admin-btn", "data-testid": "skill-edit-{item.id}", aria_label: "编辑技能 {item.id}",
+                onclick: move |_| on_edit.call(item_for_edit.clone()), "{item.name}" } }
             td { "{item.min_level_limit}" }
             td { "{item.use_times_limit}" }
             td { "{item.available_pokemons.len()}" }
@@ -354,7 +360,11 @@ fn reset_skill_filters() {
     reload_skills();
 }
 
-fn save_skill_payload(payload: SkillType, mut editor_data: Signal<Option<SkillType>>) {
+fn save_skill_payload(
+    payload: SkillType,
+    mut editor_data: Signal<Option<SkillType>>,
+    mut editor_error: Signal<Option<String>>,
+) {
     if *ADMIN_BUSY.read() {
         return;
     }
@@ -394,6 +404,7 @@ fn save_skill_payload(payload: SkillType, mut editor_data: Signal<Option<SkillTy
                 }
             }
             Err(error) => {
+                editor_error.set(Some(format!("保存技能失败: {}", error)));
                 set_notice(AdminNoticeLevel::Error, format!("保存技能失败: {}", error));
             }
         }

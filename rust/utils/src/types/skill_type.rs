@@ -283,6 +283,24 @@ pub struct SkillType {
     pub min_level_limit: u64,
     pub use_times_limit: u64,
     pub effect: SkillEffect,
+    /// Battle-engine effect template; zero explicitly removes the binding.
+    #[serde(default, deserialize_with = "deserialize_effect_id")]
+    pub effect_id: u64,
+}
+
+fn deserialize_effect_id<'de, D>(deserializer: D) -> Result<u64, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    use serde::de::Error;
+    match Option::<serde_json::Value>::deserialize(deserializer)? {
+        None => Ok(0),
+        Some(serde_json::Value::Number(value)) => value
+            .as_u64()
+            .ok_or_else(|| D::Error::custom("effect_id must be a nonnegative integer")),
+        Some(serde_json::Value::String(value)) => value.trim().parse().map_err(D::Error::custom),
+        _ => Err(D::Error::custom("effect_id must be a nonnegative integer")),
+    }
 }
 
 impl SkillType {
@@ -299,10 +317,48 @@ impl Default for SkillType {
 
             min_level_limit: 0,
             use_times_limit: 0,
+            effect_id: 0,
             effect: SkillEffect::PhysicalDamage {
                 kind: PokemonKind::Normal,
                 power: 20,
             },
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::SkillType;
+    use serde_json::json;
+
+    #[test]
+    fn skill_binding_survives_an_unrelated_edit_and_explicit_unbinding() {
+        let mut wire = serde_json::to_value(SkillType::default()).unwrap();
+        for value in [json!(17), json!("17")] {
+            wire["effect_id"] = value;
+            let mut skill: SkillType = serde_json::from_value(wire.clone()).unwrap();
+            skill.name = "Renamed skill".into();
+            assert_eq!(serde_json::to_value(&skill).unwrap()["effect_id"], 17);
+            skill.effect_id = 0;
+            assert_eq!(serde_json::to_value(&skill).unwrap()["effect_id"], 0);
+        }
+        wire.as_object_mut().unwrap().remove("effect_id");
+        assert_eq!(
+            serde_json::from_value::<SkillType>(wire.clone())
+                .unwrap()
+                .effect_id,
+            0
+        );
+        wire["effect_id"] = serde_json::Value::Null;
+        assert_eq!(
+            serde_json::from_value::<SkillType>(wire.clone())
+                .unwrap()
+                .effect_id,
+            0
+        );
+        for invalid in [json!(-1), json!(1.5), json!(true), json!("bad")] {
+            wire["effect_id"] = invalid;
+            assert!(serde_json::from_value::<SkillType>(wire.clone()).is_err());
         }
     }
 }

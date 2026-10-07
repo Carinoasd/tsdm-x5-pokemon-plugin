@@ -10,5 +10,6 @@ pub fn all_routes() -> &'static [(AdminRoute, &'static str)] {
         (AdminRoute::UserData, "用户数据"),
         (AdminRoute::EvolutionData, "进化路线"),
         (AdminRoute::SkillType, "技能数据"),
+        (AdminRoute::EffectData, "效果管理"),
     ]
 }

@@ -4,17 +4,24 @@ These tests load the compiled game and admin WASM in Chromium. An isolated local
 provides API fixtures; no forum account or production data is used. PHP and real
 database behavior are also covered by the optional live integration below.
 
-Build both WASM frontends and their CSS before running:
+Build both WASM frontends and their CSS before running (install `wasm-bindgen-cli`
+at the `wasm-bindgen` version recorded in `Cargo.lock`):
 
 ```sh
+rustup target add wasm32-unknown-unknown
+cargo build --locked --release --target wasm32-unknown-unknown -p _admin -p _game
+wasm-bindgen --target web --out-dir plugin/wasm --out-name _admin target/wasm32-unknown-unknown/release/_admin.wasm
+wasm-bindgen --target web --out-dir plugin/wasm --out-name _game target/wasm32-unknown-unknown/release/_game.wasm
 cd scripts/browser
-npm ci
+npm ci --ignore-scripts
 npx playwright install chromium
 npm test
 ```
 
-Use `npm run test:battle`, `npm run test:inventory`, `npm run test:player`, or
-`npm run test:admin` to run one suite.
+Use `npm run test:battle`, `npm run test:inventory`, `npm run test:player`,
+`npm run test:admin`, or `npm run test:effects` to run one suite. Node.js 20 or
+newer is required. On Linux, use `npx playwright install --with-deps chromium`
+to install browser system libraries as well.
 
 The battle suite covers touch and keyboard item details, PP selection, pending
 request guards, lost-response retries with the same request ID, revision
@@ -42,11 +49,18 @@ Granting items also keeps the selected item and quantity after a rejected reques
 blocks duplicate submissions, and waits for the updated inventory before unlocking.
 Configuration tests reject saves before a successful initial read, retry failed
 reads and writes without losing settings, and block edits and repeated clicks while saving.
+The effects suite covers WASM startup, effect creation and editing, list refresh
+and deletion, failed effect and skill saves retaining the form for retry, skill
+effect bindings surviving subsequent edits and a full browser reload, failed
+effect-list loading preserving an existing skill binding, explicit unbinding,
+and the server rejecting deletion of a referenced effect.
 
-Screenshots and Playwright traces are written to the ignored `artifacts/`
-directory. Set `PLAYWRIGHT_BROWSERS_PATH` if Chromium is installed in a custom
-location, `GAME_WASM_DIRECTORY` to test a different game bundle, or
-`ADMIN_WASM_DIRECTORY` to test a different admin bundle.
+No suite expects unexpected API requests or uncaught browser errors. Screenshots
+and Playwright traces are written to the ignored `artifacts/` directory. Set
+`PLAYWRIGHT_BROWSERS_PATH` if Chromium is installed in a custom location,
+`GAME_WASM_DIRECTORY` to test a different game bundle, or
+`ADMIN_WASM_DIRECTORY` to test a different admin bundle. The fixtures contain
+test data only; they never connect to a live forum.
 
 ## Live PHP and MariaDB integration
 

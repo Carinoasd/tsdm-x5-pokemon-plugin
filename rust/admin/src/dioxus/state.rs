@@ -17,6 +17,7 @@ pub enum AdminRoute {
     UserData,
     EvolutionData,
     SkillType,
+    EffectData,
 }
 
 impl Default for AdminRoute {

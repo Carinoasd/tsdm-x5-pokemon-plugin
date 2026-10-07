@@ -430,6 +430,7 @@ def main():
     test_php_regression("Captured Pokemon attributes regression", "captured_pokemon_attributes.php")
     test_php_regression("Healing regression", "healing.php")
     test_php_regression("Admin data regression", "admin_regressions.php")
+    test_php_regression("Admin skill effects regression", "admin_effects.php")
     test_php_regression("Request parsing and user statistics regression", "request_and_stats.php")
     test_php_regression("Admin data round-trip regression", "admin_round_trips.php")
     test_php_regression("Shop transaction regression", "shop_transactions.php")
