@@ -52,6 +52,7 @@ pub struct GlobalConfigState {
     pub saved: GlobalConfigType,
     pub initialized: bool,
     pub loading: bool,
+    pub load_error: Option<String>,
 }
 
 impl Default for GlobalConfigState {
@@ -62,13 +63,14 @@ impl Default for GlobalConfigState {
             saved: config,
             initialized: false,
             loading: false,
+            load_error: None,
         }
     }
 }
 
 impl GlobalConfigState {
     pub fn is_dirty(&self) -> bool {
-        self.current != self.saved
+        self.initialized && self.current != self.saved
     }
 }
 
@@ -596,12 +598,16 @@ pub fn hide_toast(id: u64) {
 
 pub fn update_global_config(update: impl FnOnce(&mut GlobalConfigType)) {
     let mut state = ADMIN_GLOBAL_CONFIG.write();
+    if !state.initialized || state.loading {
+        return;
+    }
     update(&mut state.current);
 }
 
 pub fn begin_global_config_request() {
     let mut state = ADMIN_GLOBAL_CONFIG.write();
     state.loading = true;
+    state.load_error = None;
 }
 
 pub fn finish_global_config_load(config: GlobalConfigType) {
@@ -610,16 +616,18 @@ pub fn finish_global_config_load(config: GlobalConfigType) {
     state.saved = config;
     state.initialized = true;
     state.loading = false;
+    state.load_error = None;
 }
 
-pub fn finish_global_config_attempt() {
+pub fn finish_global_config_attempt(error: Option<String>) {
     let mut state = ADMIN_GLOBAL_CONFIG.write();
-    state.initialized = true;
     state.loading = false;
+    state.load_error = error;
 }
 
 pub fn reset_global_config_to_saved() {
-    let saved = ADMIN_GLOBAL_CONFIG.read().saved.clone();
     let mut state = ADMIN_GLOBAL_CONFIG.write();
-    state.current = saved;
+    if state.initialized && !state.loading {
+        state.current = state.saved.clone();
+    }
 }

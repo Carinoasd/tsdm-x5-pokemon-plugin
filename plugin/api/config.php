@@ -33,6 +33,8 @@ switch ($action) {
  */
 function api_get_global_config()
 {
+    require_once __DIR__ . '/../announcements.php';
+    $news_announcements = pm_get_news_announcements();
     $config = array();
 
     $rows = DB::fetch_all("SELECT * FROM pm_config");
@@ -41,8 +43,6 @@ function api_get_global_config()
         switch ($obj['data_type']) {
             case "string":
                 $value = strval($obj['value']);
-                // 对所有字符串字段使用 stripslashes 还原
-                $value = stripslashes($value);
                 // 对于 news_announcements，解析 JSON 字符串为数组
                 if ($obj['key'] === 'news_announcements') {
                     $decoded = json_decode($value, true);
@@ -63,25 +63,7 @@ function api_get_global_config()
         $config[$obj['key']] = $value;
     }
 
-    // 如果 news_announcements 不存在或为空，自动创建默认值
-    if (!isset($config['news_announcements']) || !is_array($config['news_announcements'])) {
-        $config['news_announcements'] = array();
-        // 同步到数据库
-        $json_value = json_encode($config['news_announcements']);
-        $escaped_value = addslashes($json_value);
-        $existing = DB::fetch_first("SELECT * FROM pm_config WHERE `key` = 'news_announcements'");
-        if ($existing) {
-            DB::query(pm_sql(
-                "UPDATE pm_config SET `value` = %s, `data_type` = 'string' WHERE `key` = 'news_announcements'",
-                $escaped_value
-            ));
-        } else {
-            DB::query(pm_sql(
-                "INSERT INTO pm_config (`key`, `value`, `data_type`) VALUES ('news_announcements', %s, 'string')",
-                $escaped_value
-            ));
-        }
-    }
+    $config['news_announcements'] = $news_announcements;
 
     api_success($config);
 }

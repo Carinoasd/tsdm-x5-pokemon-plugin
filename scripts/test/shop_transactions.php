@@ -60,6 +60,7 @@ class DB
     public static $user, $items, $pets, $product, $species;
     public static $snapshot, $locked = false, $in_txn = false;
     public static $interleave, $fail_write, $pending_interleave;
+    public static $item_writes = 0;
 
     public static function fetch_first($sql)
     {
@@ -83,7 +84,8 @@ class DB
             }
             return $lock ? self::$user : $stale;
         }
-        if (preg_match('/^SELECT \* FROM pm_myitem WHERE uid = 7 AND itemid = \'(\d+)\'$/', $sql, $m)) {
+        if (preg_match('/^SELECT \* FROM pm_myitem WHERE uid = 7 AND itemid = \'(\d+)\'( FOR UPDATE)?$/', $sql, $m)) {
+            if (!empty($m[2]) && (!self::$locked || !self::$in_txn)) throw new RuntimeException('Inventory lock before account lock');
             foreach (self::$items as $item) if ($item['itemid'] === (int) $m[1]) return $item;
             return false;
         }
@@ -125,10 +127,13 @@ class DB
         if (self::$fail_write && str_contains($sql, self::$fail_write)) throw new RuntimeException('Injected database failure');
         if (preg_match('/^UPDATE pm_usersdata SET money = money - (\d+) WHERE uid = 7$/', $sql, $m)) {
             self::$user['money'] -= (int) $m[1];
-        } elseif (preg_match('/^INSERT INTO pm_myitem \(uid, itemid, nums\) VALUES \(7, (\d+), 1\)$/', $sql, $m)) {
-            self::$items[] = ['id' => count(self::$items) + 1, 'uid' => 7, 'itemid' => (int) $m[1], 'nums' => 1];
-        } elseif (preg_match('/^UPDATE pm_myitem SET nums = nums \+ 1 WHERE id = (\d+)$/', $sql, $m)) {
-            foreach (self::$items as &$item) if ($item['id'] === (int) $m[1]) $item['nums']++;
+        } elseif (preg_match('/^INSERT INTO pm_myitem \(uid, itemid, nums\) VALUES \(7, (\d+), (\d+)\)$/', $sql, $m)) {
+            self::$item_writes++;
+            self::$items[] = ['id' => count(self::$items) + 1, 'uid' => 7, 'itemid' => (int) $m[1], 'nums' => (int) $m[2]];
+        } elseif (preg_match('/^UPDATE pm_myitem SET nums = nums \+ (\d+) WHERE id = (\d+)$/', $sql, $m)) {
+            self::$item_writes++;
+            // Signed SMALLINT in non-strict SQL mode silently clamps overflow.
+            foreach (self::$items as &$item) if ($item['id'] === (int) $m[2]) $item['nums'] = min(32767, $item['nums'] + (int) $m[1]);
             unset($item);
         } elseif (preg_match('/^INSERT INTO pm_mypm \((.+)\) VALUES \((.+)\)$/', $sql, $m)) {
             $fields = explode(', ', $m[1]);
@@ -153,6 +158,7 @@ function fixture($money = 100)
     DB::$species = ['id' => 1, 'name' => 'Test', 'money' => 60, 'sex' => 50, 'xs' => 'grass', 'hp' => 50, 'atk' => 50, 'def' => 50, 'spatk' => 50, 'spdef' => 50, 'speed' => 50];
     DB::$in_txn = DB::$locked = false;
     DB::$interleave = DB::$pending_interleave = DB::$fail_write = null;
+    DB::$item_writes = 0;
 }
 function invoke($endpoint)
 {
@@ -219,4 +225,56 @@ check(invoke('api_buy_pet')->data['site'] === 3, 'A full party sends purchased p
 fixture();
 DB::$user['money'] = -1;
 check(invoke('api_buy_item')->getCode() === 400 && !DB::$in_txn && !DB::$items, 'Invalid stored balances roll back before responding');
+
+fixture(10000);
+$GLOBALS['input']['quantity'] = 99;
+$bulk = invoke('api_buy_item');
+check($bulk->getCode() === 200 && DB::$items[0]['nums'] === 99 && DB::$user['money'] === 7030
+    && $bulk->data['items_purchased'] === 99 && $bulk->data['total_cost'] === 2970, 'A 99-item order grants and charges the full quantity');
+check(DB::$item_writes === 1, 'A new 99-item order uses one inventory write');
+
+fixture(10000);
+DB::$items = [['id' => 5, 'uid' => 7, 'itemid' => 24, 'nums' => 32668]];
+$GLOBALS['input']['quantity'] = 99;
+check(invoke('api_buy_item')->getCode() === 200 && DB::$items[0]['nums'] === 32767
+    && DB::$user['money'] === 7030 && DB::$item_writes === 1, 'An existing stack can reach exactly 32767 in one write');
+
+foreach ([[32767, 1], [32766, 2], [32700, 99], [-1, 1]] as [$stock, $quantity]) {
+    fixture(10000);
+    DB::$items = [['id' => 5, 'uid' => 7, 'itemid' => 24, 'nums' => $stock]];
+    $GLOBALS['input']['quantity'] = $quantity;
+    check(invoke('api_buy_item')->getCode() === 400 && DB::$items[0]['nums'] === $stock
+        && DB::$user['money'] === 10000 && !DB::$in_txn,
+        "Invalid stock or capacity rejects the entire purchase: $stock + $quantity");
+}
+
+fixture(10000);
+DB::$items = [['id' => 5, 'uid' => 7, 'itemid' => 24, 'nums' => 32766]];
+$GLOBALS['input']['quantity'] = 1;
+DB::$interleave = function () { DB::$items[0]['nums']++; DB::$user['money'] -= 30; };
+check(invoke('api_buy_item')->getCode() === 400 && DB::$items[0]['nums'] === 32767
+    && DB::$user['money'] === 9970 && !DB::$in_txn, 'A competing purchase can fill the final inventory slot before the account lock');
+
+fixture(10000);
+DB::$items = [['id' => 5, 'uid' => 7, 'itemid' => 24, 'nums' => 0]];
+$GLOBALS['input']['quantity'] = 99;
+check(invoke('api_buy_item')->getCode() === 200 && count(DB::$items) === 1 && DB::$items[0]['nums'] === 99,
+    'An existing empty stack is reused');
+
+fixture(10000);
+DB::$items = [['id' => 5, 'uid' => 7, 'itemid' => 24, 'nums' => 32767],
+    ['id' => 6, 'uid' => 7, 'itemid' => 24, 'nums' => 1]];
+$GLOBALS['input']['quantity'] = 1;
+check(invoke('api_buy_item')->getCode() === 400 && DB::$items[1]['nums'] === 1,
+    'Capacity checks do not silently choose another legacy stack');
+
+fixture(10000);
+DB::$items = [['id' => 5, 'uid' => 7, 'itemid' => 24, 'nums' => 10]];
+$GLOBALS['input']['quantity'] = 99;
+DB::$fail_write = 'UPDATE pm_myitem';
+try { invoke('api_buy_item'); throw new LogicException('Expected inventory update failure'); }
+catch (RuntimeException $e) { check($e->getMessage() === 'Injected database failure', 'Bulk inventory failure preserves the database error'); }
+check(DB::$items[0]['nums'] === 10 && DB::$user['money'] === 10000 && !DB::$in_txn,
+    'Failed bulk inventory update rolls back the full debit');
+
 echo "$passed shop transaction assertions passed\n";

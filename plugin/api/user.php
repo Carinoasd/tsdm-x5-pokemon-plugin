@@ -131,7 +131,7 @@ function api_get_user_profile()
         DB::query(pm_sql(
             "INSERT INTO " . pm_table('pm_usersdata') . "
             (uid, money, datawin, datalost, dataall, strength)
-            VALUES (%d, 0, 0, 0, 0, 1)",
+            VALUES (%d, 0, 0, 0, 0, 1) ON DUPLICATE KEY UPDATE uid = VALUES(uid)",
             $uid
         ));
         $user_data = DB::fetch_first(pm_sql(
@@ -186,8 +186,13 @@ function api_get_inventory()
     global $_G;
     $uid = validate_uid($_G['uid']);
 
-    $page = (int) get_param('page', 1);
+    $page = max(1, (int) get_param('page', 1));
     $per_page = USER_ITEMS_PER_PAGE;
+    $search = get_param('search', '');
+    if (!is_scalar($search)) {
+        api_error('搜索名称格式错误', 400);
+    }
+    $search = trim((string)$search);
 
     // type=0 或未传参 表示查看全部，不限制类型
     // 使用 isset 来检测参数是否传递
@@ -204,6 +209,13 @@ function api_get_inventory()
     if ($has_type_param && $item_type > 0) {
         $where_params[] = "i.type = %d";
         $where_values[] = $item_type;
+    }
+
+    if ($search !== '') {
+        // Literal substring search before pagination; % and _ remain ordinary
+        // name characters, and FOUND_ROWS reports only matching usable stacks.
+        $where_params[] = "LOCATE(%s, i.name) > 0";
+        $where_values[] = $search;
     }
 
     $where_sql = "WHERE " . implode(' AND ', $where_params);
@@ -416,122 +428,125 @@ function api_heal_pokemon()
     $uid = validate_uid($_G['uid']);
     $pokemon_id = validate_id(get_param('pokemon_id', 0), 'pokemon_id');
 
-    // 加载必要的函数
-    // 加载状态修正变量（$statehp, $stateatk 等）
-
-    // 验证宠物所有权 - 使用 pm_table 确保表名一致
-    $pokemon_data = DB::fetch_first(pm_sql(
-        "SELECT * FROM " . pm_table('pm_mypm') . " WHERE id = %d",
-        $pokemon_id
-    ));
-
-    if (!$pokemon_data || $pokemon_data['uid'] != $uid) {
-        api_error('宝可梦不存在或不属于您', 403);
-    }
-
-    // 获取用户数据
-    $user_data = DB::fetch_first(pm_sql(
-        "SELECT * FROM " . pm_table('pm_usersdata') . " WHERE uid = %d",
-        $uid
-    ));
-
-    if (!$user_data) {
-        api_error('用户数据不存在', 500);
-    }
-
-    // 检查宠物是否在战斗中
-    $is_in_battle = !empty($user_data['npcid']) && $user_data['npcid'] > 0;
-    $is_battle_pokemon = (int)$pokemon_data['site'] === 1;
-
-    if ($is_in_battle && $is_battle_pokemon) {
-        api_error('该宠物正在战斗中，请使用脱战并治疗功能', 400);
-    }
-
-    // 治疗免费
-    $cost = 0;
-
-    // 处理宠物状态
-    $timestamp = time();
-    $needs_healing = false;
-
-    // 负面状态列表（需要治疗的异常状态）
-    // 状态码说明：
-    // 0 = 濒危/晕倒（负面，需要治疗）
-    // 1 = 正常（不需要治疗）
-    // 2-4 = 生病（负面，需要治疗）
-    // 5-6 = 饥饿（负面，需要治疗）
-    // 7 = 疲惫（负面，需要治疗）
-    // 8-10 = 兴奋（正面，不治疗）
-    // 11 = 受伤（负面，需要治疗）
-    // 12-14 = 快乐（正面，不治疗）
-    // 15 = 惊慌（负面，需要治疗）
-    // 16-17 = 自恋（中性，不治疗）
-    // 18-19 = 愤怒（中性，不治疗）
-    // 20-22 = 虚弱（负面，需要治疗）
-    $negative_states = [0, 2, 3, 4, 5, 6, 7, 11, 15, 20, 21, 22];
-
-    // 检查是否需要治疗状态
-    if ($pokemon_data['hp'] <= 0) {
-        // 宠物晕倒，需要恢复状态
-        $needs_healing = true;
-    } elseif (in_array((int)$pokemon_data['state'], $negative_states)) {
-        // 负面状态需要治疗
-        $needs_healing = true;
-    }
-
-    // 先恢复状态，再计算治疗后的最大 HP；统一函数已包含装备加成。
-    if ($needs_healing) {
-        $pokemon_data['state'] = 1;
-    }
-    $petmaxhp = api_calculate_pokemon_max_hp($pokemon_data);
-
-    if ($needs_healing) {
-        DB::query(pm_sql(
-            "UPDATE " . pm_table('pm_mypm') . " SET hp=%d, state='1', statetime=%d WHERE id=%d AND uid=%d",
-            $petmaxhp,
-            $timestamp,
-            $pokemon_id,
-            $uid
+    DB::query('START TRANSACTION');
+    try {
+        $user_data = DB::fetch_first(pm_sql(
+            "SELECT * FROM " . pm_table('pm_usersdata') . " WHERE uid = %d FOR UPDATE", $uid
         ));
-    } else {
-        DB::query(pm_sql(
-            "UPDATE " . pm_table('pm_mypm') . " SET hp=%d WHERE id=%d AND uid=%d",
-            $petmaxhp,
-            $pokemon_id,
-            $uid
-        ));
-    }
+        if (!$user_data) pm_abort_battle_transaction('用户数据不存在', 404);
 
-    // 恢复技能PP值
-    $all_skills = DB::fetch_all(pm_sql(
-        "SELECT * FROM " . pm_table('pm_myskill') . " WHERE uid=%d AND petid=%d",
-        $uid,
-        $pokemon_id
-    ));
-    foreach ($all_skills as $my_skill) {
-        $skill_id = $my_skill['skillid'];
-        $skill = DB::fetch_first(pm_sql(
-            "SELECT * FROM " . pm_table('pm_skill') . " WHERE id=%d",
-            $skill_id
+        // 加载必要的函数
+        // 加载状态修正变量（$statehp, $stateatk 等）
+
+        // 验证宠物所有权 - 使用 pm_table 确保表名一致
+        $pokemon_data = DB::fetch_first(pm_sql(
+            "SELECT * FROM " . pm_table('pm_mypm') . " WHERE id = %d",
+            $pokemon_id
         ));
-        if ($skill && isset($skill['max_uses'])) {
+
+        if (!$pokemon_data || $pokemon_data['uid'] != $uid) {
+            pm_abort_battle_transaction('宝可梦不存在或不属于您', 403);
+        }
+
+        // 获取用户数据
+        $is_in_battle = !empty($user_data['npcid']) && $user_data['npcid'] > 0;
+        $is_battle_pokemon = (int)$pokemon_data['site'] === 1;
+
+        if ($is_in_battle && $is_battle_pokemon) {
+            pm_abort_battle_transaction('该宠物正在战斗中，请使用脱战并治疗功能', 400);
+        }
+
+        // 治疗免费
+        $cost = 0;
+
+        // 处理宠物状态
+        $timestamp = time();
+        $needs_healing = false;
+
+        // 负面状态列表（需要治疗的异常状态）
+        // 状态码说明：
+        // 0 = 濒危/晕倒（负面，需要治疗）
+        // 1 = 正常（不需要治疗）
+        // 2-4 = 生病（负面，需要治疗）
+        // 5-6 = 饥饿（负面，需要治疗）
+        // 7 = 疲惫（负面，需要治疗）
+        // 8-10 = 兴奋（正面，不治疗）
+        // 11 = 受伤（负面，需要治疗）
+        // 12-14 = 快乐（正面，不治疗）
+        // 15 = 惊慌（负面，需要治疗）
+        // 16-17 = 自恋（中性，不治疗）
+        // 18-19 = 愤怒（中性，不治疗）
+        // 20-22 = 虚弱（负面，需要治疗）
+        $negative_states = [0, 2, 3, 4, 5, 6, 7, 11, 15, 20, 21, 22];
+
+        // 检查是否需要治疗状态
+        if ($pokemon_data['hp'] <= 0) {
+            // 宠物晕倒，需要恢复状态
+            $needs_healing = true;
+        } elseif (in_array((int)$pokemon_data['state'], $negative_states)) {
+            // 负面状态需要治疗
+            $needs_healing = true;
+        }
+
+        // 先恢复状态，再计算治疗后的最大 HP；统一函数已包含装备加成。
+        if ($needs_healing) {
+            $pokemon_data['state'] = 1;
+        }
+        $petmaxhp = api_calculate_pokemon_max_hp($pokemon_data);
+
+        if ($needs_healing) {
             DB::query(pm_sql(
-                "UPDATE " . pm_table('pm_myskill') . " SET skillnum=%d WHERE skillid=%d AND uid=%d AND petid=%d",
-                $skill['max_uses'],
-                $skill_id,
-                $uid,
-                $pokemon_id
+                "UPDATE " . pm_table('pm_mypm') . " SET hp=%d, state='1', statetime=%d WHERE id=%d AND uid=%d",
+                $petmaxhp,
+                $timestamp,
+                $pokemon_id,
+                $uid
+            ));
+        } else {
+            DB::query(pm_sql(
+                "UPDATE " . pm_table('pm_mypm') . " SET hp=%d WHERE id=%d AND uid=%d",
+                $petmaxhp,
+                $pokemon_id,
+                $uid
             ));
         }
-    }
 
-    api_success([
-        'cost' => $cost,
-        'message' => "{$pokemon_data['nickname']}已治疗，花费 {$cost} 金币",
-        'pokemon_id' => $pokemon_id,
-        'current_hp' => (int)$petmaxhp,
-        'max_hp' => (int)$petmaxhp,
-    ]);
+        // 恢复技能PP值
+        $all_skills = DB::fetch_all(pm_sql(
+            "SELECT * FROM " . pm_table('pm_myskill') . " WHERE uid=%d AND petid=%d",
+            $uid,
+            $pokemon_id
+        ));
+        foreach ($all_skills as $my_skill) {
+            $skill_id = $my_skill['skillid'];
+            $skill = DB::fetch_first(pm_sql(
+                "SELECT * FROM " . pm_table('pm_skill') . " WHERE id=%d",
+                $skill_id
+            ));
+            if ($skill && isset($skill['max_uses'])) {
+                DB::query(pm_sql(
+                    "UPDATE " . pm_table('pm_myskill') . " SET skillnum=%d WHERE skillid=%d AND uid=%d AND petid=%d",
+                    $skill['max_uses'],
+                    $skill_id,
+                    $uid,
+                    $pokemon_id
+                ));
+            }
+        }
+
+        $response = [
+            'cost' => $cost,
+            'message' => "{$pokemon_data['nickname']}已治疗，花费 {$cost} 金币",
+            'pokemon_id' => $pokemon_id,
+            'current_hp' => (int)$petmaxhp,
+            'max_hp' => (int)$petmaxhp,
+        ];
+        DB::query('COMMIT');
+    } catch (Throwable $e) {
+        DB::query('ROLLBACK');
+        throw $e;
+    }
+    api_success($response);
 }
 
 /**
@@ -548,107 +563,111 @@ function api_heal_and_flee()
     $pokemon_id = validate_id(get_param('pokemon_id', 0), 'pokemon_id');
 
 
-    $pokemon_data = DB::fetch_first(pm_sql(
-        "SELECT * FROM " . pm_table('pm_mypm') . " WHERE id = %d",
-        $pokemon_id
-    ));
+    require_once __DIR__ . '/battle_storage.php';
+    battle_ensure_tables();
 
-    if (!$pokemon_data || $pokemon_data['uid'] != $uid) {
-        api_error('宝可梦不存在或不属于您', 403);
-    }
-
-    $user_data = DB::fetch_first(pm_sql(
-        "SELECT * FROM " . pm_table('pm_usersdata') . " WHERE uid = %d",
-        $uid
-    ));
-
-    if (!$user_data) {
-        api_error('用户数据不存在', 500);
-    }
-
-    $is_in_battle = !empty($user_data['npcid']) && $user_data['npcid'] > 0;
-    $is_battle_pokemon = (int)$pokemon_data['site'] === 1;
-
-    if (!$is_in_battle || !$is_battle_pokemon) {
-        api_error('该宠物不在战斗中，请使用普通治疗', 400);
-    }
-
-    // 清除战斗状态
-    DB::query(pm_sql("UPDATE " . pm_table('pm_usersdata') . "
-        SET npcid = '', level = '', hp = '', hpg = '', atkg = '', defg = '',
-            spatkg = '', spdefg = '', sdg = '', allure = '', capture = ''
-        WHERE uid = %d", $uid));
-
-    $cost = 0;
-
-    $timestamp = time();
-    $needs_healing = false;
-
-    // 负面状态列表（需要治疗的异常状态，20-22 为虚弱状态）
-    $negative_states = [0, 2, 3, 4, 5, 6, 7, 11, 15, 20, 21, 22];
-
-    // 检查是否需要治疗状态
-    if ($pokemon_data['hp'] <= 0) {
-        // 宠物晕倒，需要恢复状态
-        $needs_healing = true;
-    } elseif (in_array((int)$pokemon_data['state'], $negative_states)) {
-        // 负面状态需要治疗
-        $needs_healing = true;
-    }
-
-    // 先恢复状态，再计算治疗后的最大 HP；统一函数已包含装备加成。
-    if ($needs_healing) {
-        $pokemon_data['state'] = 1;
-    }
-    $petmaxhp = api_calculate_pokemon_max_hp($pokemon_data);
-
-    if ($needs_healing) {
-        DB::query(pm_sql(
-            "UPDATE " . pm_table('pm_mypm') . " SET hp=%d, state='1', statetime=%d WHERE id=%d AND uid=%d",
-            $petmaxhp,
-            $timestamp,
-            $pokemon_id,
-            $uid
+    DB::query('START TRANSACTION');
+    try {
+        $user_data = DB::fetch_first(pm_sql(
+            "SELECT * FROM " . pm_table('pm_usersdata') . " WHERE uid = %d FOR UPDATE", $uid
         ));
-    } else {
-        DB::query(pm_sql(
-            "UPDATE " . pm_table('pm_mypm') . " SET hp=%d WHERE id=%d AND uid=%d",
-            $petmaxhp,
-            $pokemon_id,
-            $uid
-        ));
-    }
+        if (!$user_data) pm_abort_battle_transaction('用户数据不存在', 404);
 
-    $all_skills = DB::fetch_all(pm_sql(
-        "SELECT * FROM " . pm_table('pm_myskill') . " WHERE uid=%d AND petid=%d",
-        $uid,
-        $pokemon_id
-    ));
-    foreach ($all_skills as $my_skill) {
-        $skill_id = $my_skill['skillid'];
-        $skill = DB::fetch_first(pm_sql(
-            "SELECT * FROM " . pm_table('pm_skill') . " WHERE id=%d",
-            $skill_id
+        $pokemon_data = DB::fetch_first(pm_sql(
+            "SELECT * FROM " . pm_table('pm_mypm') . " WHERE id = %d",
+            $pokemon_id
         ));
-        if ($skill && isset($skill['max_uses'])) {
+
+        if (!$pokemon_data || $pokemon_data['uid'] != $uid) {
+            pm_abort_battle_transaction('宝可梦不存在或不属于您', 403);
+        }
+
+        $is_in_battle = !empty($user_data['npcid']) && $user_data['npcid'] > 0;
+        $is_battle_pokemon = (int)$pokemon_data['site'] === 1;
+
+        if (!$is_in_battle || !$is_battle_pokemon) {
+            pm_abort_battle_transaction('该宠物不在战斗中，请使用普通治疗', 400);
+        }
+
+        // 旧镜像与引擎状态一起结束，旧版本请求随后必须失效。
+        clear_battle_state($uid, true);
+
+        $cost = 0;
+
+        $timestamp = time();
+        $needs_healing = false;
+
+        // 负面状态列表（需要治疗的异常状态，20-22 为虚弱状态）
+        $negative_states = [0, 2, 3, 4, 5, 6, 7, 11, 15, 20, 21, 22];
+
+        // 检查是否需要治疗状态
+        if ($pokemon_data['hp'] <= 0) {
+            // 宠物晕倒，需要恢复状态
+            $needs_healing = true;
+        } elseif (in_array((int)$pokemon_data['state'], $negative_states)) {
+            // 负面状态需要治疗
+            $needs_healing = true;
+        }
+
+        // 先恢复状态，再计算治疗后的最大 HP；统一函数已包含装备加成。
+        if ($needs_healing) {
+            $pokemon_data['state'] = 1;
+        }
+        $petmaxhp = api_calculate_pokemon_max_hp($pokemon_data);
+
+        if ($needs_healing) {
             DB::query(pm_sql(
-                "UPDATE " . pm_table('pm_myskill') . " SET skillnum=%d WHERE skillid=%d AND uid=%d AND petid=%d",
-                $skill['max_uses'],
-                $skill_id,
-                $uid,
-                $pokemon_id
+                "UPDATE " . pm_table('pm_mypm') . " SET hp=%d, state='1', statetime=%d WHERE id=%d AND uid=%d",
+                $petmaxhp,
+                $timestamp,
+                $pokemon_id,
+                $uid
+            ));
+        } else {
+            DB::query(pm_sql(
+                "UPDATE " . pm_table('pm_mypm') . " SET hp=%d WHERE id=%d AND uid=%d",
+                $petmaxhp,
+                $pokemon_id,
+                $uid
             ));
         }
-    }
 
-    api_success([
-        'cost' => $cost,
-        'message' => "{$pokemon_data['nickname']}已脱战并治疗",
-        'pokemon_id' => $pokemon_id,
-        'current_hp' => (int)$petmaxhp,
-        'max_hp' => (int)$petmaxhp,
-        'fled' => true,
-    ]);
+        $all_skills = DB::fetch_all(pm_sql(
+            "SELECT * FROM " . pm_table('pm_myskill') . " WHERE uid=%d AND petid=%d",
+            $uid,
+            $pokemon_id
+        ));
+        foreach ($all_skills as $my_skill) {
+            $skill_id = $my_skill['skillid'];
+            $skill = DB::fetch_first(pm_sql(
+                "SELECT * FROM " . pm_table('pm_skill') . " WHERE id=%d",
+                $skill_id
+            ));
+            if ($skill && isset($skill['max_uses'])) {
+                DB::query(pm_sql(
+                    "UPDATE " . pm_table('pm_myskill') . " SET skillnum=%d WHERE skillid=%d AND uid=%d AND petid=%d",
+                    $skill['max_uses'],
+                    $skill_id,
+                    $uid,
+                    $pokemon_id
+                ));
+            }
+        }
+
+        $response = [
+            'cost' => $cost,
+            'message' => "{$pokemon_data['nickname']}已脱战并治疗",
+            'pokemon_id' => $pokemon_id,
+            'current_hp' => (int)$petmaxhp,
+            'max_hp' => (int)$petmaxhp,
+            'fled' => true,
+        ];
+        DB::query('COMMIT');
+    } catch (Throwable $e) {
+        DB::query('ROLLBACK');
+        throw $e;
+    }
+    api_success($response);
 }
 
 /**
@@ -708,72 +727,87 @@ function api_initialize_new_player()
     global $_G;
     $uid = validate_uid($_G['uid']);
 
-    // 检查是否已有宝可梦
-    $count_sql = "SELECT COUNT(*) FROM " . pm_table('pm_mypm') . " WHERE uid = $uid";
+    DB::query('START TRANSACTION');
+    try {
+        $member = DB::fetch_first(pm_sql(
+            "SELECT uid FROM " . DB::table('common_member') . " WHERE uid = %d FOR UPDATE", $uid
+        ));
+        if (!$member) pm_abort_battle_transaction('用户不存在', 404);
 
-    $existing_pokemon_count = (int) DB::result_first($count_sql);
-
-    if ($existing_pokemon_count > 0) {
-        api_error('您已有宝可梦，无需初始化', 400);
-        return;
-    }
-
-    // 检查是否有 usersdata 记录
-    $user_data = DB::fetch_first(pm_sql(
-        "SELECT * FROM " . pm_table('pm_usersdata') . " WHERE uid = %d",
-        $uid
-    ));
-
-    // 如果没有 usersdata，创建一个
-    if (!$user_data) {
-        DB::query(pm_sql(
-            "INSERT INTO " . pm_table('pm_usersdata') . "
-            (uid, money, datawin, datalost, dataall, strength)
-            VALUES (%d, 0, 0, 0, 0, 1)",
+        // 检查是否有 usersdata 记录
+        $user_data = DB::fetch_first(pm_sql(
+            "SELECT * FROM " . pm_table('pm_usersdata') . " WHERE uid = %d FOR UPDATE",
             $uid
         ));
+
+        // 如果没有 usersdata，创建一个
+        if (!$user_data) {
+            DB::query(pm_sql(
+                "INSERT INTO " . pm_table('pm_usersdata') . "
+                (uid, money, datawin, datalost, dataall, strength)
+                VALUES (%d, 0, 0, 0, 0, 1)",
+                $uid
+            ));
+        }
+
+        // 检查是否已有宝可梦
+        $count_sql = "SELECT COUNT(*) FROM " . pm_table('pm_mypm') . " WHERE uid = $uid";
+
+        $existing_pokemon_count = (int) DB::result_first($count_sql);
+
+        if ($existing_pokemon_count > 0) {
+            pm_abort_battle_transaction('您已有宝可梦，无需初始化', 400);
+            return;
+        }
+
+        // 加载宠物数值计算工具函数
+        require_once __DIR__ . '/pokemon_utils.php';
+
+        // 随机选择一个初始宝可梦（ID 1-151，第一代）
+        $random_pokemon_id = rand(1, 151);
+
+        // 获取宝可梦数据
+        $pokemon_data = DB::fetch_first(pm_sql(
+            "SELECT * FROM " . pm_table('pm_data') . " WHERE id = %d",
+            $random_pokemon_id
+        ));
+
+        if (!$pokemon_data) {
+            // 如果获取失败，使用默认的妙蛙种子（ID=1）
+            $random_pokemon_id = 1;
+            $pokemon_data = DB::fetch_first(
+                "SELECT * FROM " . pm_table('pm_data') . " WHERE id = 1"
+            );
+        }
+
+        if (!$pokemon_data) pm_abort_battle_transaction('尚未配置初始宝可梦，请联系管理员', 503);
+
+        // 初始等级设为5
+        $initial_level = 5;
+
+        // 使用工具函数创建宠物完整数据
+        $new_pokemon = create_new_pokemon_data($pokemon_data, $initial_level, $uid);
+
+        // 生成并执行 INSERT 语句
+        $sql = build_pokemon_insert_sql($new_pokemon, 1);
+
+        DB::query($sql);
+
+        $response = [
+            'success' => true,
+            'message' => '欢迎来到宝可梦世界！已为您准备初始伙伴',
+            'pokemon_id' => (int) $pokemon_data['id'],
+            'pokemon_name' => $pokemon_data['name'],
+            'level' => $initial_level,
+            'money' => $user_data ? (int)$user_data['money'] : 0,
+            'egg_received' => false,
+        ];
+        DB::query('COMMIT');
+    } catch (Throwable $e) {
+        DB::query('ROLLBACK');
+        throw $e;
     }
-
-    // 加载宠物数值计算工具函数
-    require_once __DIR__ . '/pokemon_utils.php';
-
-    // 随机选择一个初始宝可梦（ID 1-151，第一代）
-    $random_pokemon_id = rand(1, 151);
-
-    // 获取宝可梦数据
-    $pokemon_data = DB::fetch_first(pm_sql(
-        "SELECT * FROM " . pm_table('pm_data') . " WHERE id = %d",
-        $random_pokemon_id
-    ));
-
-    if (!$pokemon_data) {
-        // 如果获取失败，使用默认的妙蛙种子（ID=1）
-        $random_pokemon_id = 1;
-        $pokemon_data = DB::fetch_first(
-            "SELECT * FROM " . pm_table('pm_data') . " WHERE id = 1"
-        );
-    }
-
-    // 初始等级设为5
-    $initial_level = 5;
-
-    // 使用工具函数创建宠物完整数据
-    $new_pokemon = create_new_pokemon_data($pokemon_data, $initial_level, $uid);
-
-    // 生成并执行 INSERT 语句
-    $sql = build_pokemon_insert_sql($new_pokemon, 1);
-
-    DB::query($sql);
-
-    api_success([
-        'success' => true,
-        'message' => '欢迎来到宝可梦世界！已为您准备初始伙伴',
-        'pokemon_id' => (int) $pokemon_data['id'],
-        'pokemon_name' => $pokemon_data['name'],
-        'level' => $initial_level,
-        'money' => 0,
-        'egg_received' => false,
-    ]);
+    api_success($response);
 }
 
 /**
@@ -826,254 +860,279 @@ function api_use_item()
 
     // 加载必要的函数
 
-    // 获取物品数据
-    $item_data = DB::fetch_first(pm_sql(
-        "SELECT * FROM " . pm_table('pm_itemdata') . " WHERE id = %d",
-        $item_id
-    ));
+    // 与购买、战斗和队伍调整共用用户锁，效果与扣道具必须一起提交。
+    DB::query('START TRANSACTION');
+    try {
+        $user_data = DB::fetch_first(pm_sql(
+            "SELECT * FROM " . pm_table('pm_usersdata') . " WHERE uid = %d FOR UPDATE", $uid
+        ));
+        if (!$user_data) pm_abort_battle_transaction('用户数据不存在', 404);
 
-    if (!$item_data) {
-        api_error('物品不存在', 404);
-    }
+        // 获取物品数据
+        $item_data = DB::fetch_first(pm_sql(
+            "SELECT * FROM " . pm_table('pm_itemdata') . " WHERE id = %d",
+            $item_id
+        ));
 
-    // 检查用户是否拥有该物品
-    $my_item = DB::fetch_first(pm_sql(
-        "SELECT * FROM " . pm_table('pm_myitem') . " WHERE uid = %d AND itemid = %s",
-        $uid,
-        strval($item_id)
-    ));
-
-    if (!$my_item || $my_item['nums'] <= 0) {
-        api_error('您没有该物品', 400);
-    }
-
-    // 根据物品类型处理
-    $item_type = $item_data['type'];
-    // 旧数据 module 列为空，模块名在 sitemname/tpname 中，需回退读取
-    $item_module = api_get_item_module($item_data);
-    $success = false;
-    $message = '';
-    $pokemon_update = null;
-
-    // PP 恢复道具（迁移数据中 type=1）需要指定技能，战斗外不支持直接使用
-    if (in_array($item_module, ['pp5', 'pp10', 'pp15', 'pp99'])) {
-        api_error('PP恢复道具请在战斗中对技能使用', 400);
-    }
-
-    switch ($item_type) {
-        case '1': // 回复药
-
-            if (!$pokemon_id) {
-                api_error('请选择要使用的宝可梦', 400);
-            }
-
-            // 验证宝可梦所有权
-            $pokemon = api_my_pokemon_data($pokemon_id);
-
-            if (!$pokemon || $pokemon['uid'] != $uid) {
-                api_error('宝可梦不存在或不属于您', 403);
-            }
-
-            $effects = json_decode(isset($item_data['effects']) ? $item_data['effects'] : '{}', true) ?: [];
-            $addhp = (int) (isset($effects['hp']) ? $effects['hp'] : 0);
-            $current_hp = (int) $pokemon['hp'];
-            $current_state = (int) $pokemon['state'];
-
-            // 如果是濒危状态（state=0），使用血瓶会转为虚弱状态
-            // 如果已经是虚弱状态（state=20,21,22），使用血瓶会降级
-            $new_state = $current_state;
-            $state_changed = false;
-            $timestamp = time();
-
-            if ($current_state === 0) {
-                // 濒危状态 -> 虚弱状态（最高等级）
-                $new_state = 20;
-                $state_changed = true;
-            } elseif (in_array($current_state, [20, 21, 22])) {
-                // 虚弱状态降级
-                $new_state = downgrade_weak_state($current_state);
-                $state_changed = ($new_state !== $current_state);
-            } elseif (in_array($item_module, ['hunger', 'yypg'], true) && in_array($current_state, [5, 6, 7], true)) {
-                // 哞哞奶既回复 HP 也解除饥饿，满血时仍可用于治疗饥饿。
-                $new_state = 1;
-                $state_changed = true;
-            }
-
-            // 状态会改变 HP 上限，按治疗后的状态计算本次回复量。
-            $pokemon['state'] = $new_state;
-            $max_hp = api_calculate_pokemon_max_hp($pokemon);
-
-            if ($current_hp >= $max_hp && $addhp > 0 && !$state_changed) {
-                api_error("{$pokemon['nickname']}不需要增加 HP 了", 400);
-            }
-
-            $heal = $addhp;
-            $new_hp = api_get_item_healed_hp($pokemon, $heal, $max_hp);
-
-            // 验证并纠正 HP（确保 HP 在 [0, max_hp] 范围内）
-            $pokemon['hp'] = strval($new_hp);
-            $hp_validation = api_validate_and_correct_hp($pokemon, $new_hp, $max_hp);
-            $new_hp = $hp_validation['hp'];
-
-            // 更新HP和状态
-            if ($state_changed) {
-                DB::query(pm_sql(
-                    "UPDATE " . pm_table('pm_mypm') . " SET hp = %d, state = %d, statetime = %d WHERE id = %d",
-                    $new_hp,
-                    $new_state,
-                    $timestamp,
-                    $pokemon_id
-                ));
-            } else {
-                DB::query(pm_sql(
-                    "UPDATE " . pm_table('pm_mypm') . " SET hp = %d WHERE id = %d",
-                    $new_hp,
-                    $pokemon_id
-                ));
-            }
-
-            // 物品扣除在 switch 结束后统一处理
-
-            $success = true;
-
-            // 构建消息
-            $message_parts = [];
-            $message_parts[] = "成功对 {$pokemon['nickname']} 使用了 {$item_data['name']}";
-            if ($heal > 0) {
-                $message_parts[] = "恢复了 {$heal} 点 HP";
-            }
-            if ($state_changed) {
-                if ($current_state === 0) {
-                    $message_parts[] = "脱离濒危状态，进入虚弱状态";
-                } elseif (in_array($current_state, [5, 6, 7], true)) {
-                    $message_parts[] = "饥饿状态已解除";
-                } elseif ($new_state === 1) {
-                    $message_parts[] = "虚弱状态已完全恢复";
-                } else {
-                    $message_parts[] = "虚弱状态有所好转";
-                }
-            }
-            $message = implode('，', $message_parts);
-
-            $pokemon_update = [
-                'id' => $pokemon_id,
-                'hp' => $new_hp,
-                'max_hp' => $max_hp,
-                'old_state' => $current_state,
-                'new_state' => $new_state,
-                'state_changed' => $state_changed,
-            ];
-
-            break;
-
-        case '2': // 精灵球
-            api_error('精灵球请在战斗中使用', 400);
-            break;
-
-        case '3': // 进化石
-
-            if (!$pokemon_id) {
-                api_error('请选择要使用的宝可梦', 400);
-            }
-
-            // 验证宝可梦所有权
-            $pokemon = api_my_pokemon_data($pokemon_id);
-
-            if (!$pokemon || $pokemon['uid'] != $uid) {
-                api_error('宝可梦不存在或不属于您', 403);
-            }
-
-            // 调用物品函数（传递物品 ID 而不是名称）
-            if (function_exists($item_module)) {
-                $result = call_user_func($item_module, $pokemon_id, $item_data['name'], $item_id);
-
-                if (isset($result) && $result === 1) {
-                    api_error('该物品无法对当前宝可梦使用', 400);
-                }
-
-                $success = true;
-                $message = "成功对 {$pokemon['nickname']} 使用了 {$item_data['name']}";
-            } else {
-                api_error('物品功能未实现', 500);
-            }
-
-            break;
-
-        case '4': // 强化道具
-
-            if (!$pokemon_id) {
-                api_error('请选择要使用的宝可梦', 400);
-            }
-
-            // 验证宝可梦所有权
-            $pokemon = api_my_pokemon_data($pokemon_id);
-
-            if (!$pokemon || $pokemon['uid'] != $uid) {
-                api_error('宝可梦不存在或不属于您', 403);
-            }
-
-            // 调用物品函数
-            if (function_exists($item_module)) {
-                // 解析物品参数
-                $params = [
-                    'iatk' => isset($item_data['atk']) ? $item_data['atk'] : 0,
-                    'idef' => isset($item_data['def']) ? $item_data['def'] : 0,
-                    'ispatk' => isset($item_data['spatk']) ? $item_data['spatk'] : 0,
-                    'ispdef' => isset($item_data['spdef']) ? $item_data['spdef'] : 0,
-                    'isd' => isset($item_data['speed']) ? $item_data['speed'] : 0,
-                    'ihp' => isset($item_data['hp']) ? $item_data['hp'] : 0,
-                ];
-
-                $result = call_user_func_array($item_module, array_merge([$pokemon_id, $item_data['name']], array_values($params)));
-
-                if (isset($result) && $result === 1) {
-                    api_error('该物品无法对当前宝可梦使用', 400);
-                }
-
-                $success = true;
-                $message = "成功对 {$pokemon['nickname']} 使用了 {$item_data['name']}";
-            } else {
-                api_error('物品功能未实现', 500);
-            }
-
-            break;
-
-        case '5': // 装备道具（在装备页面使用）
-            api_error('装备道具请在装备页面使用', 400);
-            break;
-
-        default:
-            api_error('未知物品类型', 400);
-    }
-
-    if ($success) {
-        // 扣除物品
-        $new_num = $my_item['nums'] - 1;
-
-        if ($new_num <= 0) {
-            DB::query(pm_sql(
-                "DELETE FROM " . pm_table('pm_myitem') . " WHERE id = %d",
-                intval($my_item['id'])
-            ));
-            $item_remaining = 0;
-        } else {
-            DB::query(pm_sql(
-                "UPDATE " . pm_table('pm_myitem') . " SET nums = %d WHERE id = %d",
-                $new_num,
-                intval($my_item['id'])
-            ));
-            $item_remaining = $new_num;
+        if (!$item_data) {
+            pm_abort_battle_transaction('物品不存在', 404);
         }
 
-        api_success([
-            'success' => true,
-            'message' => $message,
-            'item_remaining' => (int) $item_remaining,
-            'pokemon_updated' => $pokemon_update,
-        ]);
-    } else {
-        api_error('物品使用失败', 500);
+        // 检查用户是否拥有该物品
+        $my_item = DB::fetch_first(pm_sql(
+            "SELECT * FROM " . pm_table('pm_myitem') . " WHERE uid = %d AND itemid = %s",
+            $uid,
+            strval($item_id)
+        ));
+
+        if (!$my_item || $my_item['nums'] <= 0) {
+            pm_abort_battle_transaction('您没有该物品', 400);
+        }
+
+        if ($pokemon_id) {
+            $pokemon = api_my_pokemon_data($pokemon_id);
+            if (!$pokemon || (int)$pokemon['uid'] !== $uid) {
+                pm_abort_battle_transaction('宝可梦不存在或不属于您', 403);
+            }
+            if ((int)$pokemon['site'] === 1 && (int)$user_data['npcid'] > 0) {
+                pm_abort_battle_transaction('该宠物正在战斗中，请在战斗中使用道具', 400);
+            }
+        }
+
+        // 根据物品类型处理
+        $item_type = $item_data['type'];
+        // 旧数据 module 列为空，模块名在 sitemname/tpname 中，需回退读取
+        $item_module = api_get_item_module($item_data);
+        $success = false;
+        $message = '';
+        $pokemon_update = null;
+
+        // PP 恢复道具（迁移数据中 type=1）需要指定技能，战斗外不支持直接使用
+        if (in_array($item_module, ['pp5', 'pp10', 'pp15', 'pp99'])) {
+            pm_abort_battle_transaction('PP恢复道具请在战斗中对技能使用', 400);
+        }
+
+        switch ($item_type) {
+            case '1': // 回复药
+
+                if (!$pokemon_id) {
+                    pm_abort_battle_transaction('请选择要使用的宝可梦', 400);
+                }
+
+                // 验证宝可梦所有权
+                $pokemon = api_my_pokemon_data($pokemon_id);
+
+                if (!$pokemon || $pokemon['uid'] != $uid) {
+                    pm_abort_battle_transaction('宝可梦不存在或不属于您', 403);
+                }
+
+                $effects = json_decode(isset($item_data['effects']) ? $item_data['effects'] : '{}', true) ?: [];
+                $addhp = (int) (isset($effects['hp']) ? $effects['hp'] : 0);
+                $current_hp = (int) $pokemon['hp'];
+                $current_state = (int) $pokemon['state'];
+
+                // 如果是濒危状态（state=0），使用血瓶会转为虚弱状态
+                // 如果已经是虚弱状态（state=20,21,22），使用血瓶会降级
+                $new_state = $current_state;
+                $state_changed = false;
+                $timestamp = time();
+
+                if ($current_state === 0) {
+                    // 濒危状态 -> 虚弱状态（最高等级）
+                    $new_state = 20;
+                    $state_changed = true;
+                } elseif (in_array($current_state, [20, 21, 22])) {
+                    // 虚弱状态降级
+                    $new_state = downgrade_weak_state($current_state);
+                    $state_changed = ($new_state !== $current_state);
+                } elseif (in_array($item_module, ['hunger', 'yypg'], true) && in_array($current_state, [5, 6, 7], true)) {
+                    // 哞哞奶既回复 HP 也解除饥饿，满血时仍可用于治疗饥饿。
+                    $new_state = 1;
+                    $state_changed = true;
+                }
+
+                // 状态会改变 HP 上限，按治疗后的状态计算本次回复量。
+                $pokemon['state'] = $new_state;
+                $max_hp = api_calculate_pokemon_max_hp($pokemon);
+
+                if ($current_hp >= $max_hp && $addhp > 0 && !$state_changed) {
+                    pm_abort_battle_transaction("{$pokemon['nickname']}不需要增加 HP 了", 400);
+                }
+
+                $heal = $addhp;
+                $new_hp = api_get_item_healed_hp($pokemon, $heal, $max_hp);
+
+                // 验证并纠正 HP（确保 HP 在 [0, max_hp] 范围内）
+                $pokemon['hp'] = strval($new_hp);
+                $hp_validation = api_validate_and_correct_hp($pokemon, $new_hp, $max_hp);
+                $new_hp = $hp_validation['hp'];
+
+                // 更新HP和状态
+                if ($state_changed) {
+                    DB::query(pm_sql(
+                        "UPDATE " . pm_table('pm_mypm') . " SET hp = %d, state = %d, statetime = %d WHERE id = %d",
+                        $new_hp,
+                        $new_state,
+                        $timestamp,
+                        $pokemon_id
+                    ));
+                } else {
+                    DB::query(pm_sql(
+                        "UPDATE " . pm_table('pm_mypm') . " SET hp = %d WHERE id = %d",
+                        $new_hp,
+                        $pokemon_id
+                    ));
+                }
+
+                // 物品扣除在 switch 结束后统一处理
+
+                $success = true;
+
+                // 构建消息
+                $message_parts = [];
+                $message_parts[] = "成功对 {$pokemon['nickname']} 使用了 {$item_data['name']}";
+                if ($heal > 0) {
+                    $message_parts[] = "恢复了 {$heal} 点 HP";
+                }
+                if ($state_changed) {
+                    if ($current_state === 0) {
+                        $message_parts[] = "脱离濒危状态，进入虚弱状态";
+                    } elseif (in_array($current_state, [5, 6, 7], true)) {
+                        $message_parts[] = "饥饿状态已解除";
+                    } elseif ($new_state === 1) {
+                        $message_parts[] = "虚弱状态已完全恢复";
+                    } else {
+                        $message_parts[] = "虚弱状态有所好转";
+                    }
+                }
+                $message = implode('，', $message_parts);
+
+                $pokemon_update = [
+                    'id' => $pokemon_id,
+                    'hp' => $new_hp,
+                    'max_hp' => $max_hp,
+                    'old_state' => $current_state,
+                    'new_state' => $new_state,
+                    'state_changed' => $state_changed,
+                ];
+
+                break;
+
+            case '2': // 精灵球
+                pm_abort_battle_transaction('精灵球请在战斗中使用', 400);
+                break;
+
+            case '3': // 进化石
+
+                if (!$pokemon_id) {
+                    pm_abort_battle_transaction('请选择要使用的宝可梦', 400);
+                }
+
+                // 验证宝可梦所有权
+                $pokemon = api_my_pokemon_data($pokemon_id);
+
+                if (!$pokemon || $pokemon['uid'] != $uid) {
+                    pm_abort_battle_transaction('宝可梦不存在或不属于您', 403);
+                }
+
+                // 调用物品函数（传递物品 ID 而不是名称）
+                if (function_exists($item_module)) {
+                    $result = call_user_func($item_module, $pokemon_id, $item_data['name'], $item_id);
+
+                    if (isset($result) && $result === 1) {
+                        pm_abort_battle_transaction('该物品无法对当前宝可梦使用', 400);
+                    }
+
+                    $success = true;
+                    $message = "成功对 {$pokemon['nickname']} 使用了 {$item_data['name']}";
+                } else {
+                    pm_abort_battle_transaction('物品功能未实现', 500);
+                }
+
+                break;
+
+            case '4': // 强化道具
+
+                if (!$pokemon_id) {
+                    pm_abort_battle_transaction('请选择要使用的宝可梦', 400);
+                }
+
+                // 验证宝可梦所有权
+                $pokemon = api_my_pokemon_data($pokemon_id);
+
+                if (!$pokemon || $pokemon['uid'] != $uid) {
+                    pm_abort_battle_transaction('宝可梦不存在或不属于您', 403);
+                }
+
+                // 调用物品函数
+                if (function_exists($item_module)) {
+                    // 解析物品参数
+                    $params = [
+                        'iatk' => isset($item_data['atk']) ? $item_data['atk'] : 0,
+                        'idef' => isset($item_data['def']) ? $item_data['def'] : 0,
+                        'ispatk' => isset($item_data['spatk']) ? $item_data['spatk'] : 0,
+                        'ispdef' => isset($item_data['spdef']) ? $item_data['spdef'] : 0,
+                        'isd' => isset($item_data['speed']) ? $item_data['speed'] : 0,
+                        'ihp' => isset($item_data['hp']) ? $item_data['hp'] : 0,
+                    ];
+
+                    $result = call_user_func_array($item_module, array_merge([$pokemon_id, $item_data['name']], array_values($params)));
+
+                    if (isset($result) && $result === 1) {
+                        pm_abort_battle_transaction('该物品无法对当前宝可梦使用', 400);
+                    }
+
+                    $success = true;
+                    $message = "成功对 {$pokemon['nickname']} 使用了 {$item_data['name']}";
+                } else {
+                    pm_abort_battle_transaction('物品功能未实现', 500);
+                }
+
+                break;
+
+            case '5': // 装备道具（在装备页面使用）
+                pm_abort_battle_transaction('装备道具请在装备页面使用', 400);
+                break;
+
+            default:
+                pm_abort_battle_transaction('未知物品类型', 400);
+        }
+
+        if ($success) {
+            // 扣除物品
+            $new_num = $my_item['nums'] - 1;
+
+            if ($new_num <= 0) {
+                DB::query(pm_sql(
+                    "DELETE FROM " . pm_table('pm_myitem') . " WHERE id = %d",
+                    intval($my_item['id'])
+                ));
+                $item_remaining = 0;
+            } else {
+                DB::query(pm_sql(
+                    "UPDATE " . pm_table('pm_myitem') . " SET nums = %d WHERE id = %d",
+                    $new_num,
+                    intval($my_item['id'])
+                ));
+                $item_remaining = $new_num;
+            }
+
+            $response = [
+                'success' => true,
+                'message' => $message,
+                'item_remaining' => (int) $item_remaining,
+                'pokemon_updated' => $pokemon_update,
+            ];
+        } else {
+            pm_abort_battle_transaction('物品使用失败', 500);
+        }
+
+        DB::query('COMMIT');
+    } catch (Throwable $e) {
+        DB::query('ROLLBACK');
+        throw $e;
     }
+    api_success($response);
 }
 
 /**

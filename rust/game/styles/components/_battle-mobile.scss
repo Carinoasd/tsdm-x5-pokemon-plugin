@@ -1,0 +1,40 @@
+@media (max-width: 767px) {
+  .page-battle {
+    height: auto;
+    min-height: 520px;
+  }
+
+  .battle-tools button { width: 100%; }
+  .battle-card { flex: none; overflow: visible; }
+  .battle-card .battle-card-body { padding: 12px; overflow: visible; }
+  .battle-content-area { height: auto; flex-direction: column; }
+  .battle-tab-menu {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    width: 100%;
+    margin-bottom: 12px;
+  }
+  .battle-tab-menu .battle-tab { min-height: 44px; padding: 8px 2px; font-size: 14px; }
+  .battle-tab-menu .tab-arrow { display: none; }
+  .battle-divider { display: none; }
+  .battle-main-content { flex: none; }
+  .battle-main-content .battle-scene-container .battle-scene-upper { height: 300px; }
+  .battle-main-content .battle-scene-container .enemy-pokemon-block { right: 8px; top: 36px; }
+  .battle-main-content .battle-scene-container .player-pokemon-block { left: 8px; bottom: 12px; }
+  .battle-main-content .battle-scene-container .enemy-pokemon-block .enemy-info-box,
+  .battle-main-content .battle-scene-container .player-pokemon-block .player-info-box {
+    min-width: 115px;
+    padding: 8px;
+  }
+  .battle-main-content .battle-tab-content { padding: 0; }
+  .skills-panel { height: auto; min-height: 160px; padding: 0; }
+  .attack-button-section { width: 82px; }
+  .items-panel, .capture-panel { height: auto; min-height: 128px; padding: 8px 0; }
+  .battle-items-grid { max-height: 240px; gap: 12px; }
+  .battle-item-card { width: 56px; height: 56px; }
+  .battle-item-card.disabled:not(:disabled) { cursor: pointer; }
+  .battle-result-section { padding: 0; }
+  .battle-result { min-width: 0; width: 100%; padding: 12px; }
+  .battle-end-buttons { flex-wrap: wrap; justify-content: center; }
+  .battle-end-buttons button, .skill-selection-item { min-height: 44px; }
+}

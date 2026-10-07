@@ -129,7 +129,7 @@ jobs:
 
       # A local API fixture keeps PR checks independent of Docker/Discuz.
       # The browser runs freshly built WASM; PHP handlers have separate tests.
-      - name: Admin browser regressions
+      - name: Browser regressions on freshly built assets
         run: npm test --prefix scripts/browser
 
       - name: Upload browser failure diagnostics
@@ -139,3 +139,109 @@ jobs:
           name: admin-browser-failure
           path: scripts/browser/artifacts/
           if-no-files-found: ignore
+
+  database-contracts:
+    name: MariaDB concurrency and PHP/Rust contracts
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    services:
+      mariadb:
+        image: mariadb:10.11
+        env:
+          MARIADB_ROOT_PASSWORD: test-password
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="healthcheck.sh --connect --innodb_initialized"
+          --health-interval=5s --health-timeout=5s --health-retries=20
+    env:
+      TSDM_DB_HOST: 127.0.0.1
+      TSDM_DB_USER: root
+      TSDM_DB_PASSWORD: test-password
+      TSDM_PHP_CGI: php-cgi8.3
+      TSDM_API_CONTRACT_FIXTURES: ${{ github.workspace }}/target/api-contract-fixtures.json
+    steps:
+      - uses: actions/checkout@v7
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: mysqli
+          tools: none
+          coverage: none
+      - name: Install PHP CGI
+        run: sudo apt-get update && sudo apt-get install -y php8.3-cgi
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target/
+          key: ${{ runner.os }}-cargo-contracts-${{ hashFiles('**/Cargo.lock') }}
+      - name: Verify complete seeds and upgrade paths
+        run: php scripts/test/seed_upgrade_database.php
+      - name: Verify Pokemon state transitions against MariaDB
+        run: php scripts/test/pokemon_state_database.php
+      - name: Verify admin filters and inventory transactions
+        run: php scripts/test/admin_filter_database.php && php scripts/test/admin_item_database.php
+      - name: Verify admin catalog identities and configuration storage
+        run: php scripts/test/admin_catalog_database.php && php scripts/test/admin_identity_database.php
+      - name: Verify concurrent configuration defaults and saves
+        run: php scripts/test/config_concurrency_database.php
+      - name: Verify administrative Pokemon transactions
+        run: php scripts/test/admin_pokemon_database.php
+      - name: Verify legacy export values against MariaDB
+        run: python3 scripts/test/x2_export_regressions.py --database
+      - name: Verify forum topic visibility against MariaDB
+        run: TSDM_TOPICS_REAL_DB=1 php scripts/test/topics_permissions.php
+      - name: Exercise real PHP routes against MariaDB
+        run: mkdir -p target && php scripts/test/live_database.php
+      - name: Decode generated PHP responses with Rust models
+        run: cargo test -p _utils --test php_api_contract --locked -- --ignored
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: scripts/browser/package-lock.json
+      - name: Install browser integration dependencies
+        working-directory: scripts/browser
+        run: npm ci && npx playwright install --with-deps chromium
+      - name: Exercise game WASM against PHP and MariaDB
+        working-directory: scripts/browser
+        run: node live-player.cjs
+      - name: Save live browser diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v6
+        with:
+          name: game-live-browser-failure
+          path: scripts/browser/artifacts/live-player/
+          retention-days: 7
+
+  game-browser:
+    name: Game and admin browser regressions on shipped bundles
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: scripts/browser/package-lock.json
+      - name: Install browser test dependencies
+        working-directory: scripts/browser
+        run: npm ci && npx playwright install --with-deps chromium
+      - name: Test the shipped frontend bundles
+        working-directory: scripts/browser
+        run: npm test
+      - name: Save browser diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v6
+        with:
+          name: game-browser-failure
+          path: scripts/browser/artifacts/
+          retention-days: 7

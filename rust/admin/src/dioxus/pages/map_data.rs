@@ -194,10 +194,13 @@ pub fn MapDataPage() -> Element {
                     save_text: if data.id > 0 { "保存修改" } else { "创建记录" },
                     disabled: is_busy,
                     on_save: move |payload: MapInfo| {
-                        editor_data.set(None);
-                        save_map_payload(payload);
+                        save_map_payload(payload, editor_data);
                     },
-                    on_close: move |_| editor_data.set(None),
+                    on_close: move |_| {
+                        if !*ADMIN_BUSY.read() {
+                            editor_data.set(None);
+                        }
+                    },
                 }
             }
 
@@ -359,12 +362,15 @@ fn reset_map_filters() {
     reload_maps();
 }
 
-fn save_map_payload(payload: MapInfo) {
+fn save_map_payload(payload: MapInfo, mut editor_data: Signal<Option<MapInfo>>) {
+    if *ADMIN_BUSY.read() {
+        return;
+    }
     let is_new = payload.id == 0;
 
     set_busy(true);
 
-    spawn(async move {
+    dioxus_core::spawn_forever(async move {
         let result = if is_new {
             insert_map_info(payload).await
         } else {
@@ -373,6 +379,9 @@ fn save_map_payload(payload: MapInfo) {
 
         match result {
             Ok(saved) => {
+                if let Ok(mut editor) = editor_data.try_write() {
+                    *editor = None;
+                }
                 if is_new {
                     set_notice(
                         AdminNoticeLevel::Success,
@@ -395,8 +404,8 @@ fn save_map_payload(payload: MapInfo) {
             }
             Err(error) => {
                 set_notice(AdminNoticeLevel::Error, format!("保存地图失败: {}", error));
-                set_busy(false);
             }
         }
+        set_busy(false);
     });
 }

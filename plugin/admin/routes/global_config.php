@@ -2,10 +2,11 @@
 
 function get_global_config()
 {
+  require_once __DIR__ . '/../../announcements.php';
+  $news_announcements = pm_get_news_announcements();
   // 兜底：确保必要的配置项存在
   $required_configs = [
     // 基础设定
-    'news_announcements' => '[]',
     'is_open' => '1',  // boolean: 1 = true, 0 = false
     'version' => 'Unknown',
     'ann_title' => '',
@@ -44,11 +45,11 @@ function get_global_config()
     if (!$exists) {
       $data_type = is_bool($default_value) ? 'boolean' : (is_int($default_value) ? 'integer' : 'string');
       if (is_bool($default_value)) {
-        $escaped_value = $default_value ? '1' : '0';
+        $value = $default_value ? '1' : '0';
       } else {
-        $escaped_value = addslashes($default_value);
+        $value = strval($default_value);
       }
-      @DB::query("INSERT INTO pm_config (`key`, `value`, `data_type`) VALUES ('$key', '$escaped_value', '$data_type')");
+      pm_config_upsert($key, $value, $data_type);
     }
   }
 
@@ -65,7 +66,7 @@ function get_global_config()
           $val = strval($query['value']);
           // 对 news_announcements 进行 JSON 解码
           if ($query['key'] === 'news_announcements') {
-            $decoded = json_decode(stripslashes($val), true);
+            $decoded = json_decode($val, true);
             if (is_array($decoded)) {
               $val = $decoded;
             }
@@ -85,6 +86,7 @@ function get_global_config()
       }
       $item[$query['key']] = $val;
     }
+    $item['news_announcements'] = $news_announcements;
     return [$item];
   } else {
     $json_ret = [];
@@ -96,22 +98,29 @@ function get_global_config()
 
 function set_global_config($data)
 {
+  require_once __DIR__ . '/../../config_schema.php';
+  // DDL must precede all setting writes because ALTER TABLE commits implicitly.
+  foreach ($data as $key => $value) {
+    if ($key === 'news_announcements' && is_array($value)) {
+      $value = json_encode($value, JSON_UNESCAPED_UNICODE);
+    }
+    if (is_string($value)) pm_ensure_config_value_capacity($value);
+  }
   foreach ($data as $key => $value) {
     $value = $data[$key];
-    if ($query = DB::fetch_first("SELECT * from pm_config where `key`='$key'")) {
+    if ($query = DB::fetch_first(pm_sql('SELECT * from pm_config where `key`=%s', $key))) {
       if ($query['data_type'] == "string") {
         // 特殊处理 news_announcements：如果是数组，转换为 JSON 字符串
         if ($key === 'news_announcements' && is_array($value)) {
           $value = json_encode($value, JSON_UNESCAPED_UNICODE);
         }
-        $escaped_value = addslashes($value);
-        DB::query("UPDATE pm_config SET `value`='$escaped_value' WHERE `key`='$key'");
+        DB::query(pm_sql('UPDATE pm_config SET `value`=%s WHERE `key`=%s', $value, $key));
       } else if ($query['data_type'] == "integer") {
         $value = intval($value);
-        DB::query("UPDATE pm_config SET `value`='$value' WHERE `key`='$key'");
+        DB::query(pm_sql('UPDATE pm_config SET `value`=%s WHERE `key`=%s', $value, $key));
       } else if ($query['data_type'] == "boolean") {
         $value = boolval($value) ? '1' : '0';
-        DB::query("UPDATE pm_config SET `value`='$value' WHERE `key`='$key'");
+        DB::query(pm_sql('UPDATE pm_config SET `value`=%s WHERE `key`=%s', $value, $key));
       } else {
         $json_ret = [];
         $json_ret["success"] = false;
@@ -164,15 +173,12 @@ function set_global_config($data)
           if ($key === 'news_announcements' && is_array($value)) {
             $value = json_encode($value, JSON_UNESCAPED_UNICODE);
           }
-          $escaped_value = addslashes($value);
         } else if ($data_type == "integer") {
           $value = intval($value);
-          $escaped_value = strval($value);
         } else if ($data_type == "boolean") {
           $value = boolval($value) ? '1' : '0';
-          $escaped_value = $value;
         }
-        DB::query("INSERT INTO pm_config (`key`, `value`, `data_type`) VALUES ('$key', '$escaped_value', '$data_type')");
+        pm_config_upsert($key, strval($value), $data_type, true);
       } else {
         // 对于未知键，忽略而不是报错
         continue;

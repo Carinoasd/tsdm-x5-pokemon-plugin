@@ -9,10 +9,12 @@ pub fn Welcome() -> Element {
     let mut is_success = use_signal(|| false);
 
     let handle_initialize = move |_| {
+        if *initializing.read() {
+            return;
+        }
+        initializing.set(true);
+        error_message.set(None);
         spawn(async move {
-            initializing.set(true);
-            error_message.set(None);
-
             let api = NewApiClient::new();
             match api.initialize_player().await {
                 Ok(response) => {

@@ -20,6 +20,7 @@ if (!defined('IN_DISCUZ')) {
  */
 function api_exception_handler($exception)
 {
+    if (function_exists('battle_action_rollback')) battle_action_rollback();
     // 记录详细错误到日志
     error_log(sprintf(
         "[API Exception] %s:%d - %s\nStack trace:\n%s",
@@ -31,7 +32,7 @@ function api_exception_handler($exception)
 
     // 根据异常类型返回适当的错误码
     $code = 500;
-    $message = sprintf("%s: %s", get_class($exception), $exception->getMessage());
+    $message = 'Server Error';
 
     // 根据异常类型设置HTTP状态码
     if ($exception instanceof InvalidArgumentException) {
@@ -65,6 +66,7 @@ function api_shutdown_handler()
 {
     $error = error_get_last();
     if ($error !== null && in_array($error['type'], [E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR])) {
+        if (function_exists('battle_action_rollback')) battle_action_rollback();
         error_log(sprintf(
             "[Fatal Error] %s:%d - %s",
             $error['file'],
@@ -96,16 +98,19 @@ header('Pragma: no-cache');
 // 统一响应格式
 function api_success($data = null)
 {
-    echo json_encode([
+    $response = [
         'success' => true,
         'data' => $data,
         'timestamp' => time()
-    ], JSON_UNESCAPED_UNICODE);
+    ];
+    if (function_exists('battle_action_finalize')) $response = battle_action_finalize($response);
+    echo json_encode($response, JSON_UNESCAPED_UNICODE);
     exit;
 }
 
 function api_error($message, $code = 400, $debug_info = null, $error_code = null)
 {
+    if (function_exists('battle_action_error')) battle_action_error($code);
     http_response_code($code);
     $response = [
         'success' => false,
@@ -156,7 +161,12 @@ function get_param($key, $default = null)
 function get_json_input()
 {
     $input = file_get_contents('php://input');
-    return json_decode($input, true) ?: [];
+    if (trim($input) === '') return [];
+    $decoded = json_decode($input, true);
+    if (json_last_error() !== JSON_ERROR_NONE || !is_array($decoded)) {
+        api_error('Invalid JSON request body', 400);
+    }
+    return $decoded;
 }
 
 /**
@@ -271,8 +281,13 @@ function validate_string($str, $name = 'string', $max_length = 255)
     // 去除前后空格
     $str = trim($str);
 
-    // 检查长度
-    if (strlen($str) > $max_length) {
+    // 界面与数据库按字符计数，UTF-8 中文不应被当作三个字符。
+    // PCRE is available even when the host does not install mbstring.
+    $length = preg_match_all('/./us', $str);
+    if ($length === false) {
+        api_error("Invalid {$name}: must be valid UTF-8", 400);
+    }
+    if ($length > $max_length) {
         api_error("Invalid {$name}: too long (max {$max_length} chars)", 400);
     }
 

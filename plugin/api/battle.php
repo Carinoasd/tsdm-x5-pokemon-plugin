@@ -25,6 +25,7 @@ require_once __DIR__ . '/index.php';
 
 // 加载常量定义
 require_once __DIR__ . '/constants.php';
+require_once __DIR__ . '/battle_storage.php';
 
 global $_G;
 
@@ -56,6 +57,10 @@ require_once __DIR__ . '/battle_core.php';
 
 // 加载 Boss 系统 API 函数
 require_once __DIR__ . '/boss.php';
+
+require_once __DIR__ . '/battle_actions.php';
+$stored_response = battle_action_begin($action);
+if ($stored_response !== null) api_json($stored_response);
 
 // recover 接口用于恢复战斗状态（需要依赖文件）
 if ($action === 'recover') {
@@ -129,100 +134,6 @@ function pm_data($id)
  * 都读旧列，镜像保证它们行为不变。后续阶段逐端点迁移后再废弃旧列。
  * ==================================================================== */
 
-/**
- * 惰性建表（老站点升级路径，幂等）。
- * DDL 与 docker/init.d/02-pokemon-schema.sql、plugin/install.php 保持一致。
- */
-function battle_ensure_tables()
-{
-    static $done = false;
-    if ($done) {
-        return;
-    }
-    $done = true;
-    DB::query("CREATE TABLE IF NOT EXISTS " . pm_table('pm_battle') . " (
-        `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
-        `uid` mediumint(8) unsigned NOT NULL,
-        `kind` varchar(10) NOT NULL DEFAULT 'wild',
-        `map_id` int(10) unsigned NOT NULL DEFAULT 0,
-        `turn` int(10) unsigned NOT NULL DEFAULT 0,
-        `phase` varchar(20) NOT NULL DEFAULT 'active',
-        `result` varchar(10) NOT NULL DEFAULT '',
-        `rng_seed` bigint(20) NOT NULL DEFAULT 0,
-        `rng_counter` int(10) unsigned NOT NULL DEFAULT 0,
-        `event_seq` int(10) unsigned NOT NULL DEFAULT 0,
-        `rules_version` int(10) unsigned NOT NULL DEFAULT 1,
-        `state_version` int(10) unsigned NOT NULL DEFAULT 2,
-        `field_json` text NOT NULL,
-        `created_at` int(10) unsigned NOT NULL DEFAULT 0,
-        `updated_at` int(10) unsigned NOT NULL DEFAULT 0,
-        PRIMARY KEY (`id`),
-        KEY `idx_uid` (`uid`),
-        KEY `idx_uid_phase` (`uid`, `phase`)
-    ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci");
-    DB::query("CREATE TABLE IF NOT EXISTS " . pm_table('pm_battle_unit') . " (
-        `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
-        `battle_id` bigint(20) unsigned NOT NULL,
-        `side` varchar(5) NOT NULL DEFAULT 'ally',
-        `slot` tinyint(3) unsigned NOT NULL DEFAULT 0,
-        `instance_id` int(10) unsigned NOT NULL DEFAULT 0,
-        `species_id` mediumint(8) unsigned NOT NULL DEFAULT 0,
-        `name` varchar(60) NOT NULL DEFAULT '',
-        `species_name` varchar(60) NOT NULL DEFAULT '',
-        `level` smallint(5) unsigned NOT NULL DEFAULT 1,
-        `stats_json` text NOT NULL,
-        `types_json` text NOT NULL,
-        `hp` int(10) NOT NULL DEFAULT 0,
-        `stages_json` text NOT NULL,
-        `status_json` text NOT NULL,
-        `volatile_json` text NOT NULL,
-        `buffs_json` text NOT NULL,
-        `effects_json` text NOT NULL,
-        `fainted` tinyint(1) NOT NULL DEFAULT 0,
-        `gender` tinyint(1) NOT NULL DEFAULT 0,
-        `is_shiny` tinyint(1) NOT NULL DEFAULT 0,
-        `capture_rate` smallint(5) unsigned NOT NULL DEFAULT 0,
-        `boss_multiplier` float NOT NULL DEFAULT 1,
-        PRIMARY KEY (`id`),
-        KEY `idx_battle` (`battle_id`)
-    ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci");
-    DB::query("CREATE TABLE IF NOT EXISTS " . pm_table('pm_effect') . " (
-        `id` int(10) unsigned NOT NULL AUTO_INCREMENT,
-        `code` varchar(40) NOT NULL,
-        `kind` varchar(10) NOT NULL DEFAULT 'move',
-        `hooks_json` text NOT NULL,
-        `params_json` text NOT NULL,
-        `description` varchar(255) NOT NULL DEFAULT '',
-        `version` int(10) unsigned NOT NULL DEFAULT 1,
-        PRIMARY KEY (`id`),
-        UNIQUE KEY `uk_code` (`code`)
-    ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci");
-    // 旧库 pm_skill 无 effect_id 列时惰性补列（幂等）
-    $skill_col = DB::fetch_first("SHOW COLUMNS FROM " . pm_table('pm_skill') . " LIKE 'effect_id'");
-    if (!$skill_col) {
-        DB::query("ALTER TABLE " . pm_table('pm_skill') . " ADD COLUMN effect_id int(10) unsigned NOT NULL DEFAULT 0 AFTER element");
-    }
-    DB::query("CREATE TABLE IF NOT EXISTS " . pm_table('pm_status') . " (
-        `code` varchar(20) NOT NULL,
-        `name` varchar(30) NOT NULL DEFAULT '',
-        `behavior_json` text NOT NULL,
-        `overlap` varchar(10) NOT NULL DEFAULT 'replace',
-        `version` int(10) unsigned NOT NULL DEFAULT 1,
-        PRIMARY KEY (`code`)
-    ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci");
-    DB::query("CREATE TABLE IF NOT EXISTS " . pm_table('pm_battle_event') . " (
-        `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
-        `battle_id` bigint(20) unsigned NOT NULL,
-        `turn` int(10) unsigned NOT NULL DEFAULT 0,
-        `seq` int(10) unsigned NOT NULL DEFAULT 0,
-        `type` varchar(30) NOT NULL DEFAULT '',
-        `payload_json` text NOT NULL,
-        `schema_version` smallint(5) unsigned NOT NULL DEFAULT 1,
-        `created_at` int(10) unsigned NOT NULL DEFAULT 0,
-        PRIMARY KEY (`id`),
-        KEY `idx_battle_turn` (`battle_id`, `turn`)
-    ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci");
-}
 
 /**
  * 载入用户进行中的战斗（新表优先）。
@@ -242,11 +153,12 @@ function battle_load_active($uid, $myusersdata, $mypokemon)
           AND updated_at > 0 AND updated_at < %d",
         time(), $uid, time() - 86400
     ));
+    $expired = DB::affected_rows();
 
     $row = DB::fetch_first(pm_sql(
         "SELECT * FROM " . pm_table('pm_battle') . "
         WHERE uid = %d AND phase IN ('active', 'awaiting_switch')
-        ORDER BY id DESC LIMIT 1",
+        ORDER BY id DESC LIMIT 1 FOR UPDATE",
         $uid
     ));
     if ($row) {
@@ -255,6 +167,26 @@ function battle_load_active($uid, $myusersdata, $mypokemon)
             $row['id']
         ));
         return battle_state_from_rows($row, $units);
+    }
+
+    // A request can still hold the old mirror after another request expires the
+    // engine row. Only users with no engine history can need legacy migration.
+    $has_engine_history = $expired > 0 || DB::fetch_first(pm_sql(
+        "SELECT id FROM " . pm_table('pm_battle') . " WHERE uid = %d ORDER BY id DESC LIMIT 1 FOR UPDATE",
+        $uid
+    ));
+    if ($has_engine_history) {
+        // Only clear this orphaned mirror if no new battle appeared meanwhile.
+        DB::query(pm_sql(
+            "UPDATE " . pm_table('pm_usersdata') . " u
+            LEFT JOIN " . pm_table('pm_battle') . " b
+                ON b.uid = u.uid AND b.phase IN ('active', 'awaiting_switch')
+            SET u.npcid = 0, u.level = 0, u.hp = 0, u.hpg = 0, u.atkg = 0, u.defg = 0,
+                u.spatkg = 0, u.spdefg = 0, u.sdg = 0, u.allure = 0, u.capture = 0
+            WHERE u.uid = %d AND b.id IS NULL",
+            $uid
+        ));
+        return null;
     }
 
     // 惰性迁移：旧列里有进行中的战斗
@@ -745,6 +677,12 @@ function battle_api_get_battle_log()
         }
     }
     $lines = battle_core_render_messages($events, $names, battle_lang());
+    $turn_events = [];
+    foreach ($events as $event) $turn_events[$event['turn']][] = $event;
+    $turns = [];
+    foreach ($turn_events as $turn => $group) {
+        $turns[] = ['turn' => intval($turn), 'lines' => battle_core_render_messages($group, $names, battle_lang())];
+    }
 
     // BBCode：可直接分享到帖子
     $bbcode = "[quote]" . ($battle['kind'] === 'boss' ? '[BOSS战]' : '[野外战斗]') . " 回合数 {$battle['turn']}
@@ -767,6 +705,7 @@ function battle_api_get_battle_log()
         'schema_version' => BATTLE_EVENT_SCHEMA_VERSION,
         'names' => $names,
         'lines' => $lines,
+        'turns' => $turns,
         'events' => $events,
         'bbcode' => $bbcode,
     ]);
@@ -814,6 +753,11 @@ function api_start_battle()
     }
 
     $boss_pokemon_type_id = isset($input['boss_pokemon_type_id']) ? intval($input['boss_pokemon_type_id']) : 0;
+    $boss_index = array_key_exists('boss_index', $input) ? $input['boss_index'] : null;
+    if (array_key_exists('boss_index', $input)
+        && (!is_int($boss_index) || $boss_index < 0 || $boss_pokemon_type_id <= 0)) {
+        api_error('Invalid boss selection', 400);
+    }
 
     global $_G, $myusersdata, $mypokemon, $settings;
 
@@ -828,15 +772,34 @@ function api_start_battle()
 
     // 检查是否已有进行中的战斗
     if (!empty($myusersdata['npcid']) && $myusersdata['npcid'] > 0) {
-        // 返回现有战斗状态
-        $battle = build_battle_response($myusersdata, $mypokemon);
-        api_success($battle);
+        battle_ensure_tables();
+        $engine_state = battle_load_active($_G['uid'], $myusersdata, $mypokemon);
+        $myusersdata = api_my_usersdata($_G['uid']);
+        if ($engine_state !== null) {
+            if ((int)$mypokemon['hp'] <= 0) {
+                api_recover_battle();
+            }
+            $is_boss = $engine_state['kind'] === 'boss';
+            $boss_multiplier = !empty($engine_state['sides']['enemy'])
+                ? (float)$engine_state['sides']['enemy'][0]['boss_multiplier'] : 1.0;
+            $battle = build_battle_response($myusersdata, $mypokemon, null, $is_boss, $boss_multiplier);
+            $battle['turn'] = $battle['battle_turn'] = (int)$engine_state['turn'];
+            api_success($battle);
+        }
+        if (!empty($myusersdata['npcid']) && $myusersdata['npcid'] > 0) {
+            // Expiry cleanup may have preserved a battle created after its
+            // initial lookup. Let the next request load it instead of replacing it.
+            api_error('战斗状态已更新，请重试', 409);
+        }
     }
 
     // 获取地图信息
     $map = DB::fetch_first(pm_sql("SELECT * FROM " . pm_table('pm_map') . " WHERE id = %d", $map_id));
     if (!$map) {
         api_error('Map not found', 404);
+    }
+    if (empty($map['is_enabled'])) {
+        api_error('此地图暂未开放', 403);
     }
 
     // 检查宠物HP
@@ -850,7 +813,7 @@ function api_start_battle()
     }
 
     // 生成野怪
-    $wild = generate_wild_pokemon_legacy($map, $myusersdata['strength'], $boss_pokemon_type_id > 0 ? $boss_pokemon_type_id : null);
+    $wild = generate_wild_pokemon_legacy($map, $myusersdata['strength'], $boss_pokemon_type_id > 0 ? $boss_pokemon_type_id : null, $boss_index);
 
     // 计算 Boss 属性倍率
     $is_boss = isset($wild['is_boss']) && $wild['is_boss'];
@@ -867,13 +830,14 @@ function api_start_battle()
     list($npcmhp, $npcatk, $npcdef, $npcspatk, $npcspdef, $npcsd) = battle_calc_new_npc_stats(
         $npc,
         $wild['level'],
-        $myusersdata['strength'] * $npc['strength']
+        $myusersdata['strength'] * $npc['strength'],
+        $is_boss ? ($wild['attributes'] ?? null) : null
     );
 
     // 生成野怪的性别和闪光状态（只生成一次，战斗过程中保持不变）
     $gender = 0;
     $sexrand = rand(1, 1000);
-    if ($npc['sex'] > 0) {
+    if ($npc['sex'] >= 0) {
         $gender = ($sexrand <= $npc['sex']) ? 0 : 1;
     }
     $is_shiny = (rand(1, 4096) === 1);
@@ -992,6 +956,38 @@ function pm_refund_reserved_skill_pp($skill_id, $uid, $pet_id, $max_uses)
     }
 }
 
+/** Reload mutable action inputs while the account lock is held. */
+function battle_reload_action_context($uid, $username, $require_healthy = true)
+{
+    // Call only after acquiring the account lock: a preceding turn may have
+    // changed HP, switched the active pet, or ended the battle while we waited.
+    $user = api_my_usersdata($uid);
+    $pet = api_my_pokemon($username);
+    if (empty($user['npcid']) || $user['npcid'] <= 0) {
+        pm_abort_battle_transaction('没有进行中的战斗', 400);
+    }
+    if (!$pet) {
+        pm_abort_battle_transaction('没有上场宠物', 400);
+    }
+    if ($require_healthy && ((int)$pet['hp'] <= 0 || (int)$pet['state'] === 0)) {
+        pm_abort_battle_transaction('当前宠物已倒下，请先更换宠物', 400);
+    }
+    return array($user, $pet);
+}
+
+function battle_consume_owned_item($uid, $record_id, $error_message)
+{
+    // The preflight inventory read can be stale. Reserve one item atomically
+    // before applying its effect, and remove only a depleted stack.
+    DB::query(pm_sql("UPDATE " . pm_table('pm_myitem') . " SET nums = nums - 1 WHERE id = %d AND uid = %d AND nums > 0",
+        $record_id, $uid));
+    if (!DB::affected_rows()) {
+        pm_abort_battle_transaction($error_message, 400);
+    }
+    DB::query(pm_sql("DELETE FROM " . pm_table('pm_myitem') . " WHERE id = %d AND uid = %d AND nums <= 0",
+        $record_id, $uid));
+}
+
 /**
  * 使用技能攻击
  *
@@ -1030,12 +1026,14 @@ function api_use_skill()
     // ===== 一回合一个事务 =====
     // 以 pm_usersdata 战斗状态行的排他锁串行化同账号并发回合（#69-71 同款锁点）。
     // api_error() 走 exit 语义，事务内的错误出口统一走 pm_abort_battle_transaction()。
-    DB::query("START TRANSACTION");
+    battle_action_transaction_begin();
     try {
         DB::fetch_first(pm_sql(
             "SELECT uid FROM " . pm_table('pm_usersdata') . " WHERE uid = %d FOR UPDATE",
             $_G['uid']
         ));
+
+        list($myusersdata, $mypokemon) = battle_reload_action_context($_G['uid'], $_G['username']);
 
         // 先确认当前宠物已学会技能，并原子预扣 PP，再进入战斗计算。
         // 预扣是条件 UPDATE（skillnum > 0 才扣减）：并发请求只有一个能扣到，
@@ -1073,7 +1071,6 @@ function api_use_skill()
         }
 
         // ===== 载入战斗（新表优先；升级部署前的老战斗在此惰性迁移）=====
-        $myusersdata = api_my_usersdata($_G['uid']);
         $state = battle_load_active($_G['uid'], $myusersdata, $mypokemon);
         if ($state === null) {
             pm_abort_battle_transaction('No active battle found', 400);
@@ -1186,9 +1183,9 @@ function api_use_skill()
             $state = battle_persist_state($state, $turn_events);
         }
 
-        DB::query("COMMIT");
+        battle_action_transaction_commit();
     } catch (Throwable $txn_error) {
-        DB::query("ROLLBACK");
+        battle_action_transaction_rollback();
         throw $txn_error;
     }
 
@@ -1225,7 +1222,7 @@ function api_use_skill()
     $battle['battle_over'] = $battle_ended;
     $battle['can_continue_switch'] = $can_switch;
     // 引擎 2.0 新增可选字段：真实回合数与本回合事件流（老客户端可安全忽略）
-    $battle['battle_turn'] = intval($state['turn']);
+    $battle['turn'] = $battle['battle_turn'] = intval($state['turn']);
     $battle['events'] = array();
     foreach ($turn_events as $e) {
         $battle['events'][] = array('turn' => $e['turn'], 'seq' => $e['seq'], 'type' => $e['type'], 'payload' => $e['payload']);
@@ -1272,14 +1269,14 @@ function api_flee()
 
     battle_ensure_tables();
 
-    DB::query("START TRANSACTION");
+    battle_action_transaction_begin();
     try {
         DB::fetch_first(pm_sql(
             "SELECT uid FROM " . pm_table('pm_usersdata') . " WHERE uid = %d FOR UPDATE",
             $_G['uid']
         ));
 
-        $myusersdata = api_my_usersdata($_G['uid']);
+        list($myusersdata, $mypokemon) = battle_reload_action_context($_G['uid'], $_G['username'], false);
         $state = battle_load_active($_G['uid'], $myusersdata, $mypokemon);
         if ($state === null) {
             pm_abort_battle_transaction('No active battle found', 400);
@@ -1356,9 +1353,9 @@ function api_flee()
             }
         }
 
-        DB::query("COMMIT");
+        battle_action_transaction_commit();
     } catch (Throwable $txn_error) {
-        DB::query("ROLLBACK");
+        battle_action_transaction_rollback();
         throw $txn_error;
     }
 
@@ -1395,7 +1392,7 @@ function api_flee()
     $battle['turn'] = 0;
     $battle['battle_over'] = $battle_ended;
     $battle['can_continue_switch'] = $can_switch;
-    $battle['battle_turn'] = intval($state['turn']);
+    $battle['turn'] = $battle['battle_turn'] = intval($state['turn']);
     $battle['events'] = array();
     foreach ($turn_events as $e) {
         $battle['events'][] = array('turn' => $e['turn'], 'seq' => $e['seq'], 'type' => $e['type'], 'payload' => $e['payload']);
@@ -1407,15 +1404,26 @@ function api_flee()
 /**
  * 生成野怪（旧版逻辑）
  */
-function generate_wild_pokemon_legacy($map, $strength, $force_boss_type_id = null)
+function generate_wild_pokemon_legacy($map, $strength, $force_boss_type_id = null, $boss_index = null)
 {
     $map_id = $map['id'];
 
     // 检查是否有 Boss 配置（使用 Boss API 函数）
     $boss_config = get_map_boss_config_from_map($map);
+    if ($boss_index !== null) {
+        $variants = $boss_config ? array_values($boss_config['bosses']) : [];
+        if (!is_int($boss_index) || $boss_index < 0 || $force_boss_type_id <= 0
+            || !isset($variants[$boss_index]['pokemon_type_id'])
+            || (int)$variants[$boss_index]['pokemon_type_id'] !== (int)$force_boss_type_id) {
+            api_error('Boss selection has changed. Please reload the map.', 400);
+        }
+    }
 
-    if ($boss_config && !empty($boss_config['bosses'])) {
-        if ($force_boss_type_id > 0) {
+    if ($boss_config && !empty($boss_config['bosses'])
+        && ($boss_index !== null || $force_boss_type_id > 0 || (int)($map['experience'] ?? -1) === -1)) {
+        if ($boss_index !== null) {
+            $boss = $variants[$boss_index];
+        } elseif ($force_boss_type_id > 0) {
             // 强制挑战指定 Boss（跳过刷新概率判定）
             $boss = null;
             foreach ($boss_config['bosses'] as $b) {
@@ -1447,7 +1455,11 @@ function generate_wild_pokemon_legacy($map, $strength, $force_boss_type_id = nul
                     'capture' => $pet['capture'] ?: 100,
                     'is_boss' => true,
                     'boss_multiplier' => $boss_multiplier,
+                    'attributes' => isset($boss['attributes']) && is_array($boss['attributes']) ? $boss['attributes'] : null,
                 ];
+            }
+            if ($boss_index !== null) {
+                api_error('Boss species no longer exists. Please reload the map.', 400);
             }
         }
     }
@@ -1456,9 +1468,9 @@ function generate_wild_pokemon_legacy($map, $strength, $force_boss_type_id = nul
     for ($i = 0; $i < 100; $i++) {
         $pet = DB::fetch_first(pm_sql(
             "SELECT * FROM " . pm_table('pm_data') . "
-            WHERE mapid LIKE %s OR mapid = '999'
+            WHERE FIND_IN_SET(%d, REPLACE(mapid, ' ', '')) > 0 OR mapid = '999'
             ORDER BY rand() LIMIT 1",
-            '%' . $map_id . '%'
+            $map_id
         ));
 
         if (!$pet) {
@@ -1557,15 +1569,25 @@ function battle_calc_my_stats($data, $pokemon)
  * 生成新野怪属性（随机IV/EV，10% 闪光概率）
  * @return array [hp, atk, def, spatk, spdef, sd]
  */
-function battle_calc_new_npc_stats($data, $level, $strength = 1)
+function battle_calc_new_npc_stats($data, $level, $strength = 1, $boss_attributes = null)
 {
     $level = intval($level);
     $flash = rand(1, 100) > 90 ? 1 : 0;
     if ($strength <= 0) $strength = 1;
     $stats = [];
+    $attribute_keys = ['hp' => 'hit_points', 'atk' => 'attack', 'def' => 'defense',
+        'spatk' => 'special_attack', 'spdef' => 'special_defense', 'speed' => 'speed'];
     foreach (['hp', 'atk', 'def', 'spatk', 'spdef', 'speed'] as $stat) {
         $base = $data[$stat];
         $iv = rand(0, 31);
+        // Preserve the old RNG sequence. Only explicitly configured Boss IVs
+        // replace the draw; the existing editor supports the range 0..255.
+        $key = $attribute_keys[$stat];
+        if (is_array($boss_attributes) && isset($boss_attributes[$key]) && is_numeric($boss_attributes[$key])
+            && $boss_attributes[$key] >= 0 && $boss_attributes[$key] <= 255
+            && (float)$boss_attributes[$key] === (float)(int)$boss_attributes[$key]) {
+            $iv = (int)$boss_attributes[$key];
+        }
         $ev = min(85, rand(0, 85) * $level / 100);
         $is_hp = ($stat === 'hp');
         $boost = $is_hp ? (10 + $level) : 5;
@@ -1592,8 +1614,8 @@ function calculate_rewards($mypokemon, $myusersdata, $npc, $npc_level, $map)
 
     // 金币
     $drop_money = json_decode($npc['drop_money'], true);
-    $money_min = !empty($drop_money[0]) ? $drop_money[0] : 10;
-    $money_max = !empty($drop_money[1]) ? $drop_money[1] : 50;
+    $money_min = isset($drop_money[0]) ? $drop_money[0] : 10;
+    $money_max = isset($drop_money[1]) ? $drop_money[1] : 50;
     $money = rand($money_min, $money_max) * $myusersdata['strength'];
 
     return [
@@ -1615,7 +1637,7 @@ function apply_rewards($uid, $mypokemon, $rewards)
     $old_level = intval($mypokemon['level']);
     $pmno = intval($mypokemon['species_id']);
 
-    $new_level = api_get_pet_exp_level($pmno, $new_exp);
+    $new_level = max($old_level, api_get_pet_exp_level($pmno, $new_exp));
     $level_up = false;
 
     if ($new_level > $old_level) {
@@ -1662,35 +1684,6 @@ function apply_rewards($uid, $mypokemon, $rewards)
     ];
 }
 
-/**
- * 清理战斗状态
- */
-function clear_battle_state($uid)
-{
-    // 同步结束新引擎的进行中战斗（capture/use_item/switch 等路径收尾时联动）。
-    // 已有 result 的战斗（fled/victory 已由新引擎路径写入）不覆盖 result；
-    // 无 result 的（旧路径清状态）记为 abandoned。
-    // 两条拆分而非 IF(result='')：Discuz querysafe 拒绝含空串字面量的表达式。
-    battle_ensure_tables();
-    DB::query(pm_sql(
-        "UPDATE " . pm_table('pm_battle') . "
-        SET phase = 'ended', updated_at = %d
-        WHERE uid = %d AND phase IN ('active', 'awaiting_switch') AND CHAR_LENGTH(result) > 0",
-        time(), $uid
-    ));
-    DB::query(pm_sql(
-        "UPDATE " . pm_table('pm_battle') . "
-        SET phase = 'ended', result = 'abandoned', updated_at = %d
-        WHERE uid = %d AND phase IN ('active', 'awaiting_switch') AND CHAR_LENGTH(result) = 0",
-        time(), $uid
-    ));
-    // 这些列均为整数类型：写入 '' 在 MariaDB 严格模式(STRICT_TRANS_TABLES)下会直接报错，
-    // 导致战斗状态无法清除（用户卡在战斗中），必须写 0
-    DB::query(pm_sql("UPDATE " . pm_table('pm_usersdata') . "
-        SET npcid = 0, level = 0, hp = 0, hpg = 0, atkg = 0, defg = 0,
-            spatkg = 0, spdefg = 0, sdg = 0, allure = 0, capture = 0
-        WHERE uid = %d", $uid));
-}
 
 /**
  * 我方宠物倒下时的统一判定。
@@ -1815,7 +1808,7 @@ function build_battle_response($myusersdata, $mypokemon, $map = null, $is_boss =
         } else {
             // 生成新的随机属性
             $sexrand = rand(1, 1000);
-            if ($npc['sex'] > 0) {
+            if ($npc['sex'] >= 0) {
                 $gender = ($sexrand <= $npc['sex']) ? 0 : 1;
             }
             $is_shiny = (rand(1, 4096) === 1);
@@ -1886,6 +1879,9 @@ function api_recover_battle()
     // 引擎优先：从 pm_battle 恢复 Boss 标识与真实回合数（旧列不存这些信息）
     battle_ensure_tables();
     $engine_state = battle_load_active($uid, $myusersdata, $mypokemon);
+    if ($engine_state === null) {
+        api_error('No active battle', 404);
+    }
     $is_boss = false;
     $boss_multiplier = 1.0;
     $engine_turn = null;
@@ -1900,7 +1896,7 @@ function api_recover_battle()
     // 构建战斗响应
     $response = build_battle_response($myusersdata, $mypokemon, null, $is_boss, $boss_multiplier);
     if ($engine_turn !== null) {
-        $response['battle_turn'] = $engine_turn;
+        $response['turn'] = $response['battle_turn'] = $engine_turn;
     }
 
     // 恢复的是一场当前宠物已倒下的战斗时，明确告知客户端需要换宠
@@ -2138,13 +2134,14 @@ function api_get_maps()
         $has_boss_config = is_array($boss_json) && isset($boss_json['bosses']) && is_array($boss_json['bosses']);
 
         if ($has_boss_config) {
-            foreach ($boss_json['bosses'] as $b) {
+            foreach (array_values($boss_json['bosses']) as $boss_index => $b) {
                 if (!empty($b['pokemon_type_id'])) {
                     $bosses[] = [
+                        'boss_index'      => $boss_index,
                         'pokemon_type_id' => (int)$b['pokemon_type_id'],
                         'pokemon_name'    => isset($b['pokemon_name']) ? (string)$b['pokemon_name'] : '',
-                        'level'           => isset($b['level']) ? (int)$b['level'] : 1,
-                        'boss_multiplier' => isset($b['boss_multiplier']) ? (float)$b['boss_multiplier'] : 1.0,
+                        'level'           => isset($b['level']) ? (int)$b['level'] : 50,
+                        'boss_multiplier' => isset($b['boss_multiplier']) ? (float)$b['boss_multiplier'] : 1.5,
                     ];
                 }
             }
@@ -2167,7 +2164,7 @@ function api_get_maps()
                 'is_enabled' => (bool)$row['is_enabled'],
                 'min_level' => (int)$row['min_level'],
                 'max_level' => (int)$row['max_level'],
-                'mode' => 'boss',
+                'mode' => (int)$row['experience'] === -1 ? 'boss' : 'hybrid',
                 'bosses' => $bosses,
                 'wild_pokemons' => $pokemon_names,
             ];
@@ -2272,14 +2269,14 @@ function api_capture_pokemon()
 
     // ===== 捕捉一个事务：扣球 / 插入宠物 / 战斗收尾原子化（#69-71 锁策略）=====
     try {
-        DB::query("START TRANSACTION");
+        battle_action_transaction_begin();
         DB::fetch_first(pm_sql(
             "SELECT uid FROM " . pm_table('pm_usersdata') . " WHERE uid = %d FOR UPDATE",
             $_G['uid']
         ));
 
         // 引擎状态为权威源（敌方等级/HP/捕捉基率/性别闪光快照）
-        $myusersdata = api_my_usersdata($_G['uid']);
+        list($myusersdata, $mypokemon) = battle_reload_action_context($_G['uid'], $_G['username']);
         $state = battle_load_active($_G['uid'], $myusersdata, $mypokemon);
         if ($state === null) {
             pm_abort_battle_transaction('没有进行中的战斗', 400);
@@ -2336,11 +2333,7 @@ function api_capture_pokemon()
         $turn_events = [];
 
         // 扣除精灵球（使用正确的 myitem_id）
-        if ($my_ball['nums'] == 1) {
-            DB::query(pm_sql("DELETE FROM " . pm_table('pm_myitem') . " WHERE id = %d", intval($my_ball['myitem_id'])));
-        } else {
-            DB::query(pm_sql("UPDATE " . pm_table('pm_myitem') . " SET nums = nums - 1 WHERE id = %d", intval($my_ball['myitem_id'])));
-        }
+        battle_consume_owned_item($_G['uid'], intval($my_ball['myitem_id']), '您没有该精灵球');
 
         if ($captured) {
             $status = 'captured';
@@ -2427,9 +2420,9 @@ function api_capture_pokemon()
             'hpg' => (int)$enemy['stats']['max_hp'],
         );
 
-        DB::query("COMMIT");
+        battle_action_transaction_commit();
     } catch (Throwable $txn_error) {
-        DB::query("ROLLBACK");
+        battle_action_transaction_rollback();
         throw $txn_error;
     }
 
@@ -2450,7 +2443,7 @@ function api_capture_pokemon()
     $battle['turn'] = 0;
     $battle['battle_over'] = ($status === 'captured') ? true : $battle_ended;
     $battle['can_continue_switch'] = $can_switch;
-    $battle['battle_turn'] = intval($state['turn']);
+    $battle['turn'] = $battle['battle_turn'] = intval($state['turn']);
     $battle['events'] = array();
     foreach ($turn_events as $e) {
         $battle['events'][] = array('turn' => $e['turn'], 'seq' => $e['seq'], 'type' => $e['type'], 'payload' => $e['payload']);
@@ -2549,11 +2542,13 @@ function api_use_item_in_battle()
 
     // ===== 使用与反击一个事务（#69-71 锁策略）=====
     try {
-        DB::query("START TRANSACTION");
+        battle_action_transaction_begin();
         DB::fetch_first(pm_sql(
             "SELECT uid FROM " . pm_table('pm_usersdata') . " WHERE uid = %d FOR UPDATE",
             $_G['uid']
         ));
+
+        list($myusersdata, $mypokemon) = battle_reload_action_context($_G['uid'], $_G['username']);
 
     // 根据物品类型处理
     switch ($item_type) {
@@ -2566,6 +2561,8 @@ function api_use_item_in_battle()
             if ($current_hp >= $max_hp && $addhp > 0) {
                 pm_abort_battle_transaction("{$mypokemon['nickname']}不需要回复HP");
             }
+
+            battle_consume_owned_item($_G['uid'], intval($my_item['id']), '您没有该物品');
 
             $new_hp = min($max_hp, $current_hp + $addhp);
 
@@ -2595,13 +2592,6 @@ function api_use_item_in_battle()
             pm_abort_battle_transaction('该物品无法在战斗中使用');
     }
 
-    // 扣除物品
-    if ($my_item['nums'] == 1) {
-        DB::query(pm_sql("DELETE FROM " . pm_table('pm_myitem') . " WHERE id = %d", intval($my_item['id'])));
-    } else {
-        DB::query(pm_sql("UPDATE " . pm_table('pm_myitem') . " SET nums = nums - 1 WHERE id = %d", intval($my_item['id'])));
-    }
-
     // 野怪反击（引擎核心；治疗已先行落库，反击从治疗后的 HP 起算）
     $resolved = battle_resolve_engine_counter($_G['uid'], $mypokemon);
     if ($resolved === null) {
@@ -2626,15 +2616,15 @@ function api_use_item_in_battle()
     $battle['turn'] = 0;
     $battle['battle_over'] = $battle_ended;
     $battle['can_continue_switch'] = $can_switch;
-    $battle['battle_turn'] = intval($state['turn']);
+    $battle['turn'] = $battle['battle_turn'] = intval($state['turn']);
     $battle['events'] = array();
     foreach ($turn_events as $e) {
         $battle['events'][] = array('turn' => $e['turn'], 'seq' => $e['seq'], 'type' => $e['type'], 'payload' => $e['payload']);
     }
 
-    DB::query("COMMIT");
+    battle_action_transaction_commit();
     } catch (Throwable $txn_error) {
-        DB::query("ROLLBACK");
+        battle_action_transaction_rollback();
         throw $txn_error;
     }
 
@@ -2705,11 +2695,13 @@ function api_use_item_on_skill_in_battle()
 
     // ===== 恢复与反击一个事务（#69-71 锁策略）=====
     try {
-        DB::query("START TRANSACTION");
+        battle_action_transaction_begin();
         DB::fetch_first(pm_sql(
             "SELECT uid FROM " . pm_table('pm_usersdata') . " WHERE uid = %d FOR UPDATE",
             $_G['uid']
         ));
+
+        list($myusersdata, $mypokemon) = battle_reload_action_context($_G['uid'], $_G['username']);
 
         // 获取技能信息
         $my_skill = DB::fetch_first(pm_sql(
@@ -2736,19 +2728,14 @@ function api_use_item_on_skill_in_battle()
         $restore_amount = $pp_amount >= 999 ? ($max_pp - $current_pp) : min($pp_amount, $max_pp - $current_pp);
         $new_pp = $current_pp + $restore_amount;
 
+        battle_consume_owned_item($_G['uid'], intval($my_item['id']), '您没有该物品');
+
         // 恢复PP
         DB::query(pm_sql(
             "UPDATE " . pm_table('pm_myskill') . " SET skillnum = %d WHERE id = %d",
             $new_pp,
             $skill_record_id
         ));
-
-        // 扣除物品
-        if ($my_item['nums'] == 1) {
-            DB::query(pm_sql("DELETE FROM " . pm_table('pm_myitem') . " WHERE id = %d", intval($my_item['id'])));
-        } else {
-            DB::query(pm_sql("UPDATE " . pm_table('pm_myitem') . " SET nums = nums - 1 WHERE id = %d", intval($my_item['id'])));
-        }
 
         // 野怪反击（引擎核心）
         $resolved = battle_resolve_engine_counter($_G['uid'], $mypokemon);
@@ -2773,15 +2760,15 @@ function api_use_item_on_skill_in_battle()
         $battle['turn'] = 0;
         $battle['battle_over'] = $battle_ended;
         $battle['can_continue_switch'] = $can_switch;
-        $battle['battle_turn'] = intval($state['turn']);
+        $battle['turn'] = $battle['battle_turn'] = intval($state['turn']);
         $battle['events'] = array();
         foreach ($turn_events as $e) {
             $battle['events'][] = array('turn' => $e['turn'], 'seq' => $e['seq'], 'type' => $e['type'], 'payload' => $e['payload']);
         }
 
-        DB::query("COMMIT");
+        battle_action_transaction_commit();
     } catch (Throwable $txn_error) {
-        DB::query("ROLLBACK");
+        battle_action_transaction_rollback();
         throw $txn_error;
     }
 
@@ -2795,13 +2782,12 @@ function api_get_battle_items()
     global $_G;
     $uid = validate_uid($_G['uid']);
 
-    // 旧库可能缺 module 列，先自愈；SELECT 亦不引用该列，api_get_item_module
-    // 会从行数据的 sitemname/tpname 回退解析模块名
+    // 旧库可能缺 module 列，先自愈，再同时支持新 module 与旧列回退。
     api_ensure_itemdata_module_column();
 
     // 获取用户的物品
     $my_items = DB::fetch_all(pm_sql(
-        "SELECT mi.*, i.type, i.sitemname, i.effects, i.name, i.tpname
+        "SELECT mi.*, i.type, i.module, i.sitemname, i.effects, i.name, i.tpname
          FROM " . pm_table('pm_myitem') . " mi
          INNER JOIN " . pm_table('pm_itemdata') . " i ON mi.itemid = i.id
          WHERE mi.uid = %d AND mi.nums > 0
@@ -2872,7 +2858,7 @@ function api_switch_pokemon()
     // 同账号的换宠与战斗结算，两笔 site 写入与野怪反击在同一个事务里生效，
     // 观察者不会看到「换了一半」或反击打到已经下场的宠物。
     battle_ensure_tables(); // 事务前建表：CREATE TABLE 在事务内会触发隐式提交（clear_battle_state 的联动更新需要 pm_battle）
-    DB::query("START TRANSACTION");
+    battle_action_transaction_begin();
     // 事务体内的任何异常（含数据库错误）都要显式回滚：常驻 worker 的连接
     // 不随请求关闭，未提交事务和行锁泄漏会阻塞该用户后续的所有战斗操作。
     // api_error() 走 exit 语义，其回滚由 pm_abort_battle_transaction() 负责。
@@ -3033,9 +3019,9 @@ SET site = 1 WHERE id = %d AND uid = %d AND site < 3 AND hp > 0 AND state != 0",
             $battle['can_continue_switch'] = false;
         }
 
-        DB::query("COMMIT");
+        battle_action_transaction_commit();
     } catch (Throwable $txn_error) {
-        DB::query("ROLLBACK");
+        battle_action_transaction_rollback();
         throw $txn_error;
     }
 
@@ -3066,7 +3052,7 @@ function api_replace_pokemon()
     // 已被换成健康的新宠物而走「尚未倒下」拒绝；野怪的战斗结算（如
     // clear_battle_state）也要先写这一行，同样被此锁挡在事务之外。
     battle_ensure_tables(); // 事务前建表：CREATE TABLE 在事务内会触发隐式提交（clear_battle_state 的联动更新需要 pm_battle）
-    DB::query("START TRANSACTION");
+    battle_action_transaction_begin();
     // 事务体内的任何异常（含数据库错误）都要显式回滚：常驻 worker 的连接
     // 不随请求关闭，未提交事务和行锁泄漏会阻塞该用户后续的所有战斗操作。
     // api_error() 走 exit 语义，其回滚由 pm_abort_battle_transaction() 负责。
@@ -3174,9 +3160,9 @@ SET site = 1 WHERE id = %d AND uid = %d AND site < 3 AND hp > 0 AND state != 0",
             }
         }
 
-        DB::query("COMMIT");
+        battle_action_transaction_commit();
     } catch (Throwable $txn_error) {
-        DB::query("ROLLBACK");
+        battle_action_transaction_rollback();
         throw $txn_error;
     }
 

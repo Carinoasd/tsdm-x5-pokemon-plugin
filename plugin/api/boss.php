@@ -180,6 +180,15 @@ function get_map_boss_config_from_map($map)
     $boss_config = json_decode($boss_config, true);
 
     if (is_array($boss_config) && isset($boss_config['bosses']) && is_array($boss_config['bosses'])) {
+        // Match the management model's serde defaults without turning absent
+        // legacy IVs into an explicit all-zero configuration.
+        foreach ($boss_config['bosses'] as &$boss) {
+            if (!is_array($boss)) continue;
+            if (!isset($boss['level'])) $boss['level'] = 50;
+            if (!isset($boss['boss_multiplier'])) $boss['boss_multiplier'] = 1.5;
+            if (!isset($boss['pokemon_name'])) $boss['pokemon_name'] = '';
+        }
+        unset($boss);
         return $boss_config;
     }
 

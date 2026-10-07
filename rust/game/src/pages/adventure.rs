@@ -6,23 +6,33 @@ use crate::{
     pages::BattlePage,
     state::{
         clear_battle_scene, refresh_inventory_state, refresh_pokemon_list,
-        refresh_user_profile_state, set_battle_scene, show_error, use_pokemon_state, BATTLE_STATE,
-        POKEMON_STATE,
+        refresh_user_profile_state, set_battle_scene, show_error, show_warning, use_pokemon_state,
+        BATTLE_STATE, POKEMON_STATE,
     },
-    utils::api_client::NewApiClient,
+    utils::api_client::{battle_timeout, NewApiClient},
 };
 use _utils::types::{
+    api_battle::{
+        BattleItem, BattleMutationResponse, PendingBattleAction, PpRestoreSkill, StartBattleRequest,
+    },
     api_map::MapInfo,
     api_map_region::MapRegion,
-    api_pokemon::{ApiResponse as PokemonApiResponse, PokemonBasic},
+    api_pokemon::PokemonBasic,
     api_user::InventoryItem,
 };
 
 #[component]
 pub fn Adventure() -> Element {
     use_pokemon_state();
-    let mut loading = use_signal(|| false);
-    let mut message_log = use_signal(Vec::<String>::new);
+    let mut loading = use_signal(|| true);
+    let pending = use_signal(crate::state::load_pending_battle);
+    let connection_error = use_signal(|| {
+        if pending.read().is_some() {
+            Some("上次操作的结果尚未确认，请重试确认结果。".to_string())
+        } else {
+            None
+        }
+    });
     let mut selected_region = use_signal(|| None::<String>);
     let mut selected_map_for_modal = use_signal(|| None::<MapInfo>);
     let min_level_filter = use_signal(|| None::<u32>);
@@ -31,33 +41,36 @@ pub fn Adventure() -> Element {
     let mut maps: Signal<Vec<MapInfo>> = use_signal(Vec::new);
     let mut maps_loading = use_signal(|| true);
 
-    let mut battle_items = use_signal(Vec::<InventoryItem>::new);
+    let mut battle_items = use_signal(Vec::<BattleItem>::new);
     let mut battle_balls = use_signal(Vec::<InventoryItem>::new);
 
-    let mut skill_selection_mode =
-        use_signal(|| None::<(u64, String, Vec<_utils::types::api_battle::BattleSkill>)>);
+    let mut skill_selection_mode = use_signal(|| None::<(u64, String, Vec<PpRestoreSkill>)>);
+
+    let actions = BattleActions {
+        loading,
+        pending,
+        error: connection_error,
+        items: battle_items,
+        balls: battle_balls,
+        selection: skill_selection_mode,
+    };
 
     let _resource = use_resource(move || async move {
         let api = NewApiClient::new();
 
-        match api.recover_battle().await {
-            Ok(scene) => {
+        match api.recover_current_battle().await {
+            Ok(Some(scene)) => {
                 set_battle_scene(Some(scene.clone()));
-                message_log.set(vec!["战斗已恢复".to_string()]);
 
-                let api2 = NewApiClient::new();
-                if let Ok(data) = api2.get_user_inventory(Some(1), 1).await {
-                    battle_items.set(data.items);
-                }
-                let api3 = NewApiClient::new();
-                if let Ok(data) = api3.get_user_inventory(Some(2), 1).await {
-                    battle_balls.set(data.items);
-                }
+                actions.refresh_inventory().await;
             }
-            Err(_) => {
-                clear_battle_scene();
+            Ok(None) => clear_battle_scene(),
+            Err(error) => {
+                let mut signal = connection_error;
+                signal.set(Some(format!("战斗同步失败：{error}")));
             }
         }
+        loading.set(false);
     });
 
     let _resource = use_resource(move || {
@@ -79,316 +92,46 @@ pub fn Adventure() -> Element {
         }
     });
 
-    let mut start_boss_adventure = move |map_id: u64, boss_type_id: u64| {
-        selected_map_for_modal.set(None);
-
-        let api = NewApiClient::new();
-        spawn(async move {
-            loading.set(true);
-
-            match api.start_battle(map_id, Some(boss_type_id)).await {
-                Ok(scene) => {
-                    let map_name = scene.map_name.clone();
-                    let pokemon_name = scene.wild_pokemon.name.clone();
-
-                    set_battle_scene(Some(scene.clone()));
-                    message_log.set(vec![format!(
-                        "在地图 {} 遇到了 Boss {}!",
-                        map_name, pokemon_name
-                    )]);
-
-                    let api2 = NewApiClient::new();
-                    if let Ok(data) = api2.get_battle_items().await {
-                        battle_items.set(data.items);
-                    }
-                    if let Ok(data) = api2.get_user_inventory(Some(2), 1).await {
-                        battle_balls.set(data.items);
-                    }
-                }
-                Err(e) => {
-                    show_error(format!("遇敵失败：{}", e));
-                }
-            }
-            loading.set(false);
-        });
-    };
-
+    let mut start_boss_adventure =
+        move |map_id: u64, boss_type_id: u64, boss_index: Option<u64>| {
+            selected_map_for_modal.set(None);
+            actions.begin(
+                "start",
+                serde_json::json!(StartBattleRequest {
+                    map_id,
+                    boss_pokemon_type_id: Some(boss_type_id),
+                    boss_index,
+                }),
+            );
+        };
     let regions = use_memo(move || MapRegion::from_maps(&maps.read()));
-
     let mut start_adventure = move |map_id: u64| {
         selected_map_for_modal.set(None);
-
-        let api = NewApiClient::new();
-        spawn(async move {
-            loading.set(true);
-
-            match api.start_battle(map_id, None).await {
-                Ok(scene) => {
-                    let map_name = scene.map_name.clone();
-                    let pokemon_name = scene.wild_pokemon.name.clone();
-
-                    set_battle_scene(Some(scene.clone()));
-                    message_log.set(vec![format!(
-                        "在地图 {} 遇到了野生的 {}！",
-                        map_name, pokemon_name
-                    )]);
-
-                    let api2 = NewApiClient::new();
-                    if let Ok(data) = api2.get_battle_items().await {
-                        battle_items.set(data.items);
-                    }
-                    if let Ok(data) = api2.get_user_inventory(Some(2), 1).await {
-                        battle_balls.set(data.items);
-                    }
-                }
-                Err(e) => {
-                    show_error(format!("遇敌失败：{}", e));
-                }
-            }
-            loading.set(false);
-        });
+        actions.begin("start", serde_json::json!({"map_id":map_id}));
     };
-
-    let use_skill = move |skill_id: u64| {
-        if let Some(current_battle) = &BATTLE_STATE.read().scene {
-            let battle_id = current_battle.battle_id.clone();
-            let api = NewApiClient::new();
-            spawn(async move {
-                loading.set(true);
-
-                match api.use_skill(&battle_id, skill_id).await {
-                    Ok(scene) => {
-                        let mut log = message_log.read().clone();
-                        log.push("你使用了技能！".to_string());
-                        if scene.status != _utils::types::api_battle::BattleStatus::Active {
-                            if scene.status == _utils::types::api_battle::BattleStatus::Victory {
-                                log.push(format!(
-                                    "战斗胜利！获得 {} 经验和 {} 金币",
-                                    scene.rewards.as_ref().map(|r| r.exp).unwrap_or(0),
-                                    scene.rewards.as_ref().map(|r| r.money).unwrap_or(0)
-                                ));
-                            } else if scene.status
-                                == _utils::types::api_battle::BattleStatus::Defeat
-                            {
-                                log.push(format!("{} 倒下了！", scene.my_pokemon.name));
-                            }
-                            set_battle_scene(Some(scene.clone()));
-                        } else {
-                            set_battle_scene(Some(scene.clone()));
-                        }
-                        message_log.set(log);
-                        refresh_pokemon_list();
-                    }
-                    Err(e) => {
-                        show_error(format!("攻击失败：{}", e));
-                    }
-                }
-                loading.set(false);
-            });
-        }
+    let use_skill =
+        move |skill_id: u64| actions.begin("turn", serde_json::json!({"skill_id":skill_id}));
+    let use_item_on_skill = move |item_id: u64, skill_record_id: u64| {
+        actions.begin(
+            "use_item_on_skill",
+            serde_json::json!({"item_id":item_id,"skill_record_id":skill_record_id}),
+        );
     };
-
-    let use_item_on_skill = move |item_id: u64, skill_id: u64| {
-        let api = NewApiClient::new();
-        spawn(async move {
-            loading.set(true);
-
-            match api.use_item_on_skill(item_id, skill_id).await {
-                Ok(scene) => {
-                    skill_selection_mode.set(None);
-                    message_log
-                        .write()
-                        .push("对技能使用了PP恢复道具！".to_string());
-
-                    let api2 = NewApiClient::new();
-                    if let Ok(data) = api2.get_battle_items().await {
-                        battle_items.set(data.items);
-                    }
-                    let api3 = NewApiClient::new();
-                    if let Ok(data) = api3.get_user_inventory(Some(2), 1).await {
-                        battle_balls.set(data.items);
-                    }
-
-                    set_battle_scene(Some(scene.clone()));
-                    refresh_pokemon_list();
-                }
-                Err(e) => {
-                    show_error(format!("使用物品失败：{}", e));
-                }
-            }
-            loading.set(false);
-        });
-    };
-
-    let use_item_in_battle = move |item_id: u64| {
-        let api = NewApiClient::new();
-        spawn(async move {
-            loading.set(true);
-
-            // 只发起一次请求：服务端在该请求中已扣道具、结算并让野怪反击，
-            // 之前的实现会再调用一次同一端点，导致道具被扣两次/报"您没有该物品"
-            match api.use_item_in_battle_raw(item_id).await {
-                Ok(response_text) => {
-                    // PP 恢复道具：服务端返回 requires_skill_selection，等待用户选择技能
-                    if let Ok(skill_resp) = serde_json::from_str::<
-                        PokemonApiResponse<_utils::types::api_battle::SkillSelectionResponse>,
-                    >(&response_text)
-                    {
-                        if skill_resp.success {
-                            if let Some(data) = skill_resp.data {
-                                if data.requires_skill_selection {
-                                    skill_selection_mode.set(Some((
-                                        data.item_id,
-                                        data.item_name,
-                                        data.available_skills,
-                                    )));
-                                    loading.set(false);
-                                    return;
-                                }
-                            }
-                        }
-                    }
-
-                    // 其余物品：同一响应即战斗场景
-                    match serde_json::from_str::<
-                        PokemonApiResponse<_utils::types::api_battle::BattleScene>,
-                    >(&response_text)
-                    {
-                        Ok(resp) => {
-                            if resp.success {
-                                if let Some(scene) = resp.data {
-                                    message_log.write().push("使用了物品！".to_string());
-
-                                    let api2 = NewApiClient::new();
-                                    if let Ok(data) = api2.get_battle_items().await {
-                                        battle_items.set(data.items);
-                                    }
-                                    let api3 = NewApiClient::new();
-                                    if let Ok(data) = api3.get_user_inventory(Some(2), 1).await {
-                                        battle_balls.set(data.items);
-                                    }
-
-                                    set_battle_scene(Some(scene.clone()));
-                                    refresh_pokemon_list();
-                                } else {
-                                    show_error("使用物品失败：No data returned".to_string());
-                                }
-                            } else {
-                                show_error(format!(
-                                    "使用物品失败：{}",
-                                    resp.error.unwrap_or_default()
-                                ));
-                            }
-                        }
-                        Err(e) => {
-                            show_error(format!("使用物品失败：{}", e));
-                        }
-                    }
-                }
-                Err(e) => {
-                    show_error(format!("使用物品失败：{}", e));
-                }
-            }
-            loading.set(false);
-        });
-    };
-
-    let attack = move || {
-        if let Some(current_battle) = &BATTLE_STATE.read().scene {
-            let battle_id = current_battle.battle_id.clone();
-            let api = NewApiClient::new();
-            spawn(async move {
-                loading.set(true);
-                match api.use_skill(&battle_id, 0).await {
-                    Ok(scene) => {
-                        let mut log = message_log.read().clone();
-                        log.push("使用了普通攻击！".to_string());
-                        if scene.status != _utils::types::api_battle::BattleStatus::Active {
-                            if scene.status == _utils::types::api_battle::BattleStatus::Victory {
-                                log.push(format!(
-                                    "战斗胜利！获得 {} 经验和 {} 金币",
-                                    scene.rewards.as_ref().map(|r| r.exp).unwrap_or(0),
-                                    scene.rewards.as_ref().map(|r| r.money).unwrap_or(0)
-                                ));
-                            } else if scene.status
-                                == _utils::types::api_battle::BattleStatus::Defeat
-                            {
-                                log.push(format!("{} 倒下了！", scene.my_pokemon.name));
-                            }
-                            set_battle_scene(Some(scene.clone()));
-                        } else {
-                            set_battle_scene(Some(scene.clone()));
-                        }
-                        message_log.set(log);
-                        refresh_pokemon_list();
-                    }
-                    Err(e) => {
-                        show_error(format!("攻击失败：{}", e));
-                    }
-                }
-                loading.set(false);
-            });
-        }
-    };
-
-    let capture = move |ball_id: u64| {
-        let api = NewApiClient::new();
-        spawn(async move {
-            loading.set(true);
-            match api.capture(ball_id).await {
-                Ok(scene) => {
-                    message_log.write().push(scene.message.clone());
-                    set_battle_scene(Some(scene.clone()));
-
-                    let api2 = NewApiClient::new();
-                    if let Ok(data) = api2.get_user_inventory(Some(2), 1).await {
-                        battle_balls.set(data.items);
-                    }
-
-                    refresh_pokemon_list();
-                }
-                Err(e) => {
-                    show_error(format!("捕捉失败：{}", e));
-                }
-            }
-            loading.set(false);
-        });
-    };
-
-    let flee_battle = move |_| {
-        if let Some(current_battle) = &BATTLE_STATE.read().scene {
-            let battle_id = current_battle.battle_id.clone();
-            let api = NewApiClient::new();
-            spawn(async move {
-                loading.set(true);
-
-                match api.flee(&battle_id).await {
-                    Ok(scene) => {
-                        let mut log = message_log.read().clone();
-                        if scene.status == _utils::types::api_battle::BattleStatus::Fled {
-                            log.push("成功逃跑！".to_string());
-                            refresh_user_profile_state();
-                        } else {
-                            log.push("逃跑失败！".to_string());
-                        }
-                        set_battle_scene(Some(scene.clone()));
-                        message_log.set(log);
-                        refresh_pokemon_list();
-                    }
-                    Err(e) => {
-                        show_error(format!("逃跑失败：{}", e));
-                    }
-                }
-                loading.set(false);
-            });
-        }
-    };
+    let use_item_in_battle =
+        move |item_id: u64| actions.begin("use_item", serde_json::json!({"item_id":item_id}));
+    let attack = move || actions.begin("turn", serde_json::json!({"skill_id":0}));
+    let capture =
+        move |ball_id: u64| actions.begin("capture", serde_json::json!({"ball_id":ball_id}));
+    let flee_battle = move |_| actions.begin("flee", serde_json::json!({}));
 
     let refresh_battle_items = move |_| {
         let api = NewApiClient::new();
         spawn(async move {
-            if let Ok(data) = api.get_battle_items().await {
-                battle_items.set(data.items);
+            match api.get_battle_items().await {
+                Ok(data) => battle_items.set(data.items),
+                Err(error) => {
+                    show_error(format!("道具载入失败：{error}。请重新点击道具页签重试。"))
+                }
             }
         });
     };
@@ -396,88 +139,28 @@ pub fn Adventure() -> Element {
     let refresh_battle_balls = move |_| {
         let api = NewApiClient::new();
         spawn(async move {
-            if let Ok(data) = api.get_user_inventory(Some(2), 1).await {
-                battle_balls.set(data.items);
+            match api.get_battle_balls().await {
+                Ok(data) => battle_balls.set(data.items),
+                Err(error) => {
+                    show_error(format!("精灵球载入失败：{error}。请重新点击捕捉页签重试。"))
+                }
             }
         });
     };
 
-    let mut end_battle_with_refresh = move |_| {
+    let end_battle_with_refresh = move |_| {
         clear_battle_scene();
-        message_log.set(Vec::new());
         refresh_pokemon_list();
         refresh_user_profile_state();
         refresh_inventory_state();
     };
 
-    let switch_pokemon = move || {
-        if let Some(current_battle) = &BATTLE_STATE.read().scene {
-            let battle_id = current_battle.battle_id.clone();
-            let api = NewApiClient::new();
-            spawn(async move {
-                loading.set(true);
-                match api.switch_pokemon(&battle_id).await {
-                    Ok(scene) => {
-                        let mut log = message_log.read().clone();
-                        log.push("切换了上场宠物！".to_string());
-                        if scene.status != _utils::types::api_battle::BattleStatus::Active {
-                            if scene.status == _utils::types::api_battle::BattleStatus::Victory {
-                                log.push("战斗胜利！".to_string());
-                            } else if scene.status
-                                == _utils::types::api_battle::BattleStatus::Defeat
-                            {
-                                log.push("战斗失败...".to_string());
-                            }
-                            set_battle_scene(Some(scene.clone()));
-                        } else {
-                            set_battle_scene(Some(scene.clone()));
-                        }
-                        message_log.set(log);
-                        refresh_pokemon_list();
-                    }
-                    Err(e) => {
-                        show_error(format!("切换宠物失败：{}", e));
-                    }
-                }
-                loading.set(false);
-            });
-        }
-    };
-
+    let switch_pokemon = move || actions.begin("switch_pokemon", serde_json::json!({}));
     let replace_pokemon = move |pokemon_id: u64| {
-        if let Some(current_battle) = &BATTLE_STATE.read().scene {
-            let battle_id = current_battle.battle_id.clone();
-            let api = NewApiClient::new();
-            spawn(async move {
-                loading.set(true);
-
-                match api.replace_pokemon(&battle_id, pokemon_id).await {
-                    Ok(scene) => {
-                        let mut log = message_log.read().clone();
-                        log.push("更换了上场宠物！".to_string());
-
-                        if scene.status != _utils::types::api_battle::BattleStatus::Active {
-                            if scene.status == _utils::types::api_battle::BattleStatus::Victory {
-                                log.push("战斗胜利！".to_string());
-                            } else if scene.status
-                                == _utils::types::api_battle::BattleStatus::Defeat
-                            {
-                                log.push("战斗失败...".to_string());
-                            }
-                            set_battle_scene(Some(scene.clone()));
-                        } else {
-                            set_battle_scene(Some(scene.clone()));
-                        }
-                        message_log.set(log);
-                        refresh_pokemon_list();
-                    }
-                    Err(e) => {
-                        show_error(format!("切换宠物失败：{}", e));
-                    }
-                }
-                loading.set(false);
-            });
-        }
+        actions.begin(
+            "replace_pokemon",
+            serde_json::json!({"pokemon_id":pokemon_id}),
+        )
     };
 
     let get_recommendation = |map: &MapInfo, pokemons: &[PokemonBasic]| -> String {
@@ -545,60 +228,40 @@ pub fn Adventure() -> Element {
     };
 
     let mut continue_battle = move |_| {
-        // 战斗结束响应里 map_id 恒为 0（服务端不回传地图），
-        // 必须读开战时持久化的地图 ID，否则这里拿 0 会静默失效
         let map_id = crate::state::get_last_map_id();
-        if map_id > 0 {
-            clear_battle_scene();
-            message_log.set(Vec::new());
-
+        if map_id == 0
+            || *loading.read()
+            || pending.read().is_some()
+            || connection_error.read().is_some()
+        {
+            return;
+        }
+        let injured = POKEMON_STATE.read().get_injured_pokemons();
+        loading.set(true);
+        spawn(async move {
             let api = NewApiClient::new();
-
-            let injured: Vec<(u64, String)> = POKEMON_STATE
-                .read()
-                .get_injured_pokemons()
-                .into_iter()
-                .map(|p| (p.id, p.name))
-                .collect();
-
-            spawn(async move {
-                loading.set(true);
-
-                for (pid, _pname) in &injured {
-                    let _ = api.heal_pokemon(*pid).await;
-                }
-                if !injured.is_empty() {
+            for pokemon in injured {
+                if let Err(error) = battle_timeout(api.heal_pokemon(pokemon.id))
+                    .await
+                    .and_then(|result| result)
+                {
                     refresh_pokemon_list();
                     refresh_user_profile_state();
+                    loading.set(false);
+                    show_error(format!(
+                        "治疗结果尚未确认：{error}。请检查宠物状态后再继续。"
+                    ));
+                    return;
                 }
-
-                match api.start_battle(map_id, None).await {
-                    Ok(scene) => {
-                        let map_name = scene.map_name.clone();
-                        let pokemon_name = scene.wild_pokemon.name.clone();
-
-                        set_battle_scene(Some(scene.clone()));
-                        message_log.set(vec![format!(
-                            "在地图 {} 遇到了野生的 {}！",
-                            map_name, pokemon_name
-                        )]);
-
-                        let api2 = NewApiClient::new();
-                        if let Ok(data) = api2.get_battle_items().await {
-                            battle_items.set(data.items);
-                        }
-                        if let Ok(data) = api2.get_user_inventory(Some(2), 1).await {
-                            battle_balls.set(data.items);
-                        }
-                    }
-                    Err(e) => {
-                        show_error(format!("继续冒险失败：{}", e));
-                    }
-                }
-                loading.set(false);
-            });
-        }
+            }
+            refresh_pokemon_list();
+            refresh_user_profile_state();
+            loading.set(false);
+            actions.begin("start", serde_json::json!({"map_id":map_id}));
+        });
     };
+    let actions_blocked =
+        *loading.read() || pending.read().is_some() || connection_error.read().is_some();
 
     rsx! {
         div { class: "page-adventure",
@@ -668,19 +331,19 @@ pub fn Adventure() -> Element {
                             let bosses = map.mode.get_bosses();
                             if !bosses.is_empty() {
                                 let map_id_for_boss = map.id;
-                                let bosses_vec: Vec<_> = bosses.into_iter().collect();
+                                let bosses_vec: Vec<_> = bosses.into_iter().enumerate().collect();
                                 let mid = map_id_for_boss;
                                 rsx! {
                                     div { class: "map-detail-section boss-challenge-section",
                                         h4 { "👑 Boss 挑战" }
                                         div { class: "boss-list-simple",
                                             Fragment {
-                                                for boss in bosses_vec {
+                                                for (position, boss) in bosses_vec {
                                                     button {
-                                                        key: "boss-{boss.pokemon_type_id}",
+                                                        key: "boss-{mid}-{position}",
                                                         class: "boss-row-btn",
-                                                         disabled: *loading.read() || pokemon_list_empty,
-                                                         onclick: move |_| start_boss_adventure(mid, boss.pokemon_type_id),
+                                                         disabled: actions_blocked || pokemon_list_empty,
+                                                         onclick: move |_| start_boss_adventure(mid, boss.pokemon_type_id, boss.boss_index),
                                                          div { class: "boss-row-content",
                                                              img {
                                                                  src: "{IMG_PATH_REMOTE}/pm/{boss.pokemon_type_id}.gif",
@@ -714,7 +377,7 @@ pub fn Adventure() -> Element {
                                     button {
                                         class: "modal-action-btn",
                                         onclick: move |_| start_adventure(map_id_for_adventure),
-                                    disabled: *loading.read() || pokemon_list_empty,
+                                    disabled: actions_blocked || pokemon_list_empty,
                                         "开始冒险"
                                     }
                                 }
@@ -727,7 +390,7 @@ pub fn Adventure() -> Element {
             if let Some(current_battle) = &current_battle_scene {
                 BattlePage {
                     battle: current_battle.clone(),
-                    loading: *loading.read(),
+                    loading: actions_blocked,
                     on_use_skill: move |skill_id: u64| use_skill(skill_id),
                     on_flee: move |_| flee_battle(()),
                     on_end: move |_| end_battle_with_refresh(()),
@@ -836,19 +499,19 @@ pub fn Adventure() -> Element {
                                                                     if !bosses.is_empty() {
                                                                         let map_id_for_boss_card = map_clone2.id;
                                                                         let total_boss_count = bosses.len();
-                                                                        let bosses_vec: Vec<_> = bosses.into_iter().take(3).collect();
+                                                                        let bosses_vec: Vec<_> = bosses.into_iter().enumerate().take(3).collect();
                                                                         let mid = map_id_for_boss_card;
                                                                         rsx! {
                                                                             div { class: "card-boss-list",
                                                                                 div { class: "card-boss-title", "👑 Boss:" }
                                                                                 Fragment {
-                                                                                    for boss in bosses_vec {
+                                                                                    for (position, boss) in bosses_vec {
                                                                                         div {
-                                                                                            key: "boss-{boss.pokemon_type_id}",
+                                                                                            key: "boss-{mid}-{position}",
                                                                                             class: "card-boss-item",
                                                                                             onclick: move |e| {
                                                                                                 e.stop_propagation();
-                                                                                                start_boss_adventure(mid, boss.pokemon_type_id);
+                                                                                                start_boss_adventure(mid, boss.pokemon_type_id, boss.boss_index);
                                                                                             },
                                                                                             img {
                                                                                                 src: "{IMG_PATH_REMOTE}/pm/{boss.pokemon_type_id}.gif",
@@ -876,7 +539,7 @@ pub fn Adventure() -> Element {
                                                                         e.stop_propagation();
                                                                         selected_map_for_modal.set(Some(map_clone2.clone()));
                                                                     },
-                                        disabled: *loading.read() || pokemon_list_empty,
+                                        disabled: actions_blocked || pokemon_list_empty,
                                                                     "查看详情"
                                                                 }
                                                             }
@@ -937,6 +600,197 @@ pub fn Adventure() -> Element {
                     }
                 }
             }
+            if let Some(error) = connection_error.read().clone() {
+                Modal { is_open: true, close_on_overlay: false,
+                    title: "确认战斗状态".to_string(), on_close: move |_| {},
+                    div { class: "battle-connection", "data-testid": "battle-connection",
+                        p { role: "alert", "{error}" }
+                        if pending.read().is_some() {
+                            p { "将确认刚才那次操作，已执行的操作不会重复扣除道具或推进回合。" }
+                            button { class: "btn btn-primary", "data-testid": "battle-action-retry",
+                                disabled: *loading.read(), onclick: move |_| actions.retry(), "重试并确认结果" }
+                        } else {
+                            button { class: "btn btn-primary", "data-testid": "battle-reconnect",
+                                disabled: *loading.read(), onclick: move |_| actions.recover(), "重新同步战斗" }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+struct BattleActions {
+    loading: Signal<bool>,
+    pending: Signal<Option<PendingBattleAction>>,
+    error: Signal<Option<String>>,
+    items: Signal<Vec<BattleItem>>,
+    balls: Signal<Vec<InventoryItem>>,
+    selection: Signal<Option<(u64, String, Vec<PpRestoreSkill>)>>,
+}
+
+impl BattleActions {
+    fn begin(self, action: &str, fields: serde_json::Value) {
+        if *self.loading.read() || self.pending.read().is_some() || self.error.read().is_some() {
+            return;
+        }
+        let scene = BATTLE_STATE.read().scene.clone();
+        if action != "start" && scene.is_none() {
+            return;
+        }
+        let action = PendingBattleAction::new(
+            action,
+            if action == "start" {
+                None
+            } else {
+                scene.as_ref()
+            },
+            fields,
+        );
+        self.submit(action);
+    }
+
+    fn retry(self) {
+        let pending = self.pending.read().clone();
+        if let Some(action) = pending {
+            self.submit(action);
+        }
+    }
+
+    fn submit(mut self, action: PendingBattleAction) {
+        if *self.loading.read() {
+            return;
+        }
+        let is_retry = self.pending.read().is_some();
+        self.loading.set(true);
+        self.pending.set(Some(action.clone()));
+        crate::state::save_pending_battle(Some(&action));
+        spawn(async move {
+            let api = NewApiClient::new();
+            match api.perform_battle_action(&action).await {
+                Ok(response) => {
+                    self.pending.set(None);
+                    crate::state::save_pending_battle(None);
+                    self.error.set(None);
+                    let verify_current_state = is_retry
+                        && match &response {
+                            BattleMutationResponse::Scene(scene) => !scene.battle_over,
+                            BattleMutationResponse::SkillSelection(_) => true,
+                        };
+                    // A receipt confirms the original action, but another tab may have
+                    // advanced or ended its battle while this tab was disconnected.
+                    if verify_current_state {
+                        match api.recover_current_battle().await {
+                            Ok(Some(current)) => set_battle_scene(Some(current)),
+                            Ok(None) => {
+                                clear_battle_scene();
+                                self.selection.set(None);
+                                refresh_pokemon_list();
+                                refresh_user_profile_state();
+                                refresh_inventory_state();
+                                self.loading.set(false);
+                                show_warning("刚才的操作已确认，该场战斗已结束。");
+                                return;
+                            }
+                            Err(error) => {
+                                self.selection.set(None);
+                                self.error
+                                    .set(Some(format!("刚才的操作已确认，战斗同步失败：{error}")));
+                                self.loading.set(false);
+                                return;
+                            }
+                        }
+                    }
+                    match response {
+                        BattleMutationResponse::Scene(scene) => {
+                            self.selection.set(None);
+                            let stale = BATTLE_STATE.read().scene.as_ref().is_some_and(|current| {
+                                current.engine_battle_id > 0
+                                    && scene.engine_battle_id > 0
+                                    && (current.engine_battle_id > scene.engine_battle_id
+                                        || (current.engine_battle_id == scene.engine_battle_id
+                                            && current.revision > scene.revision)
+                                        || (current.engine_battle_id != scene.engine_battle_id
+                                            && !current.battle_over
+                                            && action.action != "start"))
+                            });
+                            if stale {
+                                self.error.set(Some(
+                                    "刚才的操作已确认，但战斗已有更新，请重新同步。".to_string(),
+                                ));
+                            } else if !verify_current_state {
+                                set_battle_scene(Some(*scene));
+                            }
+                            refresh_pokemon_list();
+                            refresh_user_profile_state();
+                            refresh_inventory_state();
+                            self.refresh_inventory().await;
+                        }
+                        BattleMutationResponse::SkillSelection(selection) => {
+                            let stale = selection.engine_battle_id > 0
+                                && BATTLE_STATE.read().scene.as_ref().is_some_and(|current| {
+                                    current.engine_battle_id > 0
+                                        && (current.engine_battle_id != selection.engine_battle_id
+                                            || current.revision != selection.revision)
+                                });
+                            if stale {
+                                self.selection.set(None);
+                                self.error
+                                    .set(Some("战斗已更新，请重新同步后选择道具。".to_string()));
+                            } else {
+                                self.selection.set(Some((
+                                    selection.item_id,
+                                    selection.item_name,
+                                    selection.available_skills,
+                                )));
+                            }
+                        }
+                    }
+                }
+                Err(error) => {
+                    if !error.uncertain {
+                        self.pending.set(None);
+                        crate::state::save_pending_battle(None);
+                    }
+                    self.error.set(Some(error.message));
+                }
+            }
+            self.loading.set(false);
+        });
+    }
+
+    fn recover(mut self) {
+        if *self.loading.read() || self.pending.read().is_some() {
+            return;
+        }
+        self.loading.set(true);
+        spawn(async move {
+            let api = NewApiClient::new();
+            match api.recover_current_battle().await {
+                Ok(scene) => {
+                    set_battle_scene(scene);
+                    self.selection.set(None);
+                    self.error.set(None);
+                    refresh_pokemon_list();
+                    refresh_user_profile_state();
+                    self.refresh_inventory().await;
+                }
+                Err(error) => self.error.set(Some(format!("战斗同步失败：{error}"))),
+            }
+            self.loading.set(false);
+        });
+    }
+
+    async fn refresh_inventory(mut self) {
+        let api = NewApiClient::new();
+        match api.get_battle_items().await {
+            Ok(data) => self.items.set(data.items),
+            Err(error) => show_error(format!("道具载入失败：{error}。请重新点击道具页签重试。")),
+        }
+        match api.get_battle_balls().await {
+            Ok(data) => self.balls.set(data.items),
+            Err(error) => show_error(format!("精灵球载入失败：{error}。请重新点击捕捉页签重试。")),
         }
     }
 }

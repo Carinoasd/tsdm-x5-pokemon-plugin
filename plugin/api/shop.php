@@ -206,9 +206,7 @@ function api_buy_item()
             $uid
         ));
 
-        for ($i = 0; $i < $quantity; $i++) {
-            add_item_to_inventory($uid, $item_id);
-        }
+        add_item_to_inventory($uid, $item_id, $quantity);
         DB::query("COMMIT");
     } catch (Throwable $e) {
         DB::query("ROLLBACK");
@@ -258,26 +256,31 @@ function can_buy_item($uid, $price)
 /**
  * 添加物品到用户背包
  */
-function add_item_to_inventory($uid, $item_type_id)
+function add_item_to_inventory($uid, $item_type_id, $quantity = 1)
 {
-    // 检查背包是否已存在该物品
+    // 调用方已持有用户行锁；再锁住原有物品，按整笔购买检查有符号 SMALLINT 容量。
     $existing = DB::fetch_first(
         "SELECT * FROM " . pm_table('pm_myitem') . "
-        WHERE uid = $uid AND itemid = '$item_type_id'"
+        WHERE uid = $uid AND itemid = '$item_type_id' FOR UPDATE"
     );
 
     if ($existing) {
-        // 增加数量
+        $stock = (int) $existing['nums'];
+        if ($stock < 0 || $stock > 32767 - $quantity) {
+            pm_abort_battle_transaction('Inventory quantity limit exceeded', 400);
+        }
         DB::query(pm_sql(
-            "UPDATE " . pm_table('pm_myitem') . " SET nums = nums + 1 WHERE id = %d",
+            "UPDATE " . pm_table('pm_myitem') . " SET nums = nums + %d WHERE id = %d",
+            $quantity,
             intval($existing['id'])
         ));
     } else {
         // 添加新物品
         DB::query(pm_sql(
-            "INSERT INTO " . pm_table('pm_myitem') . " (uid, itemid, nums) VALUES (%d, %d, 1)",
+            "INSERT INTO " . pm_table('pm_myitem') . " (uid, itemid, nums) VALUES (%d, %d, %d)",
             $uid,
-            $item_type_id
+            $item_type_id,
+            $quantity
         ));
     }
 }

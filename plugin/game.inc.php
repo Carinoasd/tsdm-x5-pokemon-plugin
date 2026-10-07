@@ -6,6 +6,13 @@ if (isset($_GET['index']) && $_GET['index'] === 'admin') {
     return;
 }
 
+loadcache('plugin');
+require_once __DIR__ . '/game_access.php';
+$settings = $_G['cache']['plugin']['pokemon'] ?? [];
+if (!pm_game_is_staff($settings) && pm_game_is_closed($settings)) {
+    showmessage(lang('plugin/pokemon', 'system_closed'));
+}
+
 $wasmPath = 'source/plugin/pokemon/wasm';
 $wasmVer = time();
 

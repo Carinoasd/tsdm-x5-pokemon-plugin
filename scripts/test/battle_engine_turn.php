@@ -14,12 +14,15 @@ set_error_handler(function ($severity, $message, $file, $line) {
 });
 
 define('IN_DISCUZ', 1);
+require __DIR__ . '/../../plugin/api/battle_actions.php';
+require __DIR__ . '/../../plugin/api/battle_storage.php';
 require __DIR__ . '/../../plugin/api/battle_core.php';
 // pre-load the real helper so capture's runtime require_once (with eval-context __DIR__) no-ops
 require __DIR__ . '/../../plugin/api/pokemon_utils.php';
 
 // ---- load the real endpoint functions from battle.php (token extraction + eval) ----
-$wanted = [
+$wanted = ['battle_reload_action_context', 'battle_consume_owned_item',
+    'api_start_battle', 'api_recover_battle', 'battle_calc_new_npc_stats',
     'api_use_skill', 'api_flee', 'pm_refund_reserved_skill_pp', 'pm_data',
     'api_capture_pokemon', 'api_use_item_in_battle', 'api_use_item_on_skill_in_battle', 'api_replace_pokemon',
     'battle_ensure_tables', 'battle_load_active', 'battle_inject_ally_fresh_state',
@@ -99,6 +102,11 @@ function pm_sql($sql, ...$args)
 function api_my_usersdata($uid) { return DB::$usersdata; }
 function api_my_pokemon($username) { return DB::$pet_row; }
 function api_calculate_pokemon_max_hp($pokemon) { return 100; }
+function generate_wild_pokemon_legacy($map, $strength, $force_boss_type_id = null)
+{
+    $GLOBALS['generated_wild_count']++;
+    return ['npcid' => 129, 'level' => 15, 'capture' => 150];
+}
 function api_validate_and_correct_hp(&$pm, $hp = null, $max_hp = null)
 {
     $hp = $hp === null ? (int)$pm['hp'] : (int)$hp;
@@ -151,6 +159,10 @@ class DB
     public static $enemy_skills = [];
     public static $affected = 0;
     public static $next_id = 500;
+    public static $on_user_lock = null;
+    public static $on_expiry_mirror_clear = null;
+    public static $map_enabled = 1;
+    public static $wild_sex = 500;
 
     public static function reset()
     {
@@ -203,9 +215,22 @@ class DB
             return;
         }
         // pm_battle UPDATE from persist
-        // lifecycle timeout sweep: fixtures are fresh, so it must be a no-op here
-        if (preg_match('/^UPDATE pm_battle\b.*?updated_at </s', $sql)) {
+        // Model the timeout sweep so an expired row cannot silently stay active.
+        if (preg_match('/^UPDATE pm_battle\b.*?updated_at < (\d+)/s', $sql, $expiry)) {
+            preg_match('/updated_at = (\d+)/', $sql, $now);
+            preg_match('/WHERE uid = (\d+)/', $sql, $owner);
             self::$affected = 0;
+            foreach (self::$battles as &$row) {
+                if ((int)$row['uid'] === (int)$owner[1]
+                    && in_array($row['phase'], ['active', 'awaiting_switch'], true)
+                    && (int)($row['updated_at'] ?? 0) > 0 && (int)$row['updated_at'] < (int)$expiry[1]) {
+                    $row['phase'] = 'ended';
+                    $row['result'] = 'abandoned';
+                    $row['updated_at'] = (int)$now[1];
+                    self::$affected++;
+                }
+            }
+            unset($row);
             return;
         }
         if (preg_match('/^UPDATE pm_battle\b.*?SET/s', $sql)) {
@@ -289,6 +314,27 @@ class DB
             self::$affected = 1;
             return;
         }
+        // Expiry cleanup must not clear the mirror of a concurrently started battle.
+        if (preg_match('/^UPDATE pm_usersdata u\s+LEFT JOIN pm_battle b\b/s', $sql)) {
+            if (strpos($sql, "ON b.uid = u.uid AND b.phase IN ('active', 'awaiting_switch')") === false
+                || strpos($sql, 'WHERE u.uid = 1 AND b.id IS NULL') === false) {
+                throw new RuntimeException('Expiry mirror clear lacks its active-battle guard');
+            }
+            if (is_callable(self::$on_expiry_mirror_clear)) {
+                $callback = self::$on_expiry_mirror_clear;
+                self::$on_expiry_mirror_clear = null;
+                $callback();
+            }
+            self::$affected = 0;
+            foreach (self::$battles as $battle) {
+                if ((int)$battle['uid'] === 1 && in_array($battle['phase'], ['active', 'awaiting_switch'], true)) return;
+            }
+            foreach (['npcid', 'level', 'hp', 'hpg', 'atkg', 'defg', 'spatkg', 'spdefg', 'sdg', 'allure', 'capture'] as $c) {
+                self::$usersdata[$c] = 0;
+            }
+            self::$affected = 1;
+            return;
+        }
         // mirror clear (clear_battle_state)
         if (preg_match('/^UPDATE pm_usersdata\b.*?SET\s+npcid = 0, level = 0/is', $sql)) {
             foreach (['npcid', 'level', 'hp', 'hpg', 'atkg', 'defg', 'spatkg', 'spdefg', 'sdg', 'allure', 'capture'] as $c) {
@@ -334,18 +380,24 @@ class DB
         }
         // battle items: consume one (nums-1, delete at 1)
         if (preg_match('/^UPDATE pm_myitem\b.*?SET nums = nums - 1 WHERE id = (\d+)/s', $sql, $m)) {
+            self::$affected = 0;
             foreach (self::$myitems as &$it) {
-                if ((int)$it['id'] === (int)$m[1]) $it['nums'] = (int)$it['nums'] - 1;
+                if ((int)$it['id'] === (int)$m[1]
+                    && (strpos($sql, 'nums > 0') === false || (int)$it['nums'] > 0)) {
+                    $it['nums'] = (int)$it['nums'] - 1;
+                    self::$affected = 1;
+                }
             }
             unset($it);
-            self::$affected = 1;
             return;
         }
         if (preg_match('/^DELETE FROM pm_myitem\b.*?WHERE id = (\d+)/s', $sql, $m)) {
-            self::$myitems = array_values(array_filter(self::$myitems, function ($it) use ($m) {
-                return (int)$it['id'] !== (int)$m[1];
+            $before = count(self::$myitems);
+            self::$myitems = array_values(array_filter(self::$myitems, function ($it) use ($m, $sql) {
+                return (int)$it['id'] !== (int)$m[1]
+                    || (strpos($sql, 'nums <= 0') !== false && (int)$it['nums'] > 0);
             }));
-            self::$affected = 1;
+            self::$affected = $before - count(self::$myitems);
             return;
         }
         // captured wild insert (pm_mypm)
@@ -379,7 +431,14 @@ class DB
         }
         // direct PP set (item refill)
         if (preg_match('/^UPDATE pm_myskill\b.*?SET skillnum = (\d+) WHERE id = (\d+)/s', $sql, $m)) {
-            self::$affected = 1;
+            self::$affected = 0;
+            foreach (self::$myskills as &$skill) {
+                if (isset($skill['id']) && (int)$skill['id'] === (int)$m[2]) {
+                    $skill['skillnum'] = (int)$m[1];
+                    self::$affected = 1;
+                }
+            }
+            unset($skill);
             return;
         }
         // rewards (apply_rewards): pet exp/level and usersdata counters — just record
@@ -390,8 +449,23 @@ class DB
     {
         self::$logs[] = $sql;
         $sql = trim($sql);
-        if (strpos($sql, 'FOR UPDATE') !== false) {
+        if (strpos($sql, 'SHOW COLUMNS') === 0) return ['Field' => 'revision'];
+        if (preg_match('/^SELECT uid FROM pm_usersdata WHERE uid = \d+ FOR UPDATE$/', $sql)) {
+            if (self::$on_user_lock !== null && strpos($sql, 'FROM pm_usersdata') !== false) {
+                $callback = self::$on_user_lock;
+                self::$on_user_lock = null;
+                $callback();
+            }
             return ['uid' => 1];
+        }
+        if (preg_match('/FROM pm_myskill ms.*?WHERE ms.id = (\d+) AND ms.uid = (\d+) AND ms.petid = (\d+)/s', $sql, $m)) {
+            foreach (self::$myskills as $skill) {
+                if (isset($skill['id']) && (int)$skill['id'] === (int)$m[1]
+                    && (int)$skill['uid'] === (int)$m[2] && (int)$skill['petid'] === (int)$m[3]) {
+                    return array_merge($skill, ['max_pp' => 35]);
+                }
+            }
+            return false;
         }
         if (preg_match('/FROM pm_battle\b.*?WHERE id = (\d+) AND uid = \d+/s', $sql, $m)) {
             return isset(self::$battles[(int)$m[1]]) ? self::$battles[(int)$m[1]] : false;
@@ -403,6 +477,14 @@ class DB
             if (!$cands) return false;
             usort($cands, function ($a, $b) { return $b['id'] - $a['id']; });
             return $cands[0];
+        }
+        if (preg_match('/^SELECT id FROM pm_battle\s+WHERE uid = (\d+) ORDER BY id DESC LIMIT 1 FOR UPDATE$/s', trim($sql), $m)) {
+            $cands = array_values(array_filter(self::$battles, function ($battle) use ($m) {
+                return (int)$battle['uid'] === (int)$m[1];
+            }));
+            if (!$cands) return false;
+            usort($cands, function ($a, $b) { return $b['id'] - $a['id']; });
+            return ['id' => $cands[0]['id']];
         }
         if (preg_match('/FROM pm_battle_unit\b.*?WHERE battle_id = (\d+)/s', $sql, $m)) {
             $bid = (int)$m[1];
@@ -421,7 +503,11 @@ class DB
                 4 => ['id' => 4, 'name' => '小火龙', 'xs' => '火', 'xs2' => '', 'strength' => 1, 'sex' => 50,
                     'hp' => 39, 'atk' => 52, 'def' => 43, 'spatk' => 60, 'spdef' => 50, 'speed' => 65, 'drop_money' => '[5,20]'],
             ];
+            if ($id === 129) $data[$id]['sex'] = self::$wild_sex;
             return isset($data[$id]) ? $data[$id] : false;
+        }
+        if (preg_match('/FROM pm_map WHERE id = 3\b/', $sql)) {
+            return ['id' => 3, 'name' => 'Test map', 'is_enabled' => self::$map_enabled];
         }
         if (preg_match('/FROM pm_myskill\b/', $sql) && strpos($sql, 'WHERE skillid') !== false) {
             if (preg_match('/skillid = (\d+) AND uid = (\d+) AND petid = (\d+)/', $sql, $m)) {
@@ -689,6 +775,7 @@ check('wild_pokemon shape intact', $b['wild_pokemon']['id'] === 129 && $b['wild_
 check('message rendered as legacy damage log', strpos($b['message'], '皮卡使用了') !== false || strpos($b['message'], '鲤鱼王攻击了') !== false);
 check('transaction started', DB::has_log('START TRANSACTION'));
 check('user row locked FOR UPDATE', DB::has_log('SELECT uid FROM pm_usersdata WHERE uid = 1 FOR UPDATE'));
+check('engine lookup reads current state under the transaction', DB::has_log('ORDER BY id DESC LIMIT 1 FOR UPDATE'));
 check('PP reserved atomically', DB::has_log('skillnum = skillnum - 1'));
 check('PP consumed exactly once', (function () {
     foreach (DB::$myskills as $s) {
@@ -1178,6 +1265,10 @@ try {
 check('battle log responds', isset($log) && $log !== null && $log['battle_id'] === $battle_id);
 check('log carries the event stream', is_array($log['events']) && count($log['events']) >= 3);
 check('log renders legacy-style lines', is_array($log['lines']) && count($log['lines']) >= 1);
+check('log groups translated messages by turn', count($log['turns']) > 0 && is_int($log['turns'][0]['turn']) && is_array($log['turns'][0]['lines']));
+$grouped_lines = [];
+foreach ($log['turns'] as $group) $grouped_lines = array_merge($grouped_lines, $group['lines']);
+check('grouped log preserves all rendered lines', $grouped_lines === $log['lines']);
 check('log exposes shareable bbcode', strpos($log['bbcode'], '[quote]') === 0 && strpos($log['bbcode'], '[/quote]') !== false);
 check('log reports the rules version', $log['rules_version'] === 2);
 // ownership: someone else's battle id must 404
@@ -1190,6 +1281,244 @@ try {
 }
 check('foreign battle log rejected', $denied === 404);
 
+// A second request can finish while this request waits for the account lock.
+// Apply its committed state at lock acquisition, after the endpoint's preflight
+// reads. The endpoint must use that state and reject already-consumed resources.
+function race_set_hp($hp)
+{
+    DB::$pet_row['hp'] = $hp;
+    DB::$mypm[0]['hp'] = $hp;
+}
+function run_battle_endpoint($endpoint, $input)
+{
+    $GLOBALS['input'] = $input;
+    try {
+        $endpoint();
+    } catch (Throwable $response) {
+        return $response;
+    }
+    throw new RuntimeException('Endpoint returned without response');
+}
+function seed_race_items($hp = 80)
+{
+    DB::wipe_rows();
+    DB::$enemy_skills = [];
+    seed_battle(80, 15, 30, 42, $hp);
+    seed_pet_and_party($hp, 1);
+    DB::$myskills = [['id' => 701, 'skillid' => 5, 'uid' => 1, 'petid' => 11, 'skillnum' => 10]];
+    DB::$items = [502 => ['id' => 502, 'name' => '伤药', 'type' => 1, 'captmax' => 255, 'ballid' => 1,
+        'effects' => '{"hp":20}', 'module' => '', 'sitemname' => '', 'tpname' => '']];
+    DB::$myitems = [['id' => 902, 'uid' => 1, 'itemid' => 502, 'nums' => 1]];
+}
+
+echo "=== scenario P: actions reload state after acquiring the account lock ===" . PHP_EOL;
+seed_race_items();
+DB::$on_user_lock = function () { race_set_hp(30); };
+$r = run_turn();
+check('queued attack succeeds', $r->getCode() === 200);
+check('queued attack retains the preceding turn damage', (int)DB::$pet_row['hp'] <= 30);
+check('turn response reports the persisted turn', $r instanceof BattleApiResponse && $r->data['turn'] === 1);
+$r = run_turn();
+check('second response advances the displayed turn', $r instanceof BattleApiResponse && $r->data['turn'] === 2);
+
+seed_race_items();
+DB::$on_user_lock = function () { race_set_hp(0); };
+$r = run_turn();
+check('queued attack rejects a now-fainted pet', $r->getCode() === 400);
+check('rejected queued attack leaves PP alone', DB::$myskills[0]['skillnum'] === 10);
+check('rejected queued attack does not revive the pet', DB::$pet_row['hp'] === 0);
+
+seed_race_items();
+DB::$on_user_lock = function () {
+    DB::$pet_row = DB::$mypm[1];
+    DB::$pet_row['site'] = 1;
+};
+$r = run_turn();
+check('queued attack checks skills of the current active pet', $r->getCode() === 400);
+check('old pet PP is not spent after a concurrent switch', DB::$myskills[0]['skillnum'] === 10);
+
+seed_race_items();
+DB::$on_user_lock = function () { race_set_hp(30); };
+$r = run_battle_endpoint('api_use_item_in_battle', ['item_id' => 502]);
+check('queued heal succeeds', $r->getCode() === 200);
+check('queued heal starts with current HP before counterattack', DB::$pet_row['hp'] <= 50 && DB::$pet_row['hp'] > 30);
+
+foreach (['api_capture_pokemon', 'api_use_item_in_battle', 'api_use_item_on_skill_in_battle'] as $endpoint) {
+    seed_race_items(40);
+    if ($endpoint === 'api_capture_pokemon') DB::$items[502]['type'] = 2;
+    if ($endpoint === 'api_use_item_on_skill_in_battle') DB::$items[502]['module'] = 'pp5';
+    DB::$on_user_lock = function () { DB::$myitems = []; };
+    $r = run_battle_endpoint($endpoint, ['ball_id' => 502, 'item_id' => 502, 'skill_record_id' => 701]);
+    check($endpoint . ' rejects an already-used last item', $r->getCode() === 400);
+    check($endpoint . ' leaves HP and PP alone on rejection', DB::$pet_row['hp'] === 40 && DB::$myskills[0]['skillnum'] === 10);
+    check($endpoint . ' does not capture or advance the battle on rejection', !DB::has_log('INSERT INTO pm_mypm') && !DB::has_log('INSERT INTO pm_battle_event'));
+}
+
+seed_race_items(40);
+DB::$items[502]['module'] = 'pp5';
+DB::$myitems[0]['nums'] = 2;
+DB::$on_user_lock = function () { race_set_hp(30); };
+$r = run_battle_endpoint('api_use_item_on_skill_in_battle', ['item_id' => 502, 'skill_record_id' => 701]);
+check('PP refill restores the selected learned skill', $r->getCode() === 200 && DB::$myskills[0]['skillnum'] === 15);
+check('PP refill consumes exactly one of two items', count(DB::$myitems) === 1 && DB::$myitems[0]['nums'] === 1);
+check('PP refill counterattack starts from current HP', DB::$pet_row['hp'] <= 30);
+
+seed_race_items();
+DB::$items[502]['module'] = 'pp5';
+DB::$on_user_lock = function () {
+    DB::$pet_row = DB::$mypm[1];
+    DB::$pet_row['site'] = 1;
+};
+$r = run_battle_endpoint('api_use_item_on_skill_in_battle', ['item_id' => 502, 'skill_record_id' => 701]);
+check('PP refill rejects a skill belonging to the previously active pet', $r->getCode() === 404);
+check('rejected PP refill preserves the item and old pet PP', count(DB::$myitems) === 1 && DB::$myitems[0]['nums'] === 1 && DB::$myskills[0]['skillnum'] === 10);
+
+echo "=== lifecycle: expired engine battles cannot be recreated from their mirrors ===\n";
+function seed_expiring_battle($phase = 'active')
+{
+    DB::wipe_rows();
+    seed_pet_and_party(100, 0);
+    seed_battle(70, 15, 30, 42);
+    $id = array_key_first(DB::$battles);
+    DB::$battles[$id]['phase'] = $phase;
+    DB::$battles[$id]['updated_at'] = time() - 86410;
+    $GLOBALS['generated_wild_count'] = 0;
+    return $id;
+}
+foreach (['active', 'awaiting_switch'] as $phase) {
+    $id = seed_expiring_battle($phase);
+    $r = run_battle_endpoint('api_recover_battle', []);
+    check("Expired $phase recovery returns no battle", $r->getCode() === 404);
+    check("Expired $phase row is abandoned without creating a replacement", count(DB::$battles) === 1 && DB::$battles[$id]['phase'] === 'ended' && DB::$battles[$id]['result'] === 'abandoned');
+    check("Expired $phase mirror is cleared", DB::$usersdata['npcid'] === 0 && DB::$usersdata['hp'] === 0);
+    $r = run_battle_endpoint('api_recover_battle', []);
+    check("Repeated expired $phase recovery still returns no battle", $r->getCode() === 404 && count(DB::$battles) === 1);
+}
+
+$id = seed_expiring_battle();
+$r = run_turn();
+check('Action against expired battle is rejected and rolls back', $r->getCode() === 400 && DB::has_log('ROLLBACK'));
+// PP reservation precedes load; the real transaction rolls it back on rejection.
+check('Rejected expired action does not recreate or advance a battle', !DB::has_log('INSERT INTO pm_battle (') && !DB::has_log('INSERT INTO pm_battle_event'));
+
+$id = seed_expiring_battle();
+$r = run_battle_endpoint('api_start_battle', ['map_id' => 3]);
+$live = array_values(array_filter(DB::$battles, function ($row) { return $row['phase'] === 'active'; }));
+check('Starting after expiry generates a new encounter', $r->getCode() === 200 && $GLOBALS['generated_wild_count'] === 1);
+check('Starting after expiry keeps the old battle abandoned', DB::$battles[$id]['phase'] === 'ended' && DB::$battles[$id]['result'] === 'abandoned');
+check('Starting after expiry creates one new battle on the requested map', count($live) === 1 && $live[0]['id'] !== $id && (int)$live[0]['map_id'] === 3 && (int)$live[0]['turn'] === 0);
+
+$id = seed_expiring_battle();
+DB::$battles[$id]['updated_at'] = time();
+DB::$battles[$id]['kind'] = 'boss';
+DB::$battles[$id]['turn'] = 7;
+foreach (DB::$units as &$unit) if ($unit['side'] === 'enemy') $unit['boss_multiplier'] = 3;
+unset($unit);
+$r = run_battle_endpoint('api_start_battle', ['map_id' => 3]);
+check('Starting with a live battle reuses it without generating another encounter', $r->getCode() === 200 && $GLOBALS['generated_wild_count'] === 0 && count(DB::$battles) === 1);
+check('Existing boss battle keeps its boss attributes', ($r->data['wild_pokemon']['is_boss'] ?? false) === true && ($r->data['wild_pokemon']['boss_multiplier'] ?? 0) === 3.0);
+check('Existing battle start response keeps its real turn', ($r->data['battle_turn'] ?? null) === 7 && $r->data['turn'] === 7);
+
+foreach ([1, 0] as $bench) {
+    $id = seed_expiring_battle('awaiting_switch');
+    DB::$battles[$id]['updated_at'] = time();
+    seed_pet_and_party(0, $bench);
+    $r = run_battle_endpoint('api_start_battle', ['map_id' => 3]);
+    check('Existing battle start reports replacement availability, bench=' . $bench,
+        $r->getCode() === 200 && $r->data['can_continue_switch'] === ($bench > 0)
+        && $r->data['battle_over'] === ($bench === 0) && $GLOBALS['generated_wild_count'] === 0);
+}
+
+$id = seed_expiring_battle();
+seed_battle(66, 15, 30, 42);
+$live_id = max(array_keys(DB::$battles));
+$loaded = battle_load_active(1, DB::$usersdata, DB::$pet_row);
+check('Expiry of an older row still returns the current live battle', $loaded !== null && $loaded['battle_id'] === $live_id && count(DB::$battles) === 2);
+check('Expiry of an older row preserves the live mirror', DB::$battles[$id]['phase'] === 'ended' && DB::$usersdata['hp'] === 66);
+
+$id = seed_expiring_battle();
+DB::$on_expiry_mirror_clear = function () use ($id) {
+    $live = DB::$battles[$id];
+    $live['id'] = $id + 1000;
+    $live['phase'] = 'active';
+    $live['result'] = '';
+    $live['updated_at'] = time();
+    DB::$battles[$live['id']] = $live;
+    DB::$usersdata['npcid'] = 129;
+    DB::$usersdata['hp'] = 66;
+};
+battle_load_active(1, DB::$usersdata, DB::$pet_row);
+check('Expiry cleanup does not end a battle started during cleanup', isset(DB::$battles[$id + 1000]) && DB::$battles[$id + 1000]['phase'] === 'active');
+check('Expiry cleanup does not clear a newer battle mirror', DB::$usersdata['npcid'] === 129 && DB::$usersdata['hp'] === 66);
+DB::$on_expiry_mirror_clear = null;
+
+$id = seed_expiring_battle();
+DB::$on_expiry_mirror_clear = function () use ($id) {
+    $live = DB::$battles[$id];
+    $live['id'] = $id + 1000;
+    $live['phase'] = 'active';
+    $live['result'] = '';
+    $live['updated_at'] = time();
+    DB::$battles[$live['id']] = $live;
+    DB::$usersdata['npcid'] = 129;
+    DB::$usersdata['hp'] = 66;
+};
+$r = run_battle_endpoint('api_start_battle', ['map_id' => 3]);
+check('Concurrent start during expiry requests a retry', $r->getCode() === 409);
+check('Concurrent start during expiry does not generate another encounter', $GLOBALS['generated_wild_count'] === 0 && count(DB::$battles) === 2);
+check('Concurrent start during expiry preserves the winning battle and mirror', DB::$battles[$id + 1000]['phase'] === 'active' && DB::$usersdata['hp'] === 66);
+DB::$on_expiry_mirror_clear = null;
+
+$id = seed_expiring_battle();
+$cached_mirror = DB::$usersdata;
+$first = battle_load_active(1, $cached_mirror, DB::$pet_row);
+$second = battle_load_active(1, $cached_mirror, DB::$pet_row);
+check('Two requests holding an expired mirror both return no battle', $first === null && $second === null);
+check('A second cached-mirror request cannot recreate the expired battle', count(DB::$battles) === 1 && DB::$usersdata['npcid'] === 0);
+check('Engine history lookup uses a current read after another request expires the battle', DB::has_log('SELECT id FROM pm_battle WHERE uid = 1 ORDER BY id DESC LIMIT 1 FOR UPDATE'));
+
+foreach (['abandoned', 'victory'] as $prior_result) {
+    $id = seed_expiring_battle();
+    $cached_mirror = DB::$usersdata;
+    // Another request committed its outcome but has not yet cleared the mirror.
+    DB::$battles[$id]['phase'] = 'ended';
+    DB::$battles[$id]['result'] = $prior_result;
+    DB::$battles[$id]['updated_at'] = time();
+    $state = battle_load_active(1, $cached_mirror, DB::$pet_row);
+    check("$prior_result engine history blocks migration before its mirror is cleared", $state === null && count(DB::$battles) === 1);
+    check("$prior_result orphaned mirror is cleared without changing the outcome", DB::$usersdata['npcid'] === 0 && DB::$usersdata['hp'] === 0 && DB::$battles[$id]['result'] === $prior_result);
+}
+
+
+echo "=== encounter eligibility and attributes ===\n";
+DB::wipe_rows();
+seed_pet_and_party();
+DB::$usersdata['npcid'] = 0;
+DB::$map_enabled = 0;
+$GLOBALS['generated_wild_count'] = 0;
+$r = run_battle_endpoint('api_start_battle', ['map_id' => 3]);
+check('Disabled map rejects a direct start request', $r->getCode() === 403);
+check('Disabled map creates no encounter or battle state', $GLOBALS['generated_wild_count'] === 0 && DB::$battles === [] && DB::$usersdata['npcid'] === 0);
+DB::$map_enabled = 1;
+
+foreach ([0 => 1, 1000 => 0] as $sex_weight => $expected_gender) {
+    DB::wipe_rows();
+    seed_pet_and_party();
+    DB::$usersdata['npcid'] = 0;
+    DB::$wild_sex = $sex_weight;
+    $r = run_battle_endpoint('api_start_battle', ['map_id' => 3]);
+    check('Start preserves single-sex species weight ' . $sex_weight,
+        $r->getCode() === 200 && $r->data['wild_pokemon']['gender'] === $expected_gender);
+    $enemy_rows = array_values(array_filter(DB::$units, function ($unit) { return $unit['side'] === 'enemy'; }));
+    check('Engine and legacy mirror preserve single-sex species weight ' . $sex_weight,
+        (int)$enemy_rows[0]['gender'] === $expected_gender && ((DB::$usersdata['allure'] >> 1) & 1) === $expected_gender);
+    $legacy = DB::$usersdata;
+    $legacy['allure'] = '';
+    $response = build_battle_response($legacy, DB::$pet_row);
+    check('Legacy attribute generation preserves single-sex species weight ' . $sex_weight,
+        $response['wild_pokemon']['gender'] === $expected_gender);
+}
+DB::$wild_sex = 500;
 
 echo "\n";
 if ($failures > 0) {

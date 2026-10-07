@@ -3,7 +3,9 @@ defined('IN_DISCUZ') || exit('Access Denied');
 
 loadcache('plugin');
 $settings = $_G['cache']['plugin']['pokemon'] ?? [];
+require_once __DIR__ . '/game_access.php';
 
+$game_staff = pm_game_is_staff($settings);
 $index = isset($_GET['index']) ? preg_replace('/[^a-z_]/', '', $_GET['index']) : 'game';
 
 if (isset($_GET['endpoint'])) {
@@ -37,6 +39,13 @@ if (isset($_GET['endpoint'])) {
                 // 标记当前路由的 endpoint 名，供 boss.php 等函数被其他端点
                 // 复用的文件区分"作为端点被路由"与"被 battle.php 引入"
                 define('API_ENDPOINT', $endpoint);
+                // 公告和图片仍可读取，管理入口继续执行自己的权限检查。
+                // index=admin 不能豁免 endpoint=battle 等游戏操作。
+                if (!$game_staff && !in_array($endpoint, ['admin', 'config', 'badge', 'badges', 'avatar'], true)
+                    && pm_game_is_closed($settings)) {
+                    require_once __DIR__ . '/api/index.php';
+                    api_error(lang('plugin/pokemon', 'system_closed'), 503, null, 'game_closed');
+                }
                 include_once $api_file;
                 return;
             }
@@ -52,11 +61,8 @@ if (isset($_GET['endpoint'])) {
     return;
 }
 
-if (empty($settings['is_open']) && $index !== 'admin') {
-    $gmarray = explode(',', $settings['poke_smgly'] ?? '');
-    if (!in_array($_G['username'], $gmarray)) {
-        showmessage(lang('plugin/pokemon', 'system_closed'));
-    }
+if ($index !== 'admin' && !$game_staff && pm_game_is_closed($settings)) {
+    showmessage(lang('plugin/pokemon', 'system_closed'));
 }
 
 $allowed_routes = ['game', 'admin'];

@@ -10,12 +10,14 @@
 
 use anyhow::{anyhow, Result};
 use serde::{de::DeserializeOwned, Serialize};
+use std::{future::Future, task::Poll};
 
 use gloo_net::http::{Request, Response};
 
 // 导入API类型
 use _utils::types::api_battle::{
-    BattleScene, FleeRequest, StartBattleRequest, UseItemOnSkillRequest, UseSkillRequest,
+    BattleItemsResponse, BattleLogResponse, BattleMutationResponse, BattleScene, FleeRequest,
+    PendingBattleAction, StartBattleRequest, UseItemOnSkillRequest, UseSkillRequest,
 };
 use _utils::types::api_config::{GlobalConfigData, GlobalConfigResponse};
 use _utils::types::api_evolution::{
@@ -44,11 +46,40 @@ pub struct NewApiClient {
     base_url: &'static str,
 }
 
+#[derive(Debug)]
+pub struct BattleActionError {
+    pub message: String,
+    /// 网络断线或响应不完整时，服务端可能已执行，必须保留原 request_id。
+    pub uncertain: bool,
+}
+
+pub(crate) async fn battle_timeout<T>(future: impl Future<Output = T>) -> Result<T> {
+    let mut operation = Box::pin(future);
+    let mut timeout = Box::pin(gloo_timers::future::TimeoutFuture::new(15_000));
+    std::future::poll_fn(move |context| {
+        if let Poll::Ready(value) = operation.as_mut().poll(context) {
+            return Poll::Ready(Ok(value));
+        }
+        if timeout.as_mut().poll(context).is_ready() {
+            Poll::Ready(Err(anyhow!("连接超时，请重试确认结果")))
+        } else {
+            Poll::Pending
+        }
+    })
+    .await
+}
+
 impl NewApiClient {
     pub fn new() -> Self {
         Self {
             base_url: "/plugin.php?id=pokemon:pokemon",
         }
+    }
+
+    async fn player_mutation<T>(&self, operation: impl Future<Output = Result<T>>) -> Result<T> {
+        battle_timeout(operation)
+            .await
+            .map_err(|_| anyhow!("请求超时，操作结果尚未确认。请先检查最新资料，避免重复操作。"))?
     }
 
     // ============== 请求核心 ==============
@@ -211,7 +242,7 @@ impl NewApiClient {
 
     /// 获取宠物列表
     pub async fn get_pokemon_list(&self) -> Result<PokemonListResponse> {
-        self.get("pokemon", "list", "").await
+        battle_timeout(self.get("pokemon", "list", "")).await?
     }
 
     /// 获取宠物详情
@@ -222,7 +253,7 @@ impl NewApiClient {
 
     /// 重命名宠物
     pub async fn rename_pokemon(&self, id: u64, name: &str) -> Result<()> {
-        self.post_unit(
+        self.player_mutation(self.post_unit(
             "pokemon",
             "rename",
             "",
@@ -230,7 +261,7 @@ impl NewApiClient {
                 id,
                 name: name.to_string(),
             },
-        )
+        ))
         .await
     }
 
@@ -252,17 +283,17 @@ impl NewApiClient {
 
     /// 获取宠物可学习的技能列表
     pub async fn get_learnable_skills(&self, pokemon_id: u64) -> Result<LearnableSkillsResponse> {
-        self.get(
+        battle_timeout(self.get(
             "pokemon",
             "learnable_skills",
             &format!("&pokemon_id={}", pokemon_id),
-        )
-        .await
+        ))
+        .await?
     }
 
     /// 遗忘宠物技能
     pub async fn forget_skill(&self, pokemon_id: u64, skill_id: u64) -> Result<()> {
-        self.post_unit(
+        self.player_mutation(self.post_unit(
             "pokemon",
             "forget_skill",
             "",
@@ -270,14 +301,14 @@ impl NewApiClient {
                 "pokemon_id": pokemon_id,
                 "skill_id": skill_id
             }),
-        )
+        ))
         .await
     }
 
     /// 学习新技能（pm_myskill 无槽位列，技能按插入顺序生效；
     /// 替换技能需先调用遗忘接口）
     pub async fn learn_skill(&self, pokemon_id: u64, skill_id: u64) -> Result<LearnSkillResponse> {
-        self.post(
+        self.player_mutation(self.post(
             "pokemon",
             "learn_skill",
             "",
@@ -285,18 +316,18 @@ impl NewApiClient {
                 pokemon_id,
                 skill_id,
             },
-        )
+        ))
         .await
     }
 
     /// 获取宝可梦装备信息
     pub async fn get_equipment(&self, pokemon_id: u64) -> Result<EquipmentResponse> {
-        self.get(
+        battle_timeout(self.get(
             "pokemon",
             "equipment",
             &format!("&pokemon_id={}", pokemon_id),
-        )
-        .await
+        ))
+        .await?
     }
 
     /// 装备物品
@@ -306,7 +337,7 @@ impl NewApiClient {
         myitem_id: u64,
         slot_index: Option<i32>,
     ) -> Result<EquipItemResponse> {
-        self.post(
+        self.player_mutation(self.post(
             "pokemon",
             "equip_item",
             "",
@@ -315,7 +346,7 @@ impl NewApiClient {
                 myitem_id,
                 slot_index,
             },
-        )
+        ))
         .await
     }
 
@@ -325,7 +356,7 @@ impl NewApiClient {
         pokemon_id: u64,
         slot_index: u32,
     ) -> Result<UnequipItemResponse> {
-        self.post(
+        self.player_mutation(self.post(
             "pokemon",
             "unequip_item",
             "",
@@ -333,7 +364,7 @@ impl NewApiClient {
                 pokemon_id,
                 slot_index,
             },
-        )
+        ))
         .await
     }
 
@@ -373,6 +404,17 @@ impl NewApiClient {
         map_id: u64,
         boss_pokemon_type_id: Option<u64>,
     ) -> Result<BattleScene> {
+        self.start_battle_at_index(map_id, boss_pokemon_type_id, None)
+            .await
+    }
+
+    /// 按地图配置索引挑战 Boss，避免同物种的多个配置被当成同一项。
+    pub async fn start_battle_at_index(
+        &self,
+        map_id: u64,
+        boss_pokemon_type_id: Option<u64>,
+        boss_index: Option<u64>,
+    ) -> Result<BattleScene> {
         self.post(
             "battle",
             "start",
@@ -380,6 +422,7 @@ impl NewApiClient {
             &StartBattleRequest {
                 map_id,
                 boss_pokemon_type_id,
+                boss_index,
             },
         )
         .await
@@ -479,12 +522,19 @@ impl NewApiClient {
     }
 
     /// 在战斗中对指定技能使用PP恢复道具
-    pub async fn use_item_on_skill(&self, item_id: u64, skill_id: u64) -> Result<BattleScene> {
+    pub async fn use_item_on_skill(
+        &self,
+        item_id: u64,
+        skill_record_id: u64,
+    ) -> Result<BattleScene> {
         self.post(
             "battle",
             "use_item_on_skill",
             "",
-            &UseItemOnSkillRequest { item_id, skill_id },
+            &UseItemOnSkillRequest {
+                item_id,
+                skill_record_id,
+            },
         )
         .await
     }
@@ -504,17 +554,84 @@ impl NewApiClient {
         if let Some(max) = max_level {
             params.push_str(&format!("&max_level={}", max));
         }
-        self.get("battle", "maps", &params).await
+        battle_timeout(self.get("battle", "maps", &params)).await?
     }
 
     /// 恢复战斗状态
     pub async fn recover_battle(&self) -> Result<BattleScene> {
-        self.get("battle", "recover", "").await
+        battle_timeout(self.get("battle", "recover", "")).await?
+    }
+
+    pub async fn recover_current_battle(&self) -> Result<Option<BattleScene>> {
+        battle_timeout(async {
+            let response = Request::get(&self.url("battle", "recover", ""))
+                .send()
+                .await
+                .map_err(|_| anyhow!("无法连接服务器"))?;
+            if response.status() == 404 {
+                return Ok(None);
+            }
+            let response = self.send_ok(async { Ok(response) }).await?;
+            self.parse_envelope(response).await.map(Some)
+        })
+        .await?
+    }
+
+    pub async fn get_battle_log(&self, battle_id: u64) -> Result<BattleLogResponse> {
+        battle_timeout(self.get("battle", "battle_log", &format!("&battle_id={battle_id}"))).await?
+    }
+
+    pub async fn perform_battle_action(
+        &self,
+        pending: &PendingBattleAction,
+    ) -> std::result::Result<BattleMutationResponse, BattleActionError> {
+        let uncertain = |message: String| BattleActionError {
+            message,
+            uncertain: true,
+        };
+        let request = Request::post(&self.url("battle", &pending.action, ""))
+            .json(&pending.request)
+            .map_err(|error| BattleActionError {
+                message: format!("无法建立请求：{error}"),
+                uncertain: false,
+            })?;
+        let (status, text) = battle_timeout(async {
+            let response = request.send().await?;
+            let status = response.status();
+            response.text().await.map(|text| (status, text))
+        })
+        .await
+        .map_err(|error| uncertain(error.to_string()))?
+        .map_err(|_| uncertain("连接中断，操作结果尚未确认。".into()))?;
+        if status == 401 || status == 403 {
+            return Err(uncertain(
+                "登录或验证已过期，请重新登录并刷新页面，再重试确认原操作结果。".into(),
+            ));
+        }
+        let envelope: PokemonApiResponse<serde_json::Value> = serde_json::from_str(&text)
+            .map_err(|_| uncertain("服务器响应不完整，操作结果尚未确认。".into()))?;
+        if status >= 500 {
+            return Err(uncertain("服务器暂时无法回应，操作结果尚未确认。".into()));
+        }
+        if !envelope.success || status >= 400 {
+            return Err(BattleActionError {
+                message: envelope
+                    .error
+                    .unwrap_or_else(|| "战斗状态已改变，请重新同步。".into()),
+                uncertain: false,
+            });
+        }
+        serde_json::from_value(envelope.data.unwrap_or(serde_json::Value::Null))
+            .map_err(|_| uncertain("服务器返回的战斗资料不完整。".into()))
     }
 
     /// 获取可以在战斗中使用的物品（只包含HP恢复和PP恢复道具）
-    pub async fn get_battle_items(&self) -> Result<InventoryResponse> {
-        self.get("battle", "get_battle_items", "").await
+    pub async fn get_battle_items(&self) -> Result<BattleItemsResponse> {
+        battle_timeout(self.get("battle", "get_battle_items", "")).await?
+    }
+
+    pub async fn get_battle_balls(&self) -> Result<InventoryResponse> {
+        battle_timeout(self.get_user_inventory(Some(2), 1)).await?
     }
 
     // ============== Shop API ==============
@@ -528,13 +645,12 @@ impl NewApiClient {
         let type_param = item_type
             .map(|t| format!("&type={}", t))
             .unwrap_or_default();
-        self.get("shop", "list", &format!("&page={}{}", page, type_param))
-            .await
+        battle_timeout(self.get("shop", "list", &format!("&page={}{}", page, type_param))).await?
     }
 
     /// 购买物品
     pub async fn buy_item(&self, item_id: u64, quantity: u32) -> Result<BuyItemResponse> {
-        self.post(
+        self.player_mutation(self.post(
             "shop",
             "buy",
             "",
@@ -542,16 +658,16 @@ impl NewApiClient {
                 item_id,
                 quantity: quantity as u64,
             },
-        )
+        ))
         .await
     }
 
     pub async fn get_shop_pets(&self, page: u32) -> Result<ShopPetListResponse> {
-        self.get("shop", "pets", &format!("&page={}", page)).await
+        battle_timeout(self.get("shop", "pets", &format!("&page={}", page))).await?
     }
 
     pub async fn buy_pet(&self, pokemon_type_id: u64) -> Result<BuyPetResponse> {
-        self.post("shop", "buy_pet", "", &BuyPetRequest { pokemon_type_id })
+        self.player_mutation(self.post("shop", "buy_pet", "", &BuyPetRequest { pokemon_type_id }))
             .await
     }
 
@@ -578,7 +694,7 @@ impl NewApiClient {
 
     /// 获取用户资料
     pub async fn get_user_profile(&self) -> Result<UserProfileResponse> {
-        self.get("user", "profile", "").await
+        battle_timeout(self.get("user", "profile", "")).await?
     }
 
     /// 获取用户游戏统计
@@ -603,6 +719,33 @@ impl NewApiClient {
         .await
     }
 
+    pub async fn get_user_inventory_search(
+        &self,
+        item_type: Option<u32>,
+        page: u32,
+        search: &str,
+    ) -> Result<InventoryResponse> {
+        let encoded: String = search
+            .bytes()
+            .map(|byte| {
+                if byte.is_ascii_alphanumeric() || b"-._~".contains(&byte) {
+                    (byte as char).to_string()
+                } else {
+                    format!("%{byte:02X}")
+                }
+            })
+            .collect();
+        let category = item_type
+            .map(|value| format!("&type={value}"))
+            .unwrap_or_default();
+        self.get(
+            "user",
+            "inventory",
+            &format!("&page={page}{category}&search={encoded}"),
+        )
+        .await
+    }
+
     /// 获取背包物品类型统计
     pub async fn get_inventory_stats(&self) -> Result<InventoryStatsResponse> {
         self.get("user", "inventory_stats", "").await
@@ -610,17 +753,21 @@ impl NewApiClient {
 
     /// 治疗宝可梦
     pub async fn heal_pokemon(&self, pokemon_id: u64) -> Result<HealResponse> {
-        self.post_empty("user", "heal", &format!("&pokemon_id={}", pokemon_id))
-            .await
+        self.player_mutation(self.post_empty(
+            "user",
+            "heal",
+            &format!("&pokemon_id={}", pokemon_id),
+        ))
+        .await
     }
 
     /// 脱战并治疗宝可梦（宠物中心绿色通道）
     pub async fn heal_and_flee(&self, pokemon_id: u64) -> Result<HealResponse> {
-        self.post_empty(
+        self.player_mutation(self.post_empty(
             "user",
             "heal_and_flee",
             &format!("&pokemon_id={}", pokemon_id),
-        )
+        ))
         .await
     }
 
@@ -631,23 +778,24 @@ impl NewApiClient {
 
     /// 初始化新玩家
     pub async fn initialize_player(&self) -> Result<InitializePlayerResponse> {
-        self.post_empty("user", "initialize", "").await
+        self.player_mutation(self.post_empty("user", "initialize", ""))
+            .await
     }
 
     /// 刷新（hide=false，重新同步宠物数据并显示）或隐藏（hide=true）帖子宠物徽章
     pub async fn refresh_forum_badge(&self, hide: bool) -> Result<BadgeStatusResponse> {
-        self.post(
+        self.player_mutation(self.post(
             "user",
             "refresh_badge",
             "",
             &serde_json::json!({ "hide": hide }),
-        )
+        ))
         .await
     }
 
     /// 查询帖子宠物徽章当前是否隐藏
     pub async fn get_badge_status(&self) -> Result<BadgeStatusResponse> {
-        self.get("user", "badge_status", "").await
+        battle_timeout(self.get("user", "badge_status", "")).await?
     }
 
     /// 使用物品

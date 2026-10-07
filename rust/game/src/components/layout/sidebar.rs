@@ -165,22 +165,37 @@ pub fn Sidebar() -> Element {
 
     let mut refreshing_badge = use_signal(|| false);
     let mut badge_hidden = use_signal(|| false);
+    let mut badge_known = use_signal(|| false);
+    let mut badge_revision = use_signal(|| 0u64);
 
     // 挂载时同步一次当前徽章可见状态
     let _badge_status_res = use_resource(move || async move {
+        let revision = *badge_revision.peek();
         let api = NewApiClient::new();
-        if let Ok(status) = api.get_badge_status().await {
-            badge_hidden.set(status.hidden);
+        let result = api.get_badge_status().await;
+        if *badge_revision.peek() == revision {
+            match result {
+                Ok(status) => {
+                    badge_hidden.set(status.hidden);
+                    badge_known.set(true);
+                }
+                Err(e) => show_error(format!("徽章状态加载失败，请点击刷新徽章重试: {}", e)),
+            }
         }
     });
 
     let refresh_badge = move |_| {
+        if *refreshing_badge.read() {
+            return;
+        }
         refreshing_badge.set(true);
+        badge_revision += 1;
         let api = NewApiClient::new();
         spawn(async move {
             match api.refresh_forum_badge(false).await {
                 Ok(status) => {
                     badge_hidden.set(status.hidden);
+                    badge_known.set(true);
                     show_success("帖子徽章已刷新");
                 }
                 Err(e) => show_error(format!("刷新失败: {}", e)),
@@ -191,13 +206,18 @@ pub fn Sidebar() -> Element {
 
     // 切换帖子旁是否显示携带的宠物（隐藏 = 清空徽章数据，显示 = 重新同步并显示）
     let toggle_badge_visibility = move |_| {
+        if *refreshing_badge.read() || !*badge_known.read() {
+            return;
+        }
         refreshing_badge.set(true);
+        badge_revision += 1;
         let target_hidden = !*badge_hidden.read();
         let api = NewApiClient::new();
         spawn(async move {
             match api.refresh_forum_badge(target_hidden).await {
                 Ok(status) => {
                     badge_hidden.set(status.hidden);
+                    badge_known.set(true);
                     show_success(if status.hidden {
                         "帖子徽章已隐藏"
                     } else {
@@ -253,10 +273,12 @@ pub fn Sidebar() -> Element {
                                 }
                                 button {
                                     class: "admin-btn badge-toggle-btn",
-                                    disabled: *refreshing_badge.read(),
+                                    disabled: *refreshing_badge.read() || !*badge_known.read(),
                                     onclick: toggle_badge_visibility,
                                     title: "控制帖子旁是否显示携带的宠物",
-                                    if *badge_hidden.read() {
+                                    if !*badge_known.read() {
+                                        "加载徽章状态..."
+                                    } else if *badge_hidden.read() {
                                         "显示宠物"
                                     } else {
                                         "隐藏宠物"

@@ -32,7 +32,7 @@ class DB
                 'category' => '物攻', 'element' => '普通', 'power' => 40,
             ];
         }
-        if (preg_match('/SELECT \* from pm_config where `key`=\'([^\']+)\'/i', $sql, $match)) {
+        if (preg_match('/SELECT \* from pm_config where `key`\s*=\s*\'([^\']+)\'/i', $sql, $match)) {
             return self::$configs[$match[1]] ?? false;
         }
         if ($sql === 'SELECT id from pm_skill order by id desc limit 1') {
@@ -62,11 +62,13 @@ class DB
         self::$writes[] = $sql;
         if (preg_match('/UPDATE pm_config SET `value`=\'([^\']*)\' WHERE `key`=\'([^\']+)\'/i', $sql, $match)) {
             self::$configs[$match[2]]['value'] = stripslashes($match[1]);
-        } elseif (preg_match('/INSERT INTO pm_config .* VALUES \(\'([^\']+)\', \'([^\']*)\', \'([^\']+)\'\)/', $sql, $match)) {
+        } elseif (preg_match('/INSERT(?: IGNORE)? INTO pm_config .* VALUES \(\'([^\']+)\', \'([^\']*)\', \'([^\']+)\'\)/', $sql, $match)) {
             self::$configs[$match[1]] = ['key' => $match[1], 'value' => stripslashes($match[2]), 'data_type' => $match[3]];
         }
         return true;
     }
+
+    public static function insert_id() { return 11; }
 }
 
 function skill_payload($effect)

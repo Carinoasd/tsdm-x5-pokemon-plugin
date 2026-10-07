@@ -5,7 +5,10 @@ use crate::{
         common::Modal,
         layout::{Page, CURRENT_PAGE, IMG_PATH, INITIAL_INVENTORY_CATEGORY},
     },
-    state::{refresh_inventory_state, show_error, show_success, show_warning, use_battle_state},
+    state::{
+        refresh_inventory_state, refresh_pokemon_list, show_error, show_success, show_warning,
+        use_battle_state,
+    },
     utils::api_client::NewApiClient,
 };
 
@@ -27,6 +30,8 @@ enum ItemTargetType {
 #[component]
 pub fn Inventory() -> Element {
     let mut current_page = use_signal(|| 1usize);
+    let mut search_input = use_signal(String::new);
+    let mut search_query = use_signal(String::new);
     let mut current_category = use_signal(|| {
         let initial = *INITIAL_INVENTORY_CATEGORY.read();
         *INITIAL_INVENTORY_CATEGORY.write() = None;
@@ -39,12 +44,15 @@ pub fn Inventory() -> Element {
     let mut show_target_modal = use_signal(|| false);
     let mut pokemon_list_error_shown = use_signal(|| false);
 
-    let mut usable_pokemon_list = use_resource(move || async move {
-        if let Some((item_id, _, _)) = selected_item.read().as_ref() {
-            let api = NewApiClient::new();
-            Some(api.get_usable_pokemon(*item_id).await)
-        } else {
-            None
+    let mut usable_pokemon_list = use_resource(move || {
+        let selection = selected_item.read().clone();
+        async move {
+            if let Some((item_id, _, _)) = selection {
+                let api = NewApiClient::new();
+                Some(api.get_usable_pokemon(item_id).await)
+            } else {
+                None
+            }
         }
     });
 
@@ -73,8 +81,9 @@ pub fn Inventory() -> Element {
         let api = NewApiClient::new();
         let category = *current_category.read();
         let page = *current_page.read();
+        let search = search_query.read().clone();
         let result = api
-            .get_user_inventory(category, page as u32)
+            .get_user_inventory_search(category, page as u32, &search)
             .await
             .map_err(|e| format!("加载失败: {}", e));
         result
@@ -91,7 +100,25 @@ pub fn Inventory() -> Element {
         }
     };
 
+    let mut apply_search = move || {
+        search_query.set(search_input.read().trim().to_string());
+        current_page.set(1);
+        scroll_to_top();
+    };
+
+    use_effect(move || {
+        if let Some(Ok(data)) = inventory_data.read().as_ref() {
+            let last_page = data.total_pages.max(1);
+            if *current_page.peek() > last_page {
+                current_page.set(last_page);
+            }
+        }
+    });
+
     let mut use_item = move |item_id: u64, item_type_id: u64, item_name: String| {
+        if using_item.read().is_some() {
+            return;
+        }
         let target_type = get_item_target_type(item_type_id);
 
         // 装备道具特殊处理：跳转到个人中心装备页面
@@ -135,6 +162,9 @@ pub fn Inventory() -> Element {
     };
 
     let mut confirm_use_on_pokemon = move |pokemon_id: u64| {
+        if using_item.read().is_some() {
+            return;
+        }
         if let Some((item_id, _item_name, _)) = selected_item.read().as_ref() {
             let target_item_id = *item_id;
             using_item.set(Some(target_item_id));
@@ -145,8 +175,9 @@ pub fn Inventory() -> Element {
                 match api.use_item(target_item_id, Some(pokemon_id)).await {
                     Ok(result) => {
                         show_success(result.message);
+                        selected_item.set(None);
                         inventory_data.restart();
-                        usable_pokemon_list.restart();
+                        refresh_pokemon_list();
                         refresh_inventory_state();
                     }
                     Err(e) => {
@@ -159,6 +190,7 @@ pub fn Inventory() -> Element {
     };
 
     let categories = [
+        (None, "全部物品", "item/box.gif"),
         (Some(1u32), "回复药", "item/hp.gif"),
         (Some(2), "精灵球", "item/jlq.gif"),
         (Some(3), "进化石", "item/szs.gif"),
@@ -187,6 +219,28 @@ pub fn Inventory() -> Element {
                 }
 
                 div { class: "inventory-card-body",
+                    div { class: "inventory-search-bar",
+                        input {
+                            id: "inventory-search", r#type: "search",
+                            placeholder: "按物品名称搜索", "aria-label": "搜索背包物品名称",
+                            value: "{search_input.read()}",
+                            oninput: move |evt| search_input.set(evt.value()),
+                            onkeydown: move |evt| {
+                                if evt.key() == Key::Enter { apply_search(); }
+                            },
+                        }
+                        button { id: "inventory-search-submit", onclick: move |_| apply_search(), "搜索" }
+                        button {
+                            id: "inventory-search-clear",
+                            onclick: move |_| {
+                                search_input.set(String::new());
+                                search_query.set(String::new());
+                                current_page.set(1);
+                                scroll_to_top();
+                            },
+                            "清除"
+                        }
+                    }
                     div { class: "shop-category-bar",
                         for (cat_id , cat_name , cat_icon) in &categories {
                             {
@@ -216,7 +270,10 @@ pub fn Inventory() -> Element {
 
                     if inventory_state().is_none() {
                         div { class: "shop-loading", "正在加载背包..." }
+                    } else if let Some(Err(message)) = inventory_state() {
+                        div { class: "shop-empty", role: "alert", "{message}" }
                     } else if let Some(data) = items_to_display {
+                        p { id: "inventory-result-count", class: "inventory-result-count", "当前分类共 {data.total} 项" }
                         if data.items.is_empty() {
                             div { class: "shop-empty",
                                 img {
@@ -224,7 +281,11 @@ pub fn Inventory() -> Element {
                                     src: "{IMG_PATH}/item/box.gif",
                                     alt: "",
                                 }
-                                p { "背包空空如也" }
+                                if search_query.read().is_empty() {
+                                    p { "此分类没有物品" }
+                                } else {
+                                    p { "没有找到匹配的物品，试试其他名称或分类" }
+                                }
                             }
                         } else {
                             div {
@@ -267,7 +328,7 @@ pub fn Inventory() -> Element {
                                                     "buy-btn disabled"
                                                 };
                                                 rsx! {
-                                                    div { key: "{idx}", class: "shop-item-card",
+                                                    div { key: "{idx}", class: "shop-item-card", "data-item-id": "{item_type_id}",
                                                         div { class: "item-icon-area",
                                                             img {
                                                                 class: "item-icon-img",
@@ -336,6 +397,7 @@ pub fn Inventory() -> Element {
                 is_open: *show_target_modal.read(),
                 on_close: move |_| {
                     show_target_modal.set(false);
+                    selected_item.set(None);
                     pokemon_list_error_shown.set(false);
                 },
                 title: {

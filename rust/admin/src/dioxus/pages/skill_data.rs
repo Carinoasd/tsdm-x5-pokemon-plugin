@@ -201,7 +201,11 @@ pub fn SkillDataPage() -> Element {
                         editor_error.set(None);
                         save_skill_payload(payload, editor_data, editor_error);
                     },
-                    on_close: move |_| editor_data.set(None),
+                    on_close: move |_| {
+                        if !*ADMIN_BUSY.read() {
+                            editor_data.set(None);
+                        }
+                    },
                 }
             }
 
@@ -361,10 +365,13 @@ fn save_skill_payload(
     mut editor_data: Signal<Option<SkillType>>,
     mut editor_error: Signal<Option<String>>,
 ) {
+    if *ADMIN_BUSY.read() {
+        return;
+    }
     let is_new = payload.id == 0;
 
     set_busy(true);
-    spawn(async move {
+    dioxus_core::spawn_forever(async move {
         let result = if is_new {
             insert_skill_type(payload).await
         } else {
@@ -373,7 +380,9 @@ fn save_skill_payload(
 
         match result {
             Ok(saved) => {
-                editor_data.set(None);
+                if let Ok(mut editor) = editor_data.try_write() {
+                    *editor = None;
+                }
                 if is_new {
                     set_notice(
                         AdminNoticeLevel::Success,

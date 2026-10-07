@@ -13,7 +13,7 @@ if (!defined('IN_DISCUZ') && !defined('API_ROUTED')) exit;
 $uid = isset($_GET['uid']) ? intval($_GET['uid']) : 0;
 $size = isset($_GET['size']) ? $_GET['size'] : 'middle';
 $sizes = ['small' => 'small', 'middle' => 'middle', 'big' => 'big'];
-$size = isset($sizes[$size]) ? $sizes[$size] : 'small';
+$size = is_string($size) && isset($sizes[$size]) ? $sizes[$size] : 'small';
 
 $webroot = dirname(__DIR__, 4);
 $serve = null;
@@ -24,7 +24,7 @@ if ($uid > 0) {
     $subdir = substr($uid_sprintf, 0, 3) . '/' . substr($uid_sprintf, 3, 2) . '/' . substr($uid_sprintf, 5, 2);
     $avatar_files = [
         [$webroot . "/data/avatar/{$subdir}/{$uid_sprintf}_avatar_{$size}.jpg", 'image/jpeg'],
-        [$webroot . "/data/avatar/{$subdir}/" . ($uid % 100) . "_avatar_{$size}.jpg", 'image/jpeg'],
+        [$webroot . "/data/avatar/{$subdir}/" . substr($uid_sprintf, -2) . "_avatar_{$size}.jpg", 'image/jpeg'],
     ];
     foreach ($avatar_files as [$file, $mime]) {
         if (is_readable($file)) {

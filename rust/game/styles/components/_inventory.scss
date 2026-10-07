@@ -1,0 +1,31 @@
+.inventory-search-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+
+  input {
+    flex: 1 1 160px;
+    min-width: 0;
+    padding: 8px 12px;
+    border: 1px solid var(--color-border-light);
+    border-radius: 6px;
+    background: var(--color-bg-primary);
+    color: var(--color-text-primary);
+  }
+
+  button {
+    padding: 8px 14px;
+    border: 1px solid var(--color-primary-base);
+    border-radius: 6px;
+    background: var(--color-bg-primary);
+    color: var(--color-primary-base);
+    cursor: pointer;
+  }
+}
+
+.inventory-result-count {
+  margin: 0 0 8px;
+  color: var(--color-text-primary);
+  font-size: 13px;
+}

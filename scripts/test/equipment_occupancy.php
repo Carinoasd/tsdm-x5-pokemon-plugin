@@ -37,10 +37,14 @@ class DB
     public static function fetch_first($sql)
     {
         $sql = preg_replace('/\s+/', ' ', trim($sql));
+        $sql = preg_replace('/ FOR UPDATE$/', '', $sql);
+        if (preg_match('/^SELECT uid, npcid FROM pm_usersdata WHERE uid = (\d+)$/', $sql, $match)) {
+            return ['uid' => (int)$match[1], 'npcid' => 0];
+        }
         if (preg_match('/^SELECT \* FROM pm_mypm WHERE id = (\d+) AND uid = (\d+)$/', $sql, $match)) {
             foreach (self::$pets as $pet) {
                 if ($pet['id'] === (int) $match[1] && $pet['uid'] === (int) $match[2]) {
-                    return $pet;
+                    return $pet + ['site' => 1];
                 }
             }
             return false;
@@ -83,6 +87,8 @@ class DB
     public static function query($sql)
     {
         $sql = preg_replace('/\s+/', ' ', trim($sql));
+        // Transaction/race rollback is covered by pokemon_mutation_integrity.php.
+        if (in_array($sql, ['START TRANSACTION', 'COMMIT', 'ROLLBACK'], true)) return;
         self::$affected = 0;
         if (preg_match('/^UPDATE pm_mypm pet LEFT JOIN pm_mypm occupier ON occupier\.uid = pet\.uid AND \(occupier\.equipmentid1=(\d+) OR occupier\.equipmentid2=(\d+) OR occupier\.equipmentid3=(\d+) OR occupier\.equipmentid4=(\d+)\) SET pet\.(equipmentid[1-4])=(\d+) WHERE pet\.id=(\d+) AND pet\.uid=(\d+) AND pet\.(equipmentid[1-4])=0 AND occupier\.id IS NULL$/', $sql, $match)) {
             if ($match[1] !== $match[2] || $match[2] !== $match[3] || $match[3] !== $match[4]) {
@@ -152,6 +158,7 @@ function pm_table($name) { return $name; }
 function pm_sql($sql, ...$args) { return vsprintf($sql, $args); }
 function api_error($message, $status = 400) { throw new EquipmentResponse(false, $message, $status); }
 function api_success($data) { throw new EquipmentResponse(true, $data); }
+function pm_abort_battle_transaction($message, $status = 400) { DB::query('ROLLBACK'); api_error($message, $status); }
 
 // Stats are deterministic fixtures: base HP 100, each equipped item adds 25.
 // Stat formulas are outside the scope of these endpoint tests.

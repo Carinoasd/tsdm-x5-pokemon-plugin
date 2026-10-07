@@ -6,99 +6,223 @@ transforms every pm_* table into the canonical X5 schema (new column names +
 JSON-consolidated effort_values / drop_money / effects / equipment), and emits
 a single importable .sql file.
 
+Supported input: UTF-8 (optional BOM), archived X2 fixed-order INSERT INTO
+`pm_*` VALUES statements, single-quoted MySQL strings, integer literals and
+NULL. Backslash escapes must be enabled (the standard dump mode). Explicit
+NO_BACKSLASH_ESCAPES, expressions, column lists and other INSERT formats are
+rejected rather than guessed. Ordinary dump DDL/comments are ignored. A final
+mysqldump SQL_MODE restoration is allowed, but no data may follow it. Invalid
+input never creates or replaces the output file.
+
 Usage:
     python x2_to_x5_export.py <input.sql> <output.sql>
 """
 
-import csv
 import io
 import json
 import os
 import re
 import sys
+import tempfile
+
+
+MYSQL_ESCAPES = {
+    "0": "\0", "b": "\b", "n": "\n", "r": "\r", "t": "\t", "Z": "\x1a",
+    "\\": "\\", "'": "'", '"': '"', "%": "\\%", "_": "\\_",
+}
+INTEGER_LITERAL = re.compile(r"[+-]?[0-9]+\Z")
+
+
+def quoted_string(text, start):
+    """Read one single-quoted MySQL literal with normal backslash semantics."""
+    value = []
+    i = start + 1
+    while i < len(text):
+        c = text[i]
+        if c == "\\":
+            i += 1
+            if i == len(text):
+                raise ValueError("unfinished backslash escape")
+            # Unknown escapes lose their slash; LIKE wildcards retain it.
+            value.append(MYSQL_ESCAPES.get(text[i], text[i]))
+        elif c == "'":
+            if i + 1 < len(text) and text[i + 1] == "'":
+                value.append("'")
+                i += 1
+            else:
+                return "".join(value), i + 1
+        else:
+            value.append(c)
+        i += 1
+    raise ValueError("unterminated quoted string")
+
+
+def sql_statements(text):
+    """Split dump statements, keeping quoted data out of delimiter/comment logic."""
+    parts = []
+    i = 0
+    while i < len(text):
+        c = text[i]
+        if c in "'\"`":
+            start, quote = i, c
+            i += 1
+            while i < len(text):
+                if text[i] == "\\" and quote != "`":
+                    i += 2
+                    continue
+                if text[i] == quote:
+                    i += 1
+                    if i < len(text) and text[i] == quote:
+                        i += 1
+                        continue
+                    break
+                i += 1
+            else:
+                raise ValueError("unterminated quoted string or identifier")
+            parts.append(text[start:i])
+            continue
+        if c == "#" or (text.startswith("--", i) and
+                         (i + 2 == len(text) or text[i + 2].isspace())):
+            end = text.find("\n", i)
+            i = len(text) if end == -1 else end + 1
+            parts.append(" ")
+            continue
+        if text.startswith("/*", i):
+            end = text.find("*/", i + 2)
+            if end == -1:
+                raise ValueError("unterminated SQL comment")
+            comment = text[i + 2:end]
+            # mysqldump wraps SET directives in executable version comments.
+            if comment.startswith("!") or comment.startswith("M!"):
+                parts.append(re.sub(r"^(?:M)?!\d*\s*", "", comment))
+            else:
+                parts.append(" ")
+            i = end + 2
+            continue
+        if c == ";":
+            statement = "".join(parts).strip()
+            if statement:
+                yield statement
+            parts = []
+        else:
+            parts.append(c)
+        i += 1
+    if "".join(parts).strip():
+        raise ValueError("SQL statement is missing its terminating semicolon")
+
+
+def sql_mode_is_known(statement, previous):
+    """Recognize dump SQL_MODE assignments without evaluating SQL expressions."""
+    if not re.match(r"SET\s", statement, re.IGNORECASE):
+        return previous
+    # Mask string values so text inside unrelated SET strings is never a directive.
+    masked = list(statement)
+    i = 0
+    while i < len(statement):
+        if statement[i] == "'":
+            _, end = quoted_string(statement, i)
+            masked[i:end] = " " * (end - i)
+            i = end
+        else:
+            i += 1
+    assignments = re.finditer(r"(?<![\w@])(?:@@(?:SESSION\.|LOCAL\.)?)?`?SQL_MODE`?\s*=\s*",
+                              "".join(masked), re.IGNORECASE)
+    known = previous
+    for assignment in assignments:
+        # Whitespace in the masked value is not part of the actual assignment.
+        start = statement.index("=", assignment.start()) + 1
+        while start < len(statement) and statement[start].isspace():
+            start += 1
+        if start < len(statement) and statement[start] == "'":
+            mode, end = quoted_string(statement, start)
+            if statement[end:].strip() and not statement[end:].lstrip().startswith(","):
+                raise ValueError("unsupported SQL_MODE expression")
+            if "NO_BACKSLASH_ESCAPES" in {m.strip().upper() for m in mode.split(",")}:
+                raise ValueError("NO_BACKSLASH_ESCAPES dumps are not supported")
+            known = True
+        elif re.fullmatch(r"@OLD_SQL_MODE\s*", statement[start:], re.IGNORECASE):
+            known = False  # Standard dump trailer; its original mode is unknown.
+        else:
+            raise ValueError("unsupported SQL_MODE expression")
+    return known
 
 
 def parse_inserts(text: str):
     """Yield (table, rows) for every `INSERT INTO `pm_x` VALUES ...;` block."""
     pattern = re.compile(
-        r"INSERT INTO `(pm_\w+)` VALUES\s*", re.IGNORECASE
+        r"INSERT\s+INTO\s+`(pm_\w+)`\s+VALUES\s*(.*)\Z", re.IGNORECASE | re.DOTALL
     )
-    pos = 0
-    while True:
-        m = pattern.search(text, pos)
-        if not m:
-            return
-        table = m.group(1)
-        start = m.end()
-        # find the terminating ';' not inside quotes
-        i = start
-        in_str = False
-        esc = False
-        while i < len(text):
-            c = text[i]
-            if in_str:
-                if esc:
-                    esc = False
-                elif c == "\\":
-                    esc = True
-                elif c == "'":
-                    in_str = False
-            elif c == "'":
-                in_str = True
-            elif c == ";":
-                break
-            i += 1
-        body = text[start:i].strip()
-        pos = i + 1
-        if not body:
+    target_pattern = re.compile(
+        r"INSERT\s+(?:(?:LOW_PRIORITY|DELAYED|HIGH_PRIORITY|IGNORE)\s+)*INTO\s+"
+        r"(?:`([^`]+)`|([A-Za-z_][A-Za-z_0-9]*))(?=\s|\()", re.IGNORECASE
+    )
+    known_mode = True
+    for statement in sql_statements(text):
+        known_mode = sql_mode_is_known(statement, known_mode)
+        if not re.match(r"INSERT\b", statement, re.IGNORECASE):
             continue
-        rows = parse_values_tuples(body)
-        if rows is not None:
-            yield table, rows
+        target = target_pattern.match(statement)
+        if target and not (target.group(1) or target.group(2)).lower().startswith("pm_"):
+            # Full backups may also contain Discuz tables; retain the old filter.
+            continue
+        m = pattern.fullmatch(statement)
+        if m is None:
+            raise ValueError("unsupported INSERT format; expected archived X2 VALUES without a column list")
+        if not known_mode:
+            raise ValueError("INSERT follows an unknown restored SQL_MODE")
+        try:
+            yield m.group(1).lower(), parse_values_tuples(m.group(2))
+        except ValueError as error:
+            raise ValueError(f"{m.group(1)}: {error}") from error
 
 
 def parse_values_tuples(body: str):
-    """Parse `(v1, v2), (v3, v4);` into a list of value lists."""
+    """Parse the supported VALUES grammar; reject partial rows and expressions."""
     rows = []
     i = 0
     n = len(body)
-    while i < n:
-        if body[i] != "(":
+    while True:
+        while i < n and body[i].isspace():
             i += 1
-            continue
+        if i >= n or body[i] != "(":
+            raise ValueError("expected a VALUES tuple")
         i += 1
         vals = []
-        in_str = False
-        esc = False
-        cur = ""
-        while i < n:
-            c = body[i]
-            if in_str:
-                if esc:
-                    cur += c
-                    esc = False
-                elif c == "\\":
-                    esc = True
-                elif c == "'":
-                    in_str = False
-                else:
-                    cur += c
+        while True:
+            while i < n and body[i].isspace():
+                i += 1
+            if i >= n:
+                raise ValueError("unfinished VALUES tuple")
+            if body[i] == "'":
+                value, i = quoted_string(body, i)
             else:
-                if c == "'":
-                    in_str = True
-                    cur = ""
-                elif c == ",":
-                    vals.append(cur.strip())
-                    cur = ""
-                elif c == ")":
-                    vals.append(cur.strip())
-                    cur = ""
-                    rows.append(vals)
-                    break
+                start = i
+                while i < n and body[i] not in ",)":
+                    i += 1
+                token = body[start:i].strip()
+                if token.upper() == "NULL":
+                    value = None
+                elif INTEGER_LITERAL.fullmatch(token):
+                    value = int(token)
                 else:
-                    cur += c
+                    raise ValueError("expected a string, integer literal or NULL")
+            vals.append(value)
+            while i < n and body[i].isspace():
+                i += 1
+            if i >= n or body[i] not in ",)":
+                raise ValueError("expected a comma or closing parenthesis")
+            delimiter = body[i]
             i += 1
-    return rows
+            if delimiter == ")":
+                rows.append(vals)
+                break
+        while i < n and body[i].isspace():
+            i += 1
+        if i == n:
+            return rows
+        if body[i] != ",":
+            raise ValueError("expected a comma between VALUES tuples")
+        i += 1
 
 
 def esc(v):
@@ -107,17 +231,17 @@ def esc(v):
         return "NULL"
     if isinstance(v, (int, float)):
         return str(v)
-    s = str(v)
-    return "'" + s.replace("\\", "\\\\").replace("'", "\\'") + "'"
+    escapes = {"\0": r"\0", "\b": r"\b", "\n": r"\n", "\r": r"\r", "\t": r"\t",
+               "\x1a": r"\Z", "\\": r"\\", "'": r"\'"}
+    return "'" + "".join(escapes.get(c, c) for c in str(v)) + "'"
 
 
 def num(v):
     if v is None or v == "":
         return 0
-    try:
+    if isinstance(v, int) or (isinstance(v, str) and INTEGER_LITERAL.fullmatch(v.strip())):
         return int(v)
-    except ValueError:
-        return 0
+    raise ValueError("expected an integer in a numeric X2 column")
 
 
 def norm_uid(v):
@@ -327,6 +451,13 @@ RENAME = {"pm_up": "pm_evolution"}
 # not migrated (dropped in X5)
 SKIP = {"pm_sitemm"}
 
+# The archived dump has no column lists, so another row shape cannot be inferred.
+SOURCE_ARITY = {
+    "pm_config": 3, "pm_data": 30, "pm_itemdata": 26, "pm_map": 8,
+    "pm_skill": 10, "pm_mypm": 41, "pm_usersdata": 38, "pm_myskill": 4,
+    "pm_myitem": 6, "pm_up": 6,
+}
+
 
 def main():
     if len(sys.argv) != 3:
@@ -337,13 +468,14 @@ def main():
     if os.path.isdir(dst):
         raise SystemExit(f"output path is a directory: {dst}")
 
-    with open(src, "r", encoding="utf-8-sig", errors="replace") as f:
+    # Do not normalize real CR/LF characters that occur inside SQL strings.
+    with open(src, "r", encoding="utf-8-sig", newline="") as f:
         text = f.read()
 
     out = io.StringIO()
     out.write("-- ============================================================\n")
     out.write("-- TSDM Pokemon Plugin — X2 full data import (X5 canonical schema)\n")
-    out.write("-- Generated by scripts/backup/x2_to_x5_export.py\n")
+    out.write("-- Generated by scripts/migrate/x2_to_x5_export.py\n")
     out.write("-- Source: X2 database backup (pm.sql)\n")
     out.write("-- Usage: import after install.php has created the tables\n")
     out.write("-- ============================================================\n\n")
@@ -351,7 +483,6 @@ def main():
     out.write("SET NAMES utf8mb4;\n\n")
 
     stats = {}
-    pending = {t: 0 for t in MAPPINGS}
     buffers = {t: [] for t in MAPPINGS}
     BATCH = 100
 
@@ -363,12 +494,13 @@ def main():
             continue
         cols, fn = MAPPINGS[table]
         out_name = RENAME.get(table, table)
-        for v in rows:
+        for row_number, v in enumerate(rows, 1):
+            if len(v) != SOURCE_ARITY[table]:
+                raise ValueError(f"{table} row {row_number}: expected {SOURCE_ARITY[table]} values, got {len(v)}")
             try:
                 new_row = fn(v)
-            except Exception as e:
-                print(f"[warn] {table} row {v[:4]} transform failed: {e}")
-                continue
+            except (TypeError, ValueError) as error:
+                raise ValueError(f"{table} row {row_number}: transformation failed") from error
             buffers[table].append(new_row)
             if len(buffers[table]) >= BATCH:
                 flush(out, out_name, cols, buffers[table])
@@ -381,8 +513,22 @@ def main():
             flush(out, out_name, MAPPINGS[table][0], rows)
             stats[table] = stats.get(table, 0) + len(rows)
 
-    with open(dst, "w", encoding="utf-8") as f:
-        f.write(out.getvalue())
+    if not stats:
+        raise ValueError("no supported X2 data rows found")
+
+    # Validate the entire dump before publishing any output. An interrupted write
+    # must not leave a partial SQL file under the requested destination name.
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", newline="\n",
+                                         dir=os.path.dirname(dst), prefix=".x2-export-",
+                                         suffix=".tmp", delete=False) as f:
+            temporary = f.name
+            f.write(out.getvalue())
+        os.replace(temporary, dst)
+    finally:
+        if temporary is not None and os.path.exists(temporary):
+            os.unlink(temporary)
 
     print("=== conversion complete ===")
     for t in sorted(stats):
@@ -403,4 +549,8 @@ def flush(out, table, cols, rows):
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    try:
+        sys.exit(main())
+    except (ValueError, OSError) as error:
+        print(f"[error] {error}", file=sys.stderr)
+        sys.exit(1)

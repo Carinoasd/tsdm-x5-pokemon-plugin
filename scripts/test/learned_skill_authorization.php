@@ -11,14 +11,16 @@ set_error_handler(function ($severity, $message, $file, $line) {
 
 // Load the pure battle-core (real engine math) before extracting endpoint fns.
 define('IN_DISCUZ', 1);
+require __DIR__ . '/../../plugin/api/battle_actions.php';
 require __DIR__ . '/../../plugin/api/battle_core.php';
 
 // Load actual endpoint functions without running the Discuz dispatcher.
-$wanted = ['api_use_skill', 'api_normalize_skill_category', 'pm_refund_reserved_skill_pp', 'battle_skill_effects',
+$wanted = ['battle_reload_action_context', 'battle_consume_owned_item', 'api_use_skill', 'api_normalize_skill_category', 'pm_refund_reserved_skill_pp', 'battle_skill_effects',
     'battle_pick_enemy_move',
     'battle_ensure_tables', 'battle_load_active', 'battle_inject_ally_fresh_state',
     'battle_persist_state', 'battle_mirror_legacy'];
-$tokens = token_get_all(file_get_contents(__DIR__ . '/../../plugin/api/battle.php'));
+$tokens = token_get_all(file_get_contents(__DIR__ . '/../../plugin/api/battle.php')
+    . substr(file_get_contents(__DIR__ . '/../../plugin/api/battle_storage.php'), 5));
 for ($i = 0; $i < count($tokens); $i++) {
     if (!is_array($tokens[$i]) || $tokens[$i][0] !== T_FUNCTION) continue;
     $start = $i;
@@ -129,7 +131,7 @@ class DB
         if (strpos($sql, 'FROM pm_effect') !== false) {
             return false; // fixtures carry no effect templates
         }
-        if (strpos($sql, 'FOR UPDATE') !== false) {
+        if (preg_match('/^SELECT uid FROM pm_usersdata WHERE uid = \d+ FOR UPDATE$/', trim($sql))) {
             return ['uid' => $GLOBALS['_G']['uid']];
         }
         if (preg_match('/FROM pm_battle\b/', $sql)) {
@@ -156,6 +158,10 @@ class DB
         self::$affected = 0;
         if (preg_match('/^(START TRANSACTION|COMMIT|ROLLBACK)$/', $sql) || strpos($sql, 'CREATE TABLE') === 0) {
             // engine plumbing (txn control / lazy DDL): not gameplay state
+            return;
+        }
+        if (strpos($sql, 'UPDATE pm_battle ') === 0 && strpos($sql, 'updated_at <') !== false) {
+            // This suite starts with legacy-only encounters, so no engine rows expire.
             return;
         }
         if (preg_match('/^(INSERT INTO pm_battle(_unit|_event)?|UPDATE pm_battle\b|DELETE FROM pm_battle_unit)\b/', $sql)) {
@@ -381,7 +387,7 @@ foreach ([20, 19] as $speed) {
         $GLOBALS['speed'] = $speed;
         $GLOBALS['user']['hp'] = 1;
         $data = response(200);
-        check($data['status'] === 'victory' && $data['battle_over'] === true && $data['turn'] === 0, 'Victory response changed');
+        check($data['status'] === 'victory' && $data['battle_over'] === true && $data['turn'] === 1, 'Victory response must include its resolved turn');
         check(DB::$learned[0]['skillnum'] === 1 && $GLOBALS['calls']['rewards'] === 1 && $GLOBALS['calls']['apply'] === 1, 'Victory PP or rewards incorrect');
         $victory_types = [];
     foreach ($data['events'] as $event) {

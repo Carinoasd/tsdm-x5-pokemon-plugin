@@ -9,6 +9,9 @@ set_error_handler(function ($severity, $message, $file, $line) {
     throw new ErrorException($message, 0, $severity, $file, $line);
 });
 
+define('IN_DISCUZ', 1);
+require __DIR__ . '/../../plugin/api/battle_actions.php';
+
 // Load actual endpoint functions without running the Discuz dispatcher.
 // pm_abort_battle_transaction lives in utils.php and is mocked below.
 $wanted = ['api_switch_pokemon'];

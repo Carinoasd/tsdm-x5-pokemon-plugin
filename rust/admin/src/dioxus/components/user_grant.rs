@@ -83,6 +83,7 @@ pub fn GrantPokemonModal(
             can_proceed: draft().type_id.is_some(),
             disabled: is_busy,
             on_close: move |_| {
+                if *ADMIN_BUSY.read() { return; }
                 step.set(GrantPokemonStep::Search);
                 draft.set(GrantPokemonDraft::default());
                 search_results.set(Vec::new());
@@ -313,8 +314,11 @@ fn spawn_grant_pokemon(
     draft: GrantPokemonDraft,
     on_success: EventHandler<PokemonInfo>,
 ) {
+    if *ADMIN_BUSY.read() {
+        return;
+    }
     set_busy(true);
-    spawn(async move {
+    dioxus_core::spawn_forever(async move {
         let info = PokemonInfo {
             id: 0,
             type_id,
@@ -345,13 +349,14 @@ fn spawn_grant_pokemon(
                     AdminNoticeLevel::Success,
                     format!("已给予宠物 #{}", saved.id),
                 );
+                set_busy(false);
                 on_success.call(saved);
             }
             Err(e) => {
+                set_busy(false);
                 set_notice(AdminNoticeLevel::Error, format!("给予宠物失败: {}", e));
             }
         }
-        set_busy(false);
     });
 }
 
@@ -408,6 +413,7 @@ pub fn GrantItemModal(
             can_proceed: draft().type_id.is_some(),
             disabled: is_busy,
             on_close: move |_| {
+                if *ADMIN_BUSY.read() { return; }
                 step.set(GrantItemStep::Search);
                 draft.set(GrantItemDraft::default());
                 search_results.set(Vec::new());
@@ -548,8 +554,11 @@ pub fn GrantItemModal(
 }
 
 fn spawn_grant_item(owner_uid: u64, type_id: u64, count: u64, on_success: EventHandler<ItemInfo>) {
+    if *ADMIN_BUSY.read() {
+        return;
+    }
     set_busy(true);
-    spawn(async move {
+    dioxus_core::spawn_forever(async move {
         let info = ItemInfo {
             id: 0,
             owner: owner_uid,
@@ -563,13 +572,14 @@ fn spawn_grant_item(owner_uid: u64, type_id: u64, count: u64, on_success: EventH
                     AdminNoticeLevel::Success,
                     format!("已给予物品 #{} x{}", saved.type_id, saved.count),
                 );
+                set_busy(false);
                 on_success.call(saved);
             }
             Err(e) => {
+                set_busy(false);
                 set_notice(AdminNoticeLevel::Error, format!("给予物品失败: {}", e));
             }
         }
-        set_busy(false);
     });
 }
 

@@ -241,22 +241,18 @@ function insert_item_type($info)
   $equipment_sd = intval($info["effects"]["attribute_add_speed"]);
   $captmax = intval($info["effects"]["capture"]);
 
-  $last_id = DB::fetch_first("SELECT id from pm_itemdata order by id desc limit 1");
-  $last_id = intval($last_id['id']);
-  $new_id = $last_id + 1;
-
   $effects_json = '{"hp":' . intval($addhp) . ',"exp":' . intval($addexp) . ',"level":' . intval($addlv) . ',"intimacy":' . intval($addgood) . '}';
   $equipment_json = '{"hp":' . intval($equipment_hp) . ',"atk":' . intval($equipment_atk) . ',"def":' . intval($equipment_def) . ',"spatk":' . intval($equipment_spatk) . ',"spdef":' . intval($equipment_spdef) . ',"spd":' . intval($equipment_sd) . '}';
 
   DB::query("INSERT INTO pm_itemdata (
-    id, name, tpname, description, shop, money, type,
+    name, tpname, description, shop, money, type,
     ballid, upitem, sitemname, zbtype,
     lvask, xsask,
     effects,
     equipment,
     captmax
   ) VALUES (
-    $new_id, '$name', '$tpname', '$txt', $shop, $money, '$type',
+    '$name', '$tpname', '$txt', $shop, $money, '$type',
     $ballid, $upitem, '$sitemname', $zbtype,
     $lvask, '$xsask',
     '$effects_json',
@@ -264,7 +260,7 @@ function insert_item_type($info)
     $captmax
   )");
 
-  return $new_id;
+  return intval(DB::insert_id());
 }
 
 function delete_item_type($id)
@@ -277,9 +273,10 @@ function filter_item_type($list)
 {
   $ret = [];
 
+  $query_sql = "SELECT * from pm_itemdata where ";
+  $query_sql_list = [];
   foreach ($list as $item) {
-    $query_sql = "SELECT * from pm_itemdata where ";
-    $query_sql_list = [];
+    $condition_count = count($query_sql_list);
     $operator = $item["operator"];
     $value = addslashes($item["value"]);
 
@@ -288,34 +285,13 @@ function filter_item_type($list)
         array_push($query_sql_list, generate_filter_sql('id', $operator, $value, 'id'));
         break;
       case '名称':
-        // 智能判断：如果是纯数字，优先按 ID 精确查询
-        if (ctype_digit($value) && $value !== '') {
-          // 先尝试 ID 精确查询
-          $id_query_sql = "SELECT * from pm_itemdata where id = " . intval($value);
-          $found_id_results = DB::fetch_all($id_query_sql);
-          if (!empty($found_id_results)) {
-              foreach ($found_id_results as $query) {
-                $item = new_item_type(
-                  intval($query['id']),
-                  $query['name'],
-                  $query['tpname'],
-                  $query['description'],
-
-                  intval($query['shop']) != 0,
-                  intval($query['money']),
-                  new_item_tag(intval($query['type']), $query),
-                  new_item_limits($query),
-                  new_item_effects($query)
-                );
-
-                $item["_TYPE"] = "item_type";
-                array_push($ret, $item);
-              }
-              return $ret;
-            }
-          }
-        // ID 查询无结果或非数字输入，使用名称模糊搜索
-        array_push($query_sql_list, generate_filter_sql('name', $operator, $value, 'text'));
+        // A numeric name may select an ID, but must still obey every filter.
+        if (in_array($operator, ['equal', 'not_equal'], true) && ctype_digit($value) && $value !== ''
+            && DB::fetch_first("SELECT id FROM pm_itemdata WHERE id=" . intval($value))) {
+          $query_sql_list[] = generate_filter_sql('id', $operator, intval($value), 'id');
+        } else {
+          $query_sql_list[] = generate_filter_sql('name', $operator, $value, 'text');
+        }
         break;
       case '类型':
         array_push($query_sql_list, generate_filter_sql('type', $operator, $value, 'text'));
@@ -324,13 +300,18 @@ function filter_item_type($list)
         array_push($query_sql_list, generate_filter_sql('money', $operator, $value, 'number'));
         break;
       case '是否出售':
-        array_push($query_sql_list, generate_filter_sql('shop', $operator, boolval($value), 'id'));
+        if (in_array($value, ['是', '1', 'true'], true)) $for_sale = 1;
+        elseif (in_array($value, ['否', '0', 'false'], true)) $for_sale = 0;
+        else return [];
+        array_push($query_sql_list, generate_filter_sql('shop', $operator, $for_sale, 'id'));
         break;
       case '描述':
         array_push($query_sql_list, generate_filter_sql('description', $operator, $value, 'text'));
         break;
       default:
+        return [];
     }
+    if (count($query_sql_list) === $condition_count || end($query_sql_list) === '') return [];
   }
 
   if (count($query_sql_list) <= 0) {

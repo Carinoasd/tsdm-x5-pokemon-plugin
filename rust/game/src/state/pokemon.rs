@@ -8,6 +8,7 @@ pub struct PokemonState {
     pub loading: bool,
     pub error: Option<String>,
     pub loaded: bool,
+    pub request_id: u64,
 }
 
 #[derive(Clone, Copy, PartialEq, Default)]
@@ -67,58 +68,40 @@ fn is_negative_state(state: u8) -> bool {
 }
 
 pub fn use_pokemon_state() {
-    let state = crate::state::POKEMON_STATE.read();
-    let loaded = state.loaded;
-    let loading = state.loading;
-    drop(state);
-
     use_effect(move || {
-        if loaded || loading {
+        let state = crate::state::POKEMON_STATE.peek();
+        if state.loaded || state.loading {
             return;
         }
-
-        spawn(async move {
-            let mut state = crate::state::POKEMON_STATE.write();
-            state.loading = true;
-            state.error = None;
-            drop(state);
-
-            let api = crate::utils::api_client::NewApiClient::new();
-            match api.get_pokemon_list().await {
-                Ok(data) => {
-                    let mut state = crate::state::POKEMON_STATE.write();
-                    state.list = data.pokemons;
-                    state.loaded = true;
-                    state.loading = false;
-                }
-                Err(e) => {
-                    let mut state = crate::state::POKEMON_STATE.write();
-                    state.error = Some(format!("加载宠物列表失败: {}", e));
-                    state.loading = false;
-                }
-            }
-        });
+        drop(state);
+        refresh_pokemon_list();
     });
 }
 
 pub fn refresh_pokemon_list() {
-    spawn(async move {
+    let request_id = {
         let mut state = crate::state::POKEMON_STATE.write();
+        state.request_id += 1;
         state.loading = true;
         state.error = None;
-        drop(state);
-
+        state.request_id
+    };
+    // 全域列表的請求不能隨發起頁面卸載而中止，舊回應也不能覆蓋後來的刷新。
+    dioxus_core::spawn_forever(async move {
         let api = crate::utils::api_client::NewApiClient::new();
-        match api.get_pokemon_list().await {
+        let result = api.get_pokemon_list().await;
+        let mut state = crate::state::POKEMON_STATE.write();
+        if state.request_id != request_id {
+            return;
+        }
+        state.loading = false;
+        match result {
             Ok(data) => {
-                let mut state = crate::state::POKEMON_STATE.write();
                 state.list = data.pokemons;
-                state.loading = false;
+                state.loaded = true;
             }
             Err(e) => {
-                let mut state = crate::state::POKEMON_STATE.write();
                 state.error = Some(format!("刷新宠物列表失败: {}", e));
-                state.loading = false;
             }
         }
     });
@@ -137,7 +120,6 @@ pub fn update_pokemon_hp(pokemon_id: u64, new_hp: i64, new_max_hp: i64) {
 
 pub static MY_POKEMON_TAB: GlobalSignal<MyPokemonTab> = Signal::global(MyPokemonTab::default);
 pub static EQUIPMENT_BONUSES: GlobalSignal<Vec<(String, i64)>> = Signal::global(Vec::new);
-pub static SELECTED_ITEM: GlobalSignal<Option<SelectedItem>> = Signal::global(|| None);
 pub static SELECTED_POKEMON_INDEX: GlobalSignal<Option<u64>> = Signal::global(|| None);
 
 #[cfg(test)]

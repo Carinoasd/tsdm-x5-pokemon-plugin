@@ -396,6 +396,21 @@ def test_php_regression(name, filename):
         ok(name)
 
 
+def test_x2_export_regression():
+    import subprocess
+
+    name = "X2 data export regression"
+    print(f"\n=== {name} ===")
+    suite = ROOT / "scripts" / "test" / "x2_export_regressions.py"
+    result = subprocess.run([sys.executable, str(suite)], capture_output=True,
+                            text=True, encoding="utf-8")
+    print((result.stdout + result.stderr).rstrip())
+    if result.returncode:
+        fail(name)
+    else:
+        ok(name)
+
+
 def main():
     print("TSDM Pokemon Plugin — Static Test Suite")
     print("=" * 60)
@@ -408,6 +423,7 @@ def main():
     test_active_pokemon_switch()
     test_party_pokemon_moves()
     test_migration_coverage()
+    test_x2_export_regression()
     test_learned_skill_authorization()
     test_php_syntax()
     test_equipment_occupancy()
@@ -421,7 +437,24 @@ def main():
     test_php_regression("Hunger item regression", "item_hunger.php")
     test_php_regression("Pokemon progression regression", "progression_regressions.php")
     test_php_regression("Battle core engine regression", "battle_core_engine.php")
+    test_php_regression("Battle status and turn order regressions", "battle_core_regressions.php")
+    test_php_regression("Admin input and public config regressions", "admin_input_regressions.php")
     test_php_regression("Battle turn endpoint regression", "battle_engine_turn.php")
+    test_php_regression("Battle action replay regression", "battle_actions.php")
+    test_php_regression("Inventory search regression", "inventory_search.php")
+    test_php_regression("Pokemon mutation integrity regression", "pokemon_mutation_integrity.php")
+    test_php_regression("Battle encounter selection regression", "battle_encounters.php")
+    test_php_regression("Configured Boss encounter regression", "boss_encounters.php")
+    test_php_regression("Skill mutation integrity regression", "skill_mutation_integrity.php")
+    test_php_regression("Battle reward progression regression", "battle_reward_progression.php")
+    test_php_regression("Evolution battle guard regression", "evolution_battle_guard.php")
+    test_php_regression("Pet read repair concurrency regression", "pet_read_repairs.php")
+    test_php_regression("Admin inventory integrity regression", "admin_item_integrity.php")
+    test_php_regression("Game maintenance route regression", "game_maintenance.php")
+    test_php_regression("Avatar route compatibility regression", "avatar_routes.php")
+    test_php_regression("Forum topic permission regression", "topics_permissions.php")
+    test_php_regression("Announcement lock retry regression", "announcement_retries.php")
+    test_php_regression("Configuration upsert retry regression", "config_upsert_retries.php")
 
     print("\n" + "=" * 60)
     print(f"Results: {PASS} passed, {FAIL} failed, {WARN} warnings")

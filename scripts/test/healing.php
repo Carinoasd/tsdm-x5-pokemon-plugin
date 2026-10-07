@@ -19,7 +19,7 @@ for ($i = 0; $i < count($tokens); $i++) {
     $opened = false;
     for ($j = $start; $j < count($tokens); $j++) {
         $token = $tokens[$j];
-        $body .= is_array($token) ? $token[1] : $token;
+        $body .= is_array($token) && $token[0] === T_DIR ? var_export(realpath(__DIR__ . '/../../plugin/api'), true) : (is_array($token) ? $token[1] : $token);
         if ($token === '{' || (is_array($token) && in_array($token[0], [T_CURLY_OPEN, T_DOLLAR_OPEN_CURLY_BRACES], true))) {
             $depth++;
             $opened = true;
@@ -60,6 +60,7 @@ class DB
 
     public static function fetch_first($sql)
     {
+        if (str_starts_with($sql, 'SHOW COLUMNS')) return ['Field' => 'fixture'];
         if (str_contains($sql, 'FROM pm_mypm')) return self::$pet;
         if (str_contains($sql, 'FROM pm_usersdata')) return self::$user;
         if (str_contains($sql, 'SELECT hp FROM pm_data')) return ['hp' => 50];
@@ -79,6 +80,8 @@ class DB
 
     public static function query($sql)
     {
+        if (in_array($sql, ['START TRANSACTION', 'COMMIT', 'ROLLBACK'], true) || str_starts_with($sql, 'CREATE TABLE IF NOT EXISTS')) return;
+        if (str_contains($sql, 'UPDATE pm_battle')) return;
         self::$writes[] = $sql;
         if (preg_match("/UPDATE pm_mypm SET hp=(\d+), state='1', statetime=(\d+) WHERE id=1 AND uid=7/", $sql, $m)) {
             self::$pet['hp'] = (int) $m[1];

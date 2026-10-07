@@ -7,6 +7,10 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct BattleScene {
     pub battle_id: String,
+    pub engine_battle_id: u64,
+    pub revision: u64,
+    pub phase: String,
+    pub events: Vec<BattleLogEvent>,
     pub map_id: u64,
     pub map_name: String,
     pub turn: u64,
@@ -23,6 +27,13 @@ pub struct BattleScene {
     pub can_continue_switch: bool,
     pub rewards: Option<BattleRewards>,
     pub level_up: Option<LevelUpInfo>,
+}
+
+impl BattleScene {
+    /// 以服务端判断为准，宠物列表可能尚未加载或仍是上一回合的缓存。
+    pub fn needs_replacement(&self) -> bool {
+        self.can_continue_switch && !self.battle_over
+    }
 }
 
 // Custom deserialization to add logging
@@ -48,6 +59,10 @@ impl<'de> Deserialize<'de> for BattleScene {
                 A: MapAccess<'de>,
             {
                 let mut battle_id: Option<String> = None;
+                let mut engine_battle_id = 0;
+                let mut revision = 0;
+                let mut phase = String::new();
+                let mut events = Vec::new();
                 let mut map_id: Option<u64> = None;
                 let mut map_name: Option<String> = None;
                 let mut turn: Option<u64> = None;
@@ -62,6 +77,10 @@ impl<'de> Deserialize<'de> for BattleScene {
 
                 while let Some(key) = map.next_key::<String>()? {
                     match key.as_str() {
+                        "engine_battle_id" => engine_battle_id = map.next_value()?,
+                        "revision" => revision = map.next_value()?,
+                        "phase" => phase = map.next_value()?,
+                        "events" => events = map.next_value()?,
                         "battle_id" => {
                             battle_id = Some(map.next_value()?);
                         }
@@ -93,10 +112,10 @@ impl<'de> Deserialize<'de> for BattleScene {
                             can_continue_switch = Some(map.next_value()?);
                         }
                         "rewards" => {
-                            rewards = Some(map.next_value()?);
+                            rewards = map.next_value()?;
                         }
                         "level_up" => {
-                            level_up = Some(map.next_value()?);
+                            level_up = map.next_value()?;
                         }
                         _ => {
                             map.next_value::<serde::de::IgnoredAny>()?;
@@ -124,6 +143,10 @@ impl<'de> Deserialize<'de> for BattleScene {
 
                 Ok(BattleScene {
                     battle_id,
+                    engine_battle_id,
+                    revision,
+                    phase,
+                    events,
                     map_id,
                     map_name,
                     turn,
@@ -316,9 +339,12 @@ pub struct LevelUpInfo {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct StartBattleRequest {
     pub map_id: u64,
-    /// 指定 Boss 寺孠类型 ID（仅 Boss 地图使用）
+    /// 指定 Boss 宠物类型 ID（仅 Boss 地图使用）
     #[serde(skip_serializing_if = "Option::is_none")]
     pub boss_pokemon_type_id: Option<u64>,
+    /// 地图配置的原始索引；缺省时兼容按物种选择的旧请求。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub boss_index: Option<u64>,
 }
 
 /// 使用技能请求
@@ -342,13 +368,253 @@ pub struct SkillSelectionResponse {
     pub requires_skill_selection: bool,
     pub item_id: u64,
     pub item_name: String,
-    pub available_skills: Vec<BattleSkill>,
+    pub available_skills: Vec<PpRestoreSkill>,
     pub message: String,
+    #[serde(default)]
+    pub engine_battle_id: u64,
+    #[serde(default)]
+    pub revision: u64,
+}
+
+/// PP 恢复选择的是已学技能记录，不是技能种类。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PpRestoreSkill {
+    pub id: u64,
+    pub skill_id: u64,
+    pub name: String,
+    pub current_pp: u64,
+    pub max_pp: u64,
 }
 
 /// 对技能使用道具请求
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct UseItemOnSkillRequest {
     pub item_id: u64,
-    pub skill_id: u64,
+    pub skill_record_id: u64,
+}
+
+/// 战斗道具接口不分页，物品 id 是种类 ID（普通背包接口的 id 则是持有记录 ID）。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct BattleItemsResponse {
+    pub items: Vec<BattleItem>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct BattleLogEvent {
+    pub turn: u64,
+    pub seq: u64,
+    #[serde(rename = "type")]
+    pub event_type: String,
+    pub payload: serde_json::Value,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct BattleLogTurn {
+    pub turn: u64,
+    pub lines: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct BattleLogResponse {
+    pub battle_id: u64,
+    pub turn: u64,
+    pub phase: String,
+    pub result: String,
+    pub lines: Vec<String>,
+    #[serde(default)]
+    pub turns: Vec<BattleLogTurn>,
+    pub events: Vec<BattleLogEvent>,
+    pub bbcode: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct BattleMutationRequest {
+    pub request_id: String,
+    pub engine_battle_id: u64,
+    pub expected_revision: u64,
+    #[serde(flatten)]
+    pub fields: serde_json::Value,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PendingBattleAction {
+    pub action: String,
+    pub request: BattleMutationRequest,
+}
+
+impl PendingBattleAction {
+    pub fn new(action: &str, scene: Option<&BattleScene>, fields: serde_json::Value) -> Self {
+        Self {
+            action: action.to_string(),
+            request: BattleMutationRequest {
+                request_id: uuid::Uuid::new_v4().to_string(),
+                engine_battle_id: scene.map(|scene| scene.engine_battle_id).unwrap_or(0),
+                expected_revision: scene.map(|scene| scene.revision).unwrap_or(0),
+                fields,
+            },
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(untagged)]
+pub enum BattleMutationResponse {
+    Scene(Box<BattleScene>),
+    SkillSelection(SkillSelectionResponse),
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct BattleItem {
+    pub id: u64,
+    pub name: String,
+    pub img: String,
+    pub nums: i64,
+    pub item_type: u64,
+    pub module: String,
+    #[serde(default)]
+    pub addhp: i64,
+}
+
+impl BattleItem {
+    pub fn is_pp_restore(&self) -> bool {
+        matches!(self.module.as_str(), "pp5" | "pp10" | "pp15" | "pp99")
+    }
+
+    pub fn can_use_on(&self, pokemon: &BattlePokemon) -> bool {
+        if self.nums <= 0 || pokemon.hp <= 0 {
+            return false;
+        }
+        if self.is_pp_restore() {
+            pokemon.skills.iter().any(|skill| skill.pp < skill.max_pp)
+        } else {
+            self.item_type == 1 && self.addhp > 0 && pokemon.hp < pokemon.max_hp
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::types::api_pokemon::ApiResponse;
+
+    #[test]
+    fn indexed_boss_selection_survives_pending_request_round_trip() {
+        let legacy: StartBattleRequest =
+            serde_json::from_value(serde_json::json!({"map_id":7,"boss_pokemon_type_id":25}))
+                .unwrap();
+        assert_eq!(legacy.boss_index, None);
+        assert_eq!(
+            serde_json::to_value(&legacy).unwrap(),
+            serde_json::json!({"map_id":7,"boss_pokemon_type_id":25})
+        );
+
+        for index in [0, 1] {
+            let request = StartBattleRequest {
+                boss_index: Some(index),
+                ..legacy.clone()
+            };
+            let pending =
+                PendingBattleAction::new("start", None, serde_json::to_value(request).unwrap());
+            let encoded = serde_json::to_string(&pending).unwrap();
+            let restored: PendingBattleAction = serde_json::from_str(&encoded).unwrap();
+            assert_eq!(restored, pending);
+            assert_eq!(restored.request.fields["boss_index"], index);
+            assert_eq!(restored.request.engine_battle_id, 0);
+            assert_eq!(restored.request.expected_revision, 0);
+        }
+    }
+
+    // Shapes captured from the PHP battle endpoints, including migrated type=1 PP items.
+    const BATTLE_ITEMS: &str = r#"{"success":true,"data":{"items":[
+        {"id":17,"name":"Potion","img":"hp20","nums":3,"item_type":1,"module":"hp20","addhp":20},
+        {"id":18,"name":"Ether","img":"pp5","nums":2,"item_type":1,"module":"pp5"}
+    ]}}"#;
+    const PP_SELECTION: &str = r#"{"success":true,"data":{
+        "requires_skill_selection":true,"item_id":18,"item_name":"Ether",
+        "available_skills":[{"id":701,"skill_id":12,"name":"Tackle","current_pp":2,"max_pp":20}],
+        "message":"请选择要恢复PP的技能"
+    }}"#;
+
+    fn pokemon() -> BattlePokemon {
+        BattlePokemon {
+            id: 25,
+            instance_id: 501,
+            name: "Pikachu".into(),
+            level: 5,
+            hp: 50,
+            max_hp: 50,
+            skills: vec![BattleSkill {
+                id: 12,
+                name: "Tackle".into(),
+                power: 40,
+                pp: 2,
+                max_pp: 20,
+                skill_type: String::new(),
+                category: String::new(),
+            }],
+        }
+    }
+
+    #[test]
+    fn battle_items_accept_php_shape_without_inventory_pagination() {
+        let response: ApiResponse<BattleItemsResponse> =
+            serde_json::from_str(BATTLE_ITEMS).unwrap();
+        let items = response.data.unwrap().items;
+        assert_eq!(items[0].id, 17);
+        assert_eq!(items[0].img, "hp20");
+        assert_eq!(items[0].nums, 3);
+        assert_eq!(items[1].addhp, 0);
+        let empty: ApiResponse<BattleItemsResponse> =
+            serde_json::from_str(r#"{"success":true,"data":{"items":[]}}"#).unwrap();
+        assert!(empty.data.unwrap().items.is_empty());
+    }
+
+    #[test]
+    fn pp_restore_uses_record_id_and_server_request_field() {
+        let response: ApiResponse<SkillSelectionResponse> =
+            serde_json::from_str(PP_SELECTION).unwrap();
+        let selection = response.data.unwrap();
+        let skill = &selection.available_skills[0];
+        assert_eq!(skill.current_pp, 2);
+        assert_eq!(skill.skill_id, 12);
+        let request = UseItemOnSkillRequest {
+            item_id: selection.item_id,
+            skill_record_id: skill.id,
+        };
+        assert_eq!(
+            serde_json::to_value(request).unwrap(),
+            serde_json::json!({"item_id":18,"skill_record_id":701})
+        );
+    }
+
+    #[test]
+    fn migrated_pp_items_use_pp_not_hp_to_determine_availability() {
+        let response: ApiResponse<BattleItemsResponse> =
+            serde_json::from_str(BATTLE_ITEMS).unwrap();
+        let items = response.data.unwrap().items;
+        let mut pokemon = pokemon();
+        assert!(!items[0].can_use_on(&pokemon));
+        assert!(items[1].can_use_on(&pokemon));
+        pokemon.hp = 20;
+        pokemon.skills[0].pp = 20;
+        assert!(items[0].can_use_on(&pokemon));
+        assert!(!items[1].can_use_on(&pokemon));
+        pokemon.hp = 0;
+        assert!(!items[0].can_use_on(&pokemon));
+        assert!(!items[1].can_use_on(&pokemon));
+    }
+
+    #[test]
+    fn replacement_follows_server_flags_without_a_cached_pokemon_list() {
+        let mut scene: BattleScene = serde_json::from_value(serde_json::json!({
+            "battle_id":"battle_1", "map_id":0, "map_name":"", "turn":3,
+            "my_pokemon":{"id":25,"instance_id":501,"name":"Pikachu","level":5,"hp":0,"max_hp":50,"skills":[]},
+            "wild_pokemon":{"id":19,"name":"Rattata","level":5,"hp":20,"max_hp":30,"gender":0,"is_shiny":false},
+            "status":"defeat", "battle_over":false, "can_continue_switch":true
+        })).unwrap();
+        assert_eq!(scene.my_pokemon.instance_id, 501);
+        assert!(scene.needs_replacement());
+        scene.battle_over = true;
+        assert!(!scene.needs_replacement());
+    }
 }

@@ -1,0 +1,84 @@
+-- Repair item evolution rules imported from the original X5 Docker seed.
+-- Only for installations that used docker/init.d/08-pokemon-evolutions.sql.
+-- The original seed stored legacy pm_itemdata.upitem codes; APIs require item IDs.
+-- Exact original-row guards leave customized rules unchanged. Safe to rerun.
+-- Back up the database before applying; use the target site's configured database.
+-- This script never changes runtime interpretation or converts arbitrary X3 data.
+
+UPDATE `pm_evolution` SET `condition_value` = '6' WHERE `id` = 341 AND `from_id` = 25 AND `to_id` = 26 AND `method` = 'item' AND `condition_value` = '4' AND `priority` = 0;
+UPDATE `pm_evolution` SET `condition_value` = '7' WHERE `id` = 342 AND `from_id` = 30 AND `to_id` = 31 AND `method` = 'item' AND `condition_value` = '5' AND `priority` = 0;
+UPDATE `pm_evolution` SET `condition_value` = '7' WHERE `id` = 343 AND `from_id` = 33 AND `to_id` = 34 AND `method` = 'item' AND `condition_value` = '5' AND `priority` = 0;
+UPDATE `pm_evolution` SET `condition_value` = '7' WHERE `id` = 344 AND `from_id` = 35 AND `to_id` = 36 AND `method` = 'item' AND `condition_value` = '5' AND `priority` = 0;
+UPDATE `pm_evolution` SET `condition_value` = '5' WHERE `id` = 345 AND `from_id` = 37 AND `to_id` = 38 AND `method` = 'item' AND `condition_value` = '3' AND `priority` = 0;
+UPDATE `pm_evolution` SET `condition_value` = '7' WHERE `id` = 346 AND `from_id` = 39 AND `to_id` = 40 AND `method` = 'item' AND `condition_value` = '5' AND `priority` = 0;
+UPDATE `pm_evolution` SET `condition_value` = '4' WHERE `id` = 347 AND `from_id` = 44 AND `to_id` = 45 AND `method` = 'item' AND `condition_value` = '2' AND `priority` = 0;
+UPDATE `pm_evolution` SET `condition_value` = '5' WHERE `id` = 348 AND `from_id` = 58 AND `to_id` = 59 AND `method` = 'item' AND `condition_value` = '3' AND `priority` = 0;
+UPDATE `pm_evolution` SET `condition_value` = '13' WHERE `id` = 349 AND `from_id` = 61 AND `to_id` = 62 AND `method` = 'item' AND `condition_value` = '7' AND `priority` = 0;
+UPDATE `pm_evolution` SET `condition_value` = '14' WHERE `id` = 350 AND `from_id` = 64 AND `to_id` = 65 AND `method` = 'item' AND `condition_value` = '11' AND `priority` = 0;
+UPDATE `pm_evolution` SET `condition_value` = '14' WHERE `id` = 351 AND `from_id` = 67 AND `to_id` = 68 AND `method` = 'item' AND `condition_value` = '11' AND `priority` = 0;
+UPDATE `pm_evolution` SET `condition_value` = '4' WHERE `id` = 352 AND `from_id` = 70 AND `to_id` = 71 AND `method` = 'item' AND `condition_value` = '2' AND `priority` = 0;
+UPDATE `pm_evolution` SET `condition_value` = '14' WHERE `id` = 353 AND `from_id` = 75 AND `to_id` = 76 AND `method` = 'item' AND `condition_value` = '11' AND `priority` = 0;
+UPDATE `pm_evolution` SET `condition_value` = '6' WHERE `id` = 354 AND `from_id` = 82 AND `to_id` = 462 AND `method` = 'item' AND `condition_value` = '4' AND `priority` = 0;
+UPDATE `pm_evolution` SET `condition_value` = '3' WHERE `id` = 355 AND `from_id` = 90 AND `to_id` = 91 AND `method` = 'item' AND `condition_value` = '1' AND `priority` = 0;
+UPDATE `pm_evolution` SET `condition_value` = '14' WHERE `id` = 356 AND `from_id` = 93 AND `to_id` = 94 AND `method` = 'item' AND `condition_value` = '11' AND `priority` = 0;
+UPDATE `pm_evolution` SET `condition_value` = '12' WHERE `id` = 357 AND `from_id` = 95 AND `to_id` = 208 AND `method` = 'item' AND `condition_value` = '8' AND `priority` = 0;
+UPDATE `pm_evolution` SET `condition_value` = '4' WHERE `id` = 358 AND `from_id` = 102 AND `to_id` = 103 AND `method` = 'item' AND `condition_value` = '2' AND `priority` = 0;
+UPDATE `pm_evolution` SET `condition_value` = '15' WHERE `id` = 359 AND `from_id` = 112 AND `to_id` = 464 AND `method` = 'item' AND `condition_value` = '12' AND `priority` = 0;
+UPDATE `pm_evolution` SET `condition_value` = '3' WHERE `id` = 361 AND `from_id` = 120 AND `to_id` = 121 AND `method` = 'item' AND `condition_value` = '1' AND `priority` = 0;
+UPDATE `pm_evolution` SET `condition_value` = '12' WHERE `id` = 362 AND `from_id` = 123 AND `to_id` = 212 AND `method` = 'item' AND `condition_value` = '8' AND `priority` = 0;
+UPDATE `pm_evolution` SET `condition_value` = '16' WHERE `id` = 363 AND `from_id` = 125 AND `to_id` = 466 AND `method` = 'item' AND `condition_value` = '13' AND `priority` = 0;
+UPDATE `pm_evolution` SET `condition_value` = '17' WHERE `id` = 364 AND `from_id` = 126 AND `to_id` = 467 AND `method` = 'item' AND `condition_value` = '14' AND `priority` = 0;
+UPDATE `pm_evolution` SET `condition_value` = '11' WHERE `id` = 365 AND `from_id` = 137 AND `to_id` = 233 AND `method` = 'item' AND `condition_value` = '10' AND `priority` = 0;
+UPDATE `pm_evolution` SET `condition_value` = '23' WHERE `id` = 366 AND `from_id` = 176 AND `to_id` = 468 AND `method` = 'item' AND `condition_value` = '20' AND `priority` = 0;
+UPDATE `pm_evolution` SET `condition_value` = '8' WHERE `id` = 367 AND `from_id` = 191 AND `to_id` = 192 AND `method` = 'item' AND `condition_value` = '6' AND `priority` = 0;
+UPDATE `pm_evolution` SET `condition_value` = '22' WHERE `id` = 368 AND `from_id` = 198 AND `to_id` = 430 AND `method` = 'item' AND `condition_value` = '19' AND `priority` = 0;
+UPDATE `pm_evolution` SET `condition_value` = '22' WHERE `id` = 369 AND `from_id` = 200 AND `to_id` = 429 AND `method` = 'item' AND `condition_value` = '19' AND `priority` = 0;
+UPDATE `pm_evolution` SET `condition_value` = '18' WHERE `id` = 370 AND `from_id` = 207 AND `to_id` = 472 AND `method` = 'item' AND `condition_value` = '15' AND `priority` = 0;
+UPDATE `pm_evolution` SET `condition_value` = '19' WHERE `id` = 371 AND `from_id` = 215 AND `to_id` = 461 AND `method` = 'item' AND `condition_value` = '16' AND `priority` = 0;
+UPDATE `pm_evolution` SET `condition_value` = '52' WHERE `id` = 372 AND `from_id` = 233 AND `to_id` = 474 AND `method` = 'item' AND `condition_value` = '23' AND `priority` = 0;
+UPDATE `pm_evolution` SET `condition_value` = '3' WHERE `id` = 373 AND `from_id` = 271 AND `to_id` = 272 AND `method` = 'item' AND `condition_value` = '1' AND `priority` = 0;
+UPDATE `pm_evolution` SET `condition_value` = '4' WHERE `id` = 374 AND `from_id` = 274 AND `to_id` = 275 AND `method` = 'item' AND `condition_value` = '2' AND `priority` = 0;
+UPDATE `pm_evolution` SET `condition_value` = '6' WHERE `id` = 375 AND `from_id` = 299 AND `to_id` = 476 AND `method` = 'item' AND `condition_value` = '4' AND `priority` = 0;
+UPDATE `pm_evolution` SET `condition_value` = '7' WHERE `id` = 376 AND `from_id` = 300 AND `to_id` = 301 AND `method` = 'item' AND `condition_value` = '5' AND `priority` = 0;
+UPDATE `pm_evolution` SET `condition_value` = '23' WHERE `id` = 377 AND `from_id` = 315 AND `to_id` = 407 AND `method` = 'item' AND `condition_value` = '20' AND `priority` = 0;
+UPDATE `pm_evolution` SET `condition_value` = '21' WHERE `id` = 378 AND `from_id` = 356 AND `to_id` = 477 AND `method` = 'item' AND `condition_value` = '18' AND `priority` = 0;
+UPDATE `pm_evolution` SET `condition_value` = '54' WHERE `id` = 379 AND `from_id` = 366 AND `to_id` = 367 AND `method` = 'item' AND `condition_value` = '25' AND `priority` = 0;
+UPDATE `pm_evolution` SET `condition_value` = '4' WHERE `id` = 380 AND `from_id` = 511 AND `to_id` = 512 AND `method` = 'item' AND `condition_value` = '2' AND `priority` = 0;
+UPDATE `pm_evolution` SET `condition_value` = '5' WHERE `id` = 381 AND `from_id` = 513 AND `to_id` = 514 AND `method` = 'item' AND `condition_value` = '3' AND `priority` = 0;
+UPDATE `pm_evolution` SET `condition_value` = '3' WHERE `id` = 382 AND `from_id` = 515 AND `to_id` = 516 AND `method` = 'item' AND `condition_value` = '1' AND `priority` = 0;
+UPDATE `pm_evolution` SET `condition_value` = '7' WHERE `id` = 383 AND `from_id` = 517 AND `to_id` = 518 AND `method` = 'item' AND `condition_value` = '5' AND `priority` = 0;
+UPDATE `pm_evolution` SET `condition_value` = '14' WHERE `id` = 384 AND `from_id` = 525 AND `to_id` = 526 AND `method` = 'item' AND `condition_value` = '11' AND `priority` = 0;
+UPDATE `pm_evolution` SET `condition_value` = '14' WHERE `id` = 385 AND `from_id` = 533 AND `to_id` = 534 AND `method` = 'item' AND `condition_value` = '11' AND `priority` = 0;
+UPDATE `pm_evolution` SET `condition_value` = '8' WHERE `id` = 386 AND `from_id` = 546 AND `to_id` = 547 AND `method` = 'item' AND `condition_value` = '6' AND `priority` = 0;
+UPDATE `pm_evolution` SET `condition_value` = '8' WHERE `id` = 387 AND `from_id` = 548 AND `to_id` = 549 AND `method` = 'item' AND `condition_value` = '6' AND `priority` = 0;
+UPDATE `pm_evolution` SET `condition_value` = '23' WHERE `id` = 388 AND `from_id` = 572 AND `to_id` = 573 AND `method` = 'item' AND `condition_value` = '20' AND `priority` = 0;
+UPDATE `pm_evolution` SET `condition_value` = '14' WHERE `id` = 389 AND `from_id` = 588 AND `to_id` = 589 AND `method` = 'item' AND `condition_value` = '11' AND `priority` = 0;
+UPDATE `pm_evolution` SET `condition_value` = '6' WHERE `id` = 390 AND `from_id` = 603 AND `to_id` = 604 AND `method` = 'item' AND `condition_value` = '4' AND `priority` = 0;
+UPDATE `pm_evolution` SET `condition_value` = '22' WHERE `id` = 391 AND `from_id` = 608 AND `to_id` = 609 AND `method` = 'item' AND `condition_value` = '19' AND `priority` = 0;
+UPDATE `pm_evolution` SET `condition_value` = '14' WHERE `id` = 392 AND `from_id` = 616 AND `to_id` = 617 AND `method` = 'item' AND `condition_value` = '11' AND `priority` = 0;
+UPDATE `pm_evolution` SET `condition_value` = '23' WHERE `id` = 393 AND `from_id` = 670 AND `to_id` = 671 AND `method` = 'item' AND `condition_value` = '20' AND `priority` = 0;
+UPDATE `pm_evolution` SET `condition_value` = '22' WHERE `id` = 394 AND `from_id` = 680 AND `to_id` = 681 AND `method` = 'item' AND `condition_value` = '19' AND `priority` = 0;
+UPDATE `pm_evolution` SET `condition_value` = '14' WHERE `id` = 395 AND `from_id` = 682 AND `to_id` = 683 AND `method` = 'item' AND `condition_value` = '11' AND `priority` = 0;
+UPDATE `pm_evolution` SET `condition_value` = '14' WHERE `id` = 396 AND `from_id` = 684 AND `to_id` = 685 AND `method` = 'item' AND `condition_value` = '11' AND `priority` = 0;
+UPDATE `pm_evolution` SET `condition_value` = '8' WHERE `id` = 397 AND `from_id` = 694 AND `to_id` = 695 AND `method` = 'item' AND `condition_value` = '6' AND `priority` = 0;
+UPDATE `pm_evolution` SET `condition_value` = '14' WHERE `id` = 398 AND `from_id` = 708 AND `to_id` = 709 AND `method` = 'item' AND `condition_value` = '11' AND `priority` = 0;
+UPDATE `pm_evolution` SET `condition_value` = '14' WHERE `id` = 399 AND `from_id` = 710 AND `to_id` = 711 AND `method` = 'item' AND `condition_value` = '11' AND `priority` = 0;
+UPDATE `pm_evolution` SET `condition_value` = '6' WHERE `id` = 400 AND `from_id` = 737 AND `to_id` = 738 AND `method` = 'item' AND `condition_value` = '4' AND `priority` = 0;
+UPDATE `pm_evolution` SET `condition_value` = '51' WHERE `id` = 401 AND `from_id` = 739 AND `to_id` = 740 AND `method` = 'item' AND `condition_value` = '22' AND `priority` = 0;
+UPDATE `pm_evolution` SET `condition_value` = '13' WHERE `id` = 402 AND `from_id` = 79 AND `to_id` = 199 AND `method` = 'item' AND `condition_value` = '7' AND `priority` = 0;
+UPDATE `pm_evolution` SET `condition_value` = '55' WHERE `id` = 404 AND `from_id` = 366 AND `to_id` = 368 AND `method` = 'item' AND `condition_value` = '26' AND `priority` = 1;
+UPDATE `pm_evolution` SET `condition_value` = '3' WHERE `id` = 407 AND `from_id` = 133 AND `to_id` = 134 AND `method` = 'item' AND `condition_value` = '1' AND `priority` = 1;
+UPDATE `pm_evolution` SET `condition_value` = '4' WHERE `id` = 408 AND `from_id` = 133 AND `to_id` = 470 AND `method` = 'item' AND `condition_value` = '2' AND `priority` = 2;
+UPDATE `pm_evolution` SET `condition_value` = '5' WHERE `id` = 409 AND `from_id` = 133 AND `to_id` = 136 AND `method` = 'item' AND `condition_value` = '3' AND `priority` = 3;
+UPDATE `pm_evolution` SET `condition_value` = '6' WHERE `id` = 410 AND `from_id` = 133 AND `to_id` = 135 AND `method` = 'item' AND `condition_value` = '4' AND `priority` = 4;
+UPDATE `pm_evolution` SET `condition_value` = '7' WHERE `id` = 411 AND `from_id` = 133 AND `to_id` = 197 AND `method` = 'item' AND `condition_value` = '5' AND `priority` = 5;
+UPDATE `pm_evolution` SET `condition_value` = '8' WHERE `id` = 412 AND `from_id` = 133 AND `to_id` = 196 AND `method` = 'item' AND `condition_value` = '6' AND `priority` = 6;
+UPDATE `pm_evolution` SET `condition_value` = '51' WHERE `id` = 413 AND `from_id` = 133 AND `to_id` = 471 AND `method` = 'item' AND `condition_value` = '22' AND `priority` = 7;
+UPDATE `pm_evolution` SET `condition_value` = '210' WHERE `id` = 414 AND `from_id` = 840 AND `to_id` = 841 AND `method` = 'item' AND `condition_value` = '27' AND `priority` = 0;
+UPDATE `pm_evolution` SET `condition_value` = '211' WHERE `id` = 415 AND `from_id` = 840 AND `to_id` = 842 AND `method` = 'item' AND `condition_value` = '28' AND `priority` = 1;
+UPDATE `pm_evolution` SET `condition_value` = '20' WHERE `id` = 425 AND `from_id` = 281 AND `to_id` = 475 AND `method` = 'item' AND `condition_value` = '17' AND `priority` = 0;
+UPDATE `pm_evolution` SET `condition_value` = '8' WHERE `id` = 428 AND `from_id` = 790 AND `to_id` = 791 AND `method` = 'item' AND `condition_value` = '6' AND `priority` = 0;
+UPDATE `pm_evolution` SET `condition_value` = '7' WHERE `id` = 429 AND `from_id` = 790 AND `to_id` = 792 AND `method` = 'item' AND `condition_value` = '5' AND `priority` = 1;
+UPDATE `pm_evolution` SET `condition_value` = '20' WHERE `id` = 432 AND `from_id` = 361 AND `to_id` = 478 AND `method` = 'item' AND `condition_value` = '17' AND `priority` = 1;
+UPDATE `pm_evolution` SET `condition_value` = '8' WHERE `id` = 439 AND `from_id` = 44 AND `to_id` = 182 AND `method` = 'item' AND `condition_value` = '6' AND `priority` = 1;
+UPDATE `pm_evolution` SET `condition_value` = '3' WHERE `id` = 440 AND `from_id` = 61 AND `to_id` = 62 AND `method` = 'item' AND `condition_value` = '1' AND `priority` = 1;

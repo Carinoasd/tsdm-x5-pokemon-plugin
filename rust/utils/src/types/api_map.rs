@@ -9,6 +9,9 @@ pub struct MapsResponse {
 /// Boss 信息（游戏前端展示用）
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct BossInfo {
+    /// 原始配置位置；显示列表按等级排序，不能用显示顺序代替。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub boss_index: Option<u64>,
     pub pokemon_type_id: u64,
     pub pokemon_name: String,
     pub level: u64,
@@ -352,6 +355,7 @@ mod tests {
             (
                 MapMode::Boss {
                     bosses: vec![BossInfo {
+                        boss_index: Some(0),
                         pokemon_type_id: 1,
                         pokemon_name: "n".to_string(),
                         level: 5,
@@ -368,5 +372,17 @@ mod tests {
             let back: MapInfo = serde_json::from_value(value).unwrap();
             assert_eq!(back.mode, mode, "round-trip mismatch for {}", tag);
         }
+    }
+
+    #[test]
+    fn sorted_bosses_keep_configuration_indices_and_accept_legacy_rows() {
+        let rows: Vec<BossInfo> = serde_json::from_value(serde_json::json!([
+            {"boss_index":1,"pokemon_type_id":25,"pokemon_name":"Pikachu","level":20,"boss_multiplier":1.5},
+            {"boss_index":0,"pokemon_type_id":25,"pokemon_name":"Pikachu","level":80,"boss_multiplier":2.0},
+            {"pokemon_type_id":1,"pokemon_name":"Bulbasaur","level":50,"boss_multiplier":1.5}
+        ])).unwrap();
+        assert_eq!(rows[0].boss_index, Some(1));
+        assert_eq!(rows[1].boss_index, Some(0));
+        assert_eq!(rows[2].boss_index, None);
     }
 }

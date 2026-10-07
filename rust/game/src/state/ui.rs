@@ -91,7 +91,7 @@ pub fn show_toast(message: impl Into<String>, toast_type: ToastType) {
         _ => 3000,
     };
 
-    spawn(async move {
+    dioxus_core::spawn_forever(async move {
         gloo_timers::future::TimeoutFuture::new(timeout_ms).await;
         hide_toast(toast_id);
     });

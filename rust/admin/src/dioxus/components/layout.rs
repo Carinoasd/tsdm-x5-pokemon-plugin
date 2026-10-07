@@ -41,6 +41,7 @@ pub fn AdminLayout(
                             button {
                                 "data-testid": if *route == AdminRoute::EffectData { "nav-effects" } else if *route == AdminRoute::SkillType { "nav-skills" } else { "nav-admin" },
                                 style: if *route == current { "display:block;width:100%;margin:4px 0;padding:8px 6px;border:1px solid #2f6aa0;background:#2f6aa0;color:#fff;text-align:center;cursor:pointer;font-size:13px;" } else { "display:block;width:100%;margin:4px 0;padding:8px 6px;border:1px solid #c7d4e6;background:#fff;color:#234;text-align:center;cursor:pointer;font-size:13px;" },
+                                disabled: busy,
                                 onclick: move |_| on_navigate.call(*route),
                                 "{label}"
                             }

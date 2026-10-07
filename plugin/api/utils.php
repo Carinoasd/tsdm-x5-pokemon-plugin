@@ -235,8 +235,9 @@ function api_get_pet_exp_level($no_or_data, $exp)
 
     $level = 0;
     foreach ($no_or_data as $lv => $v) {
+        // Past the final threshold, keep the last level instead of returning 0.
+        $level = $lv;
         if ($exp <= $v) {
-            $level = $lv;
             if ($exp == $v && !($lv == $v && $v < 1)) {
                 ++$level;
             }
@@ -564,10 +565,19 @@ function api_validate_and_correct_hp(&$pm, $current_hp = null, $max_hp = null, $
 
     // 如果需要纠正，更新数据库
     if ($corrected) {
-        DB::query(pm_sql(
-            "UPDATE " . pm_table('pm_mypm') . " SET hp = %d WHERE id = %d",
-            $corrected_hp,
-            $pet_id
+        // 列表/详情的快照可能早于并发治疗、战斗或换装。仅在 HP 和决定
+        // 上限的宠物数据仍相同时修复；显式 current_hp 是待校正值，不能
+        // 用它替代快照 HP 作为条件。战斗等写入方仍自行提交最终 HP。
+        $where = ['id = %d', 'uid = %d'];
+        $args = [$corrected_hp, $pet_id, $uid];
+        foreach (['hp', 'state', 'species_id', 'level', 'hpg', 'hpn', 'is_shiny',
+            'equipmentid1', 'equipmentid2', 'equipmentid3', 'equipmentid4'] as $field) {
+            $where[] = $field . ' = %d';
+            $args[] = isset($pm[$field]) ? (int)$pm[$field] : 0;
+        }
+        DB::query(pm_sql_v(
+            "UPDATE " . pm_table('pm_mypm') . " SET hp = %d WHERE " . implode(' AND ', $where),
+            $args
         ));
         // 更新传入的宠物数据
         $pm['hp'] = strval($corrected_hp);

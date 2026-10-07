@@ -16,6 +16,7 @@ const PET_CATEGORY: Option<u32> = None;
 pub fn Shop() -> Element {
     let mut current_page = use_signal(|| 1u32);
     let mut current_category = use_signal(|| Some(1u32));
+    let buying = use_signal(|| false);
     let scroll_container: Signal<Option<web_sys::Element>> = use_signal(|| None);
 
     let shop_data = use_shop(current_category, current_page);
@@ -66,7 +67,9 @@ pub fn Shop() -> Element {
                                 rsx! {
                                     button {
                                         class: if active { "category-btn active" } else { "category-btn" },
+                                        disabled: *buying.read(),
                                         onclick: move |_| {
+                                            if *buying.read() { return; }
                                             current_category.set(cid);
                                             current_page.set(1);
                                             scroll_to_top(());
@@ -95,6 +98,7 @@ pub fn Shop() -> Element {
 
                     if *current_category.read() == PET_CATEGORY {
                         ShopPetsTab {
+                            buying,
                             current_page,
                             pet_shop_data,
                             scroll_container,
@@ -102,6 +106,7 @@ pub fn Shop() -> Element {
                         }
                     } else {
                         ShopItemsTab {
+                            buying,
                             current_category,
                             current_page,
                             shop_data,
@@ -117,6 +122,7 @@ pub fn Shop() -> Element {
 
 #[component]
 fn ShopItemsTab(
+    mut buying: Signal<bool>,
     current_category: Signal<Option<u32>>,
     current_page: Signal<u32>,
     shop_data: Resource<Result<_utils::types::api_shop::ShopListResponse, String>>,
@@ -189,8 +195,10 @@ fn ShopItemsTab(
                                                 }
                                                 button {
                                                     class: if can_buy { "buy-btn" } else { "buy-btn disabled" },
-                                                    disabled: !can_buy,
+                                                    disabled: !can_buy || *buying.read(),
                                                     onclick: move |_| {
+                                                        if !can_buy || *buying.read() || use_battle_state() { return; }
+                                                        buying.set(true);
                                                         let name_clone = item_name.clone();
                                                         let api = NewApiClient::new();
                                                         let do_refresh = || {
@@ -213,6 +221,7 @@ fn ShopItemsTab(
                                                                 }
                                                             }
                                                             do_refresh();
+                                                            buying.set(false);
                                                         });
                                                     },
                                                     "购买"
@@ -261,6 +270,7 @@ fn ShopItemsTab(
 
 #[component]
 fn ShopPetsTab(
+    mut buying: Signal<bool>,
     current_page: Signal<u32>,
     pet_shop_data: Resource<Result<_utils::types::api_shop::ShopPetListResponse, String>>,
     scroll_container: Signal<Option<web_sys::Element>>,
@@ -340,8 +350,10 @@ fn ShopPetsTab(
                                                 }
                                                 button {
                                                     class: if can_buy { "buy-btn" } else { "buy-btn disabled" },
-                                                    disabled: !can_buy,
+                                                    disabled: !can_buy || *buying.read(),
                                                     onclick: move |_| {
+                                                        if !can_buy || *buying.read() || use_battle_state() { return; }
+                                                        buying.set(true);
                                                         let name_clone = pet_name.clone();
                                                         let api = NewApiClient::new();
                                                         spawn(async move {
@@ -367,6 +379,7 @@ fn ShopPetsTab(
                                                                     show_error(format!("购买失败: {}", e));
                                                                 }
                                                             }
+                                                            buying.set(false);
                                                         });
                                                     },
                                                     "购买"

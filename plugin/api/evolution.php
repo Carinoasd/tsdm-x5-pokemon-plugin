@@ -131,12 +131,12 @@ function api_evolve_pokemon()
     DB::query("START TRANSACTION");
     try {
         $owner = DB::fetch_first(pm_sql(
-            "SELECT uid FROM " . pm_table('pm_usersdata') . " WHERE uid = %d FOR UPDATE", $uid
+            "SELECT uid, npcid FROM " . pm_table('pm_usersdata') . " WHERE uid = %d FOR UPDATE", $uid
         ));
         if (!$owner) {
             api_my_usersdata($uid);
             $owner = DB::fetch_first(pm_sql(
-                "SELECT uid FROM " . pm_table('pm_usersdata') . " WHERE uid = %d FOR UPDATE", $uid
+                "SELECT uid, npcid FROM " . pm_table('pm_usersdata') . " WHERE uid = %d FOR UPDATE", $uid
             ));
             if (!$owner) {
                 pm_abort_battle_transaction('User state not found', 500);
@@ -148,6 +148,9 @@ function api_evolve_pokemon()
         ));
         if (!$pet) {
             pm_abort_battle_transaction('Pokemon not found', 404);
+        }
+        if ((int) $pet['site'] === 1 && (int) $owner['npcid'] > 0) {
+            pm_abort_battle_transaction('战斗中的首位宠物无法进化', 400);
         }
 
         $evolution_info = DB::fetch_first(pm_sql(

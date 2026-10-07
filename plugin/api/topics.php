@@ -61,33 +61,8 @@ function api_get_topics()
   // 获取新闻公告配置（最多 6 条）
   $news_announcements = array();
   try {
-    $news_config = DB::fetch_first("SELECT * FROM pm_config WHERE `key` = 'news_announcements'");
-    if ($news_config) {
-      $decoded = json_decode(stripslashes($news_config['value']), true);
-      if (is_array($decoded)) {
-        // 限制最多 6 条
-        $news_announcements = array_slice($decoded, 0, 6);
-      }
-    } else {
-      // 兜底：如果 news_announcements 键不存在，自动创建空数组
-      // 同时尝试从旧的 ann_title/ann_url 迁移数据
-      $old_title = DB::fetch_first("SELECT * FROM pm_config WHERE `key` = 'ann_title'");
-      $old_url = DB::fetch_first("SELECT * FROM pm_config WHERE `key` = 'ann_url'");
-      if ($old_title && $old_url) {
-        $title = stripslashes($old_title['value']);
-        $url = stripslashes($old_url['value']);
-        if (!empty($title)) {
-          $news_announcements = array(array('title' => $title, 'url' => $url));
-        }
-      }
-
-      // 同步到数据库（使用 INSERT IGNORE 避免重复插入）
-      $json_value = json_encode($news_announcements);
-      @DB::query(pm_sql(
-          "INSERT IGNORE INTO pm_config (`key`, `value`, `data_type`) VALUES ('news_announcements', %s, 'string')",
-          $json_value
-      ));
-    }
+    require_once __DIR__ . '/../announcements.php';
+    $news_announcements = array_slice(pm_get_news_announcements(), 0, 6);
   } catch (Exception $e) {
     // 忽略错误，使用空数组
   }
@@ -99,14 +74,14 @@ function api_get_topics()
   try {
     $fid_escaped = intval($fid);
     $limit_escaped = intval($limit);
-    $rows = DB::fetch_all(pm_sql(
+    $rows = pm_topics_can_view_forum($fid_escaped) ? DB::fetch_all(pm_sql(
       "SELECT tid, subject, dateline, displayorder, author, authorid, views, replies
            FROM " . DB::table('forum_thread') . "
            WHERE fid = %d AND displayorder >= 0
            ORDER BY displayorder DESC, lastpost DESC
            LIMIT 0, %d",
       $fid_escaped, $limit_escaped
-    ));
+    )) : array();
 
     foreach ($rows as $topic) {
       $topics[] = [
@@ -121,7 +96,7 @@ function api_get_topics()
         'is_pinned' => (int) $topic['displayorder'] > 0,
       ];
     }
-  } catch (Exception $e) {
+  } catch (Throwable $e) {
     // 查询失败，返回空数组
   }
 
@@ -130,4 +105,87 @@ function api_get_topics()
     'topics' => $topics,
     'total' => count($topics),
   ]);
+}
+
+/** X5 uses table classes; X3 exposes the same table methods through C::t(). */
+function pm_topics_table($name)
+{
+  $class = 'table_' . $name;
+  return is_callable(array($class, 't')) ? $class::t() : C::t($name);
+}
+
+/** Check the native forum boundary before disclosing titles, authors or counts. */
+function pm_topics_can_view_forum($fid)
+{
+  global $_G;
+
+  if (isset($_G['setting']['forumstatus']) && !$_G['setting']['forumstatus']) return false;
+  $forum = pm_topics_table('forum_forum')->fetch_info_by_fid($fid);
+  if (!$forum || $forum['type'] === 'group' || !empty($forum['redirect'])) return false;
+  $uid = (int) ($_G['uid'] ?? 0);
+  $adminid = (int) ($_G['adminid'] ?? 0);
+  if ($fid == ($_G['setting']['followforumid'] ?? 0) && $adminid !== 1) return false;
+
+  $forum['allowview'] = 0;
+  if ($uid && !empty($_G['member']['accessmasks'])) {
+    $access = pm_topics_table('forum_access')->fetch_all_by_fid_uid($fid, $uid);
+    $forum['allowview'] = (int) ($access[0]['allowview'] ?? 0);
+  }
+  if ($forum['allowview'] === -1) return false;
+  $forum['ismoderator'] = $adminid === 1 || $adminid === 2
+    || ($uid && $adminid === 3 && pm_topics_table('forum_moderator')->fetch_uid_by_fid_uid($fid, $uid));
+
+  // The permission helpers use the selected forum. Do not replace the caller's context.
+  $had_forum = array_key_exists('forum', $_G);
+  $had_fid = array_key_exists('fid', $_G);
+  if ($had_forum) $old_forum = &$_G['forum'];
+  if ($had_fid) $old_fid = &$_G['fid'];
+  unset($_G['forum'], $_G['fid']);
+  $_G['forum'] = $forum;
+  $_G['fid'] = $fid;
+  try {
+    if ((int) $forum['status'] === 3) {
+      if ((int) $forum['level'] === -1) return false;
+      if (!function_exists('groupperm')) require_once libfile('function/group');
+      if ($uid && $adminid !== 1) {
+        $moderators = !empty($forum['moderators']) ? dunserialize($forum['moderators']) : array();
+        $groups = !empty($_G['setting']['group_admingroupids'])
+          ? dunserialize($_G['setting']['group_admingroupids']) : array(1 => 1);
+        $forum['ismoderator'] = !empty($moderators[$uid]) || !empty($groups[$_G['groupid']]);
+        $_G['forum']['ismoderator'] = $forum['ismoderator'];
+      }
+      $member = pm_topics_table('forum_groupuser')->fetch_userinfo($uid, $fid);
+      // Older native helpers read false['level'] after allowing a public outsider.
+      // Preserve that result without inventing a member record or emitting a warning.
+      $public_outsider = !$member && $forum['type'] === 'sub'
+        && $forum['jointype'] >= 0 && !empty($forum['gviewperm']);
+      $status = $public_outsider ? '' : groupperm($forum, $uid, '', $member ?: false);
+      if ($status !== '' && $status !== 'isgroupuser') return false;
+    }
+    // forumdisplay permits an empty viewperm. Thread readperm controls the body,
+    // so it must not remove otherwise public titles from this list.
+    if (!empty($forum['viewperm']) && !$forum['allowview']) {
+      if (!function_exists('forumperm') && function_exists('libfile')) {
+        require_once libfile('function/core');
+      }
+      // For a plain guest group list, use the native explicit-group mode. Older
+      // X5 helpers otherwise iterate null guest tag/account records on PHP 8.
+      $guest_group = !$uid && preg_match('/^[0-9\t]+$/D', $forum['viewperm'])
+        ? (int) ($_G['groupid'] ?? 0) : 0;
+      if (!function_exists('forumperm') || !forumperm($forum['viewperm'], $guest_group)) return false;
+    }
+    // Legacy formulaperm() can showmessage()/exit and has no boolean ACL API.
+    // Leave those previews to the forum page, preserving its native moderator exemption.
+    if (!empty($forum['formulaperm']) && !$forum['ismoderator']) return false;
+    if (!empty($forum['password']) && $forum['password'] !== ($_G['cookie']['fidpw' . $fid] ?? null)) return false;
+    if (!empty($forum['price']) && !$forum['ismoderator']) {
+      $paid = pm_topics_table('common_member_forum_buylog')->get_credits($uid, $fid);
+      if ($paid < $forum['price']) return false;
+    }
+    return true;
+  } finally {
+    unset($_G['forum'], $_G['fid']);
+    if ($had_forum) $_G['forum'] = &$old_forum;
+    if ($had_fid) $_G['fid'] = &$old_fid;
+  }
 }

@@ -419,21 +419,23 @@ function battle_core_emit(&$state, &$events, $type, $payload)
 
 /**
  * 属性相克表（攻击属性 => {effective, resisted, immune}，中文属性名与 pm_data.xs 一致）
- * 自旧版 get_pet_type_effectiveness 移植，数据驱动：调用方可传自定义 chart 覆盖。
+ * v2 采用含妖精的现代相克表；v1 保留旧版移植时的数值以继续旧战斗。
+ * 相克方向核对：Pokemon Showdown data/typechart.ts（damageTaken 为防守方视角）。
+ * https://github.com/smogon/pokemon-showdown/blob/master/data/typechart.ts
  */
-function battle_core_type_chart()
+function battle_core_type_chart($rules_version = BATTLE_RULES_VERSION)
 {
-    return [
+    $chart = [
         '普通' => ['effective' => [], 'resisted' => ['岩石', '钢'], 'immune' => ['幽灵']],
-        '格斗' => ['effective' => ['普通', '岩石', '钢', '冰', '恶'], 'resisted' => ['飞行', '超能', '妖精'], 'immune' => ['幽灵']],
+        '格斗' => ['effective' => ['普通', '岩石', '钢', '冰', '恶'], 'resisted' => ['飞行', '毒', '虫', '超能', '妖精'], 'immune' => ['幽灵']],
         '飞行' => ['effective' => ['格斗', '虫', '草'], 'resisted' => ['岩石', '电', '钢'], 'immune' => []],
         '毒' => ['effective' => ['草', '妖精'], 'resisted' => ['毒', '地面', '岩石', '幽灵'], 'immune' => ['钢']],
         '地面' => ['effective' => ['火', '电', '毒', '岩石', '钢'], 'resisted' => ['草', '虫'], 'immune' => ['飞行']],
         '岩石' => ['effective' => ['飞行', '虫', '火', '冰'], 'resisted' => ['格斗', '地面', '钢'], 'immune' => []],
         '虫' => ['effective' => ['草', '超能', '恶'], 'resisted' => ['飞行', '格斗', '毒', '幽灵', '钢', '火', '妖精'], 'immune' => []],
         '幽灵' => ['effective' => ['超能', '幽灵'], 'resisted' => ['恶'], 'immune' => ['普通']],
-        '钢' => ['effective' => ['岩石', '冰', '妖精'], 'resisted' => ['火', '水', '电', '钢'], 'immune' => ['毒']],
-        '火' => ['effective' => ['草', '冰', '虫', '钢'], 'resisted' => ['火', '水', '龙'], 'immune' => []],
+        '钢' => ['effective' => ['岩石', '冰', '妖精'], 'resisted' => ['火', '水', '电', '钢'], 'immune' => []],
+        '火' => ['effective' => ['草', '冰', '虫', '钢'], 'resisted' => ['火', '水', '岩石', '龙'], 'immune' => []],
         '水' => ['effective' => ['火', '地面', '岩石'], 'resisted' => ['水', '草', '龙'], 'immune' => []],
         '草' => ['effective' => ['水', '地面', '岩石'], 'resisted' => ['飞行', '草', '毒', '虫', '钢', '火', '龙'], 'immune' => []],
         '电' => ['effective' => ['水', '飞行'], 'resisted' => ['电', '草', '龙'], 'immune' => ['地面']],
@@ -441,8 +443,15 @@ function battle_core_type_chart()
         '冰' => ['effective' => ['草', '地面', '飞行', '龙'], 'resisted' => ['火', '水', '冰', '钢'], 'immune' => []],
         '龙' => ['effective' => ['龙'], 'resisted' => ['钢'], 'immune' => ['妖精']],
         '恶' => ['effective' => ['超能', '幽灵'], 'resisted' => ['格斗', '恶', '妖精'], 'immune' => []],
-        '妖精' => ['effective' => ['格斗', '龙', '恶'], 'resisted' => ['火', '毒', '钢'], 'immune' => ['龙']],
+        '妖精' => ['effective' => ['格斗', '龙', '恶'], 'resisted' => ['火', '毒', '钢'], 'immune' => []],
     ];
+    if ((int)$rules_version < 2) {
+        $chart['格斗']['resisted'] = ['飞行', '超能', '妖精'];
+        $chart['火']['resisted'] = ['火', '水', '龙'];
+        $chart['钢']['immune'] = ['毒'];
+        $chart['妖精']['immune'] = ['龙'];
+    }
+    return $chart;
 }
 
 /**
@@ -508,7 +517,7 @@ function battle_core_calc_damage(&$state, $attacker, $defender, $move, $rng = nu
     }
 
     // 属性相克（on_damage_calc 钩子的注入点之一：效果可修正倍率）
-    $effectiveness = battle_core_type_effectiveness($move['type'], $defender['types']);
+    $effectiveness = battle_core_type_effectiveness($move['type'], $defender['types'], battle_core_type_chart($state['rules_version']));
     $damage = $base * $effectiveness;
 
     // 属性一致加成（STAB）
@@ -525,10 +534,11 @@ function battle_core_calc_damage(&$state, $attacker, $defender, $move, $rng = nu
         $damage *= 2;
     }
 
+    $immune = (int)$state['rules_version'] >= 2 && $effectiveness === 0.0;
     return [
-        'amount' => intval(max(1, floor($damage))),
+        'amount' => $immune ? 0 : intval(max(1, floor($damage))),
         'effectiveness' => $effectiveness,
-        'crit' => $crit,
+        'crit' => $immune ? false : $crit,
         'stat' => $category !== 1 ? 'atk' : 'spatk',
     ];
 }
@@ -745,7 +755,10 @@ function battle_core_actor_move(&$state, &$events, $rng, $side, $move)
             break;
         }
     }
-    battle_core_apply_effects($state, $events, 'on_hit', ['actor_side' => $actor_side_key, 'actor_slot' => $actor['slot']], $rng);
+    // A damaging move that cannot affect its target cannot inflict its secondary status.
+    if ($result['amount'] > 0) {
+        battle_core_apply_effects($state, $events, 'on_hit', ['actor_side' => $actor_side_key, 'actor_slot' => $actor['slot']], $rng);
+    }
 
     if ($new_hp <= 0) {
         foreach ($state['sides'][$target_side_key] as $i => $u) {
@@ -756,6 +769,14 @@ function battle_core_actor_move(&$state, &$events, $rng, $side, $move)
         }
         battle_core_emit($state, $events, 'faint', ['side' => $target_side_key, 'slot' => $target['slot']]);
         battle_core_apply_effects($state, $events, 'on_faint', ['actor_side' => $target_side_key, 'actor_slot' => $target['slot']]);
+        if ($target_side_key === 'ally') {
+            // The endpoint checks the player's party for replacements, just as
+            // it does after the fixed counter attack. The core only holds the
+            // current combatant, so it cannot decide that the whole party lost.
+            $state['phase'] = 'awaiting_switch';
+            battle_core_emit($state, $events, 'switch_required', ['side' => 'ally']);
+            return false;
+        }
         if (battle_core_active_unit($state, $target_side_key) === null) {
             $state['phase'] = 'ended';
             $state['result'] = $actor_side_key === 'ally' ? 'victory' : 'defeat';
@@ -774,6 +795,10 @@ function battle_core_counter_attack(&$state, &$events, $rng = null)
     $enemy = battle_core_active_unit($state, 'enemy');
     $ally = battle_core_active_unit($state, 'ally');
     if ($enemy === null || $ally === null) {
+        return;
+    }
+    // Item, capture and failed-flee turns call this entry point directly.
+    if (battle_core_pre_move_status($state, $events, $rng, 'enemy')) {
         return;
     }
 
@@ -819,7 +844,7 @@ function battle_core_counter_attack(&$state, &$events, $rng = null)
 function battle_core_resolve_move($state, $action)
 {
     $ally = battle_core_active_unit($state, 'ally');
-    $fallback_type = isset($action['fallback_type']) && $action['fallback_type'] !== '' ? $action['fallback_type'] : ($ally ? $ally['types'][0] : '普通');
+    $fallback_type = isset($action['fallback_type']) && $action['fallback_type'] !== '' ? $action['fallback_type'] : (!empty($ally['types'][0]) ? $ally['types'][0] : '普通');
     if (!isset($action['type']) || $action['type'] !== 'move' || empty($action['skill'])) {
         return [
             'id' => 0,
@@ -947,13 +972,16 @@ function battle_core_resolve_statuses(&$state, &$events, $rng = null)
                 if ($new_hp <= 0) {
                     $state['sides'][$side][$i]['fainted'] = true;
                     battle_core_emit($state, $events, 'faint', ['side' => $side, 'slot' => $unit['slot']]);
-                    if (battle_core_active_unit($state, $side) === null) {
-                        $state['phase'] = 'ended';
-                        $state['result'] = $side === 'ally' ? 'defeat' : 'victory';
-                        battle_core_emit($state, $events, 'battle_end', ['result' => $state['result']]);
-                    } elseif ($side === 'ally') {
+                    if ($side === 'ally') {
                         $state['phase'] = 'awaiting_switch';
                         battle_core_emit($state, $events, 'switch_required', ['side' => 'ally']);
+                        return;
+                    }
+                    if (battle_core_active_unit($state, $side) === null) {
+                        $state['phase'] = 'ended';
+                        $state['result'] = 'victory';
+                        battle_core_emit($state, $events, 'battle_end', ['result' => $state['result']]);
+                        return;
                     }
                     continue; // 倒下后不再解除判定
                 }
@@ -997,7 +1025,7 @@ function battle_core_finish_turn(&$state, &$events, $ally_slot, $mounted, $rng =
 function battle_core_resolve_move_for_side($state, $side, $raw)
 {
     $unit = battle_core_active_unit($state, $side);
-    $fallback_type = $unit ? $unit['types'][0] : '普通';
+    $fallback_type = !empty($unit['types'][0]) ? $unit['types'][0] : '普通';
     return [
         'id' => isset($raw['id']) ? intval($raw['id']) : 0,
         'name' => isset($raw['name']) ? strval($raw['name']) : '',
@@ -1189,6 +1217,9 @@ function battle_core_apply_action($state, $action, $rng = null)
     /** 敌方行动（先手/后手路径共用） */
     $enemy_act = function () use (&$state, &$events, $rng, $enemy_move) {
         if ($enemy_move !== null) {
+            if (battle_core_pre_move_status($state, $events, $rng, 'enemy')) {
+                return;
+            }
             battle_core_actor_move($state, $events, $rng, 'enemy', $enemy_move);
         } else {
             battle_core_counter_attack($state, $events, $rng);
@@ -1206,17 +1237,13 @@ function battle_core_apply_action($state, $action, $rng = null)
             battle_core_finish_turn($state, $events, $ally['slot'], $mounted, $rng, $enemy_mounted);
             return ['state' => $state, 'events' => $events, 'pp_refund' => $pp_refund];
         }
-        if (battle_core_pre_move_status($state, $events, $rng, 'ally')) {
-            battle_core_finish_turn($state, $events, $ally['slot'], $mounted, $rng, $enemy_mounted);
-            return ['state' => $state, 'events' => $events, 'pp_refund' => $pp_refund];
-        }
         battle_core_actor_move($state, $events, $rng, 'ally', $move);
         if ($state['phase'] === 'ended') {
             // 先手击倒：回合结束（旧版此时野怪不再反击）
             battle_core_finish_turn($state, $events, $ally['slot'], $mounted, $rng, $enemy_mounted);
             return ['state' => $state, 'events' => $events, 'pp_refund' => $pp_refund];
         }
-        if (battle_core_events_has($events, 'miss')) {
+        if (battle_core_events_has($events, 'miss', 'ally')) {
             $pp_refund = true;
         }
         $enemy_act();
@@ -1242,7 +1269,7 @@ function battle_core_apply_action($state, $action, $rng = null)
             battle_core_finish_turn($state, $events, $ally['slot'], $mounted, $rng, $enemy_mounted);
             return ['state' => $state, 'events' => $events, 'pp_refund' => $pp_refund];
         }
-        if (battle_core_events_has($events, 'miss')) {
+        if (battle_core_events_has($events, 'miss', 'ally')) {
             $pp_refund = true;
         }
     }
@@ -1251,10 +1278,10 @@ function battle_core_apply_action($state, $action, $rng = null)
     return ['state' => $state, 'events' => $events, 'pp_refund' => $pp_refund];
 }
 
-function battle_core_events_has($events, $type)
+function battle_core_events_has($events, $type, $side = null)
 {
     foreach ($events as $e) {
-        if ($e['type'] === $type) {
+        if ($e['type'] === $type && ($side === null || ($e['payload']['side'] ?? null) === $side)) {
             return true;
         }
     }
