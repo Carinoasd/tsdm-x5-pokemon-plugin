@@ -19,6 +19,9 @@ The battle suite covers touch and keyboard item details, PP selection, pending
 request guards, lost-response retries with the same request ID, revision
 conflicts, expired login, battles ended in another tab, inventory timeouts,
 delayed party loading, and battle report loading and clipboard sharing.
+It also checks selecting duplicate-species Boss configurations after level sorting,
+including configuration index zero and preserving the chosen Boss across a retry.
+Hybrid maps keep both ordinary adventure and explicit Boss choices available.
 The inventory suite covers item search and warehouse filtering, sorting, and
 selection across larger collections.
 The player suite covers duplicate purchases and initialization, pet selection,

@@ -98,6 +98,14 @@ function get_global_config()
 
 function set_global_config($data)
 {
+  require_once __DIR__ . '/../../config_schema.php';
+  // DDL must precede all setting writes because ALTER TABLE commits implicitly.
+  foreach ($data as $key => $value) {
+    if ($key === 'news_announcements' && is_array($value)) {
+      $value = json_encode($value, JSON_UNESCAPED_UNICODE);
+    }
+    if (is_string($value)) pm_ensure_config_value_capacity($value);
+  }
   foreach ($data as $key => $value) {
     $value = $data[$key];
     if ($query = DB::fetch_first("SELECT * from pm_config where `key`='$key'")) {

@@ -165,20 +165,16 @@ function insert_evolution_info($info)
   $cond = translate_evolution_info_label_to_db_cond($info["condition"]);
   $priority = intval($info["priority"]);
 
-  $last_id = DB::fetch_first("SELECT id from pm_evolution order by id desc limit 1");
-  $last_id = intval($last_id['id']);
-  $new_id = $last_id + 1;
-
   DB::query("INSERT INTO pm_evolution (
-    `id`, `from_id`, `to_id`, `method`, `condition_value`, `priority`
+    `from_id`, `to_id`, `method`, `condition_value`, `priority`
   ) VALUES (
-    $new_id, $source_id, $target_id, '" .
+    $source_id, $target_id, '" .
     $cond[0] . "', '" .
     $cond[1] . "', 
     $priority
   )");
 
-  return $new_id;
+  return intval(DB::insert_id());
 }
 
 function delete_evolution_info($id)

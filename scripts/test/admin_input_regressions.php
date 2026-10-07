@@ -8,6 +8,10 @@ set_error_handler(function ($severity, $message, $file, $line) {
 class DB
 {
     public static $tables = ['pm_data' => [1 => ['id' => 1]], 'pm_evolution' => [], 'pm_config' => []];
+    public static $fail_news_insert = false;
+    public static function errno() { return 1142; }
+    public static $next_ids = [];
+    public static $last_insert_id = 0;
 
     public static function value($raw)
     {
@@ -48,6 +52,7 @@ class DB
 
     public static function fetch_first($sql)
     {
+        if ($sql === "SHOW COLUMNS FROM pm_config LIKE 'value'") return ['Type' => 'longtext'];
         $rows = self::fetch_all($sql);
         return $rows[0] ?? false;
     }
@@ -56,13 +61,14 @@ class DB
 
     public static function query($sql)
     {
+        if (self::$fail_news_insert && str_starts_with($sql, 'INSERT') && str_contains($sql, 'news_announcements')) return false;
         if (preg_match('/^UPDATE (\w+) set `?(\w+)`?\s*=\s*(.*?) where `?(id|key)`?\s*=\s*(.+)$/is', trim($sql), $match)) {
             $id = self::value($match[5]);
             if (!isset(self::$tables[$match[1]][$id])) throw new RuntimeException('Unknown update row');
             self::$tables[$match[1]][$id][$match[2]] = self::value($match[3]);
             return true;
         }
-        if (preg_match('/^INSERT(?: IGNORE)? INTO (\w+)\s*\((.*?)\)\s*VALUES\s*\((.*?)\)$/is', trim($sql), $match)) {
+        if (preg_match('/^INSERT(?: IGNORE)? INTO (\w+)\s*\((.*?)\)\s*VALUES\s*\((.*?)\)( ON DUPLICATE KEY UPDATE `key` = `key`)?$/is', trim($sql), $match)) {
             $columns = array_map(function ($value) { return trim($value, " \t\r\n`"); }, explode(',', $match[2]));
             $literal = "(?:'(?:\\\\.|[^'\\\\])*'|-?\d+)";
             if (!preg_match('/^' . $literal . '(?:\s*,\s*' . $literal . ')*$/s', trim($match[3]))) {
@@ -71,11 +77,23 @@ class DB
             preg_match_all("/'(?:\\\\.|[^'\\\\])*'|-?\d+/s", $match[3], $values);
             if (count($columns) !== count($values[0])) throw new RuntimeException('Malformed INSERT columns');
             $row = array_combine($columns, array_map([self::class, 'value'], $values[0]));
+            if (!empty($match[4]) && isset(self::$tables[$match[1]][$row['key']])) return true;
+            if ($match[1] !== 'pm_config') {
+                $table = $match[1];
+                if (!isset(self::$next_ids[$table])) {
+                    self::$next_ids[$table] = max(array_merge([0], array_keys(self::$tables[$table]))) + 1;
+                }
+                if (!isset($row['id'])) $row['id'] = self::$next_ids[$table];
+                self::$next_ids[$table] = max(self::$next_ids[$table], $row['id'] + 1);
+                self::$last_insert_id = $row['id'];
+            }
             self::$tables[$match[1]][$row['id'] ?? $row['key']] = $row;
             return true;
         }
         throw new RuntimeException('Unexpected write: ' . $sql);
     }
+
+    public static function insert_id() { return self::$last_insert_id; }
 }
 
 function api_success($data) { exit(json_encode(['success' => true, 'data' => $data], JSON_UNESCAPED_UNICODE)); }
@@ -85,6 +103,7 @@ function get_param($name, $default = null) { return $_GET[$name] ?? $_POST[$name
 if (isset($argv[1])) {
     $request = json_decode(base64_decode($argv[1]), true, 512, JSON_THROW_ON_ERROR);
     DB::$tables = $request['tables'] ?? DB::$tables;
+    DB::$fail_news_insert = !empty($request['fail_news_insert']);
     register_shutdown_function(function () { fwrite(STDERR, json_encode(DB::$tables, JSON_UNESCAPED_UNICODE)); });
     define('IN_DISCUZ', true);
     $_POST = $request['params'] ?? [];
@@ -295,6 +314,16 @@ foreach (['config', 'admin', 'topics'] as $reader) {
         expect_input($data['news_announcements'], []);
     });
 }
+
+check_input('Failed announcement inserts cannot return an empty successful list', function () {
+    try {
+        input_request(['endpoint' => 'config', 'fail_news_insert' => true]);
+    } catch (RuntimeException $error) {
+        expect_input($error->getMessage(), 'Announcement migration failed');
+        return;
+    }
+    throw new RuntimeException('A failed insert must reject the read migration');
+});
 
 echo "Admin input regressions: $passed passed, $failed failed\n";
 exit($failed === 0 ? 0 : 1);

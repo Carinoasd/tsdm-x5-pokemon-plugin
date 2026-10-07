@@ -67,6 +67,8 @@ class DB
         }
         return true;
     }
+
+    public static function insert_id() { return 11; }
 }
 
 function skill_payload($effect)

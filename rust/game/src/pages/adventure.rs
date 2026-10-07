@@ -12,7 +12,9 @@ use crate::{
     utils::api_client::{battle_timeout, NewApiClient},
 };
 use _utils::types::{
-    api_battle::{BattleItem, BattleMutationResponse, PendingBattleAction, PpRestoreSkill},
+    api_battle::{
+        BattleItem, BattleMutationResponse, PendingBattleAction, PpRestoreSkill, StartBattleRequest,
+    },
     api_map::MapInfo,
     api_map_region::MapRegion,
     api_pokemon::PokemonBasic,
@@ -90,13 +92,18 @@ pub fn Adventure() -> Element {
         }
     });
 
-    let mut start_boss_adventure = move |map_id: u64, boss_type_id: u64| {
-        selected_map_for_modal.set(None);
-        actions.begin(
-            "start",
-            serde_json::json!({"map_id":map_id,"boss_pokemon_type_id":boss_type_id}),
-        );
-    };
+    let mut start_boss_adventure =
+        move |map_id: u64, boss_type_id: u64, boss_index: Option<u64>| {
+            selected_map_for_modal.set(None);
+            actions.begin(
+                "start",
+                serde_json::json!(StartBattleRequest {
+                    map_id,
+                    boss_pokemon_type_id: Some(boss_type_id),
+                    boss_index,
+                }),
+            );
+        };
     let regions = use_memo(move || MapRegion::from_maps(&maps.read()));
     let mut start_adventure = move |map_id: u64| {
         selected_map_for_modal.set(None);
@@ -324,19 +331,19 @@ pub fn Adventure() -> Element {
                             let bosses = map.mode.get_bosses();
                             if !bosses.is_empty() {
                                 let map_id_for_boss = map.id;
-                                let bosses_vec: Vec<_> = bosses.into_iter().collect();
+                                let bosses_vec: Vec<_> = bosses.into_iter().enumerate().collect();
                                 let mid = map_id_for_boss;
                                 rsx! {
                                     div { class: "map-detail-section boss-challenge-section",
                                         h4 { "👑 Boss 挑战" }
                                         div { class: "boss-list-simple",
                                             Fragment {
-                                                for boss in bosses_vec {
+                                                for (position, boss) in bosses_vec {
                                                     button {
-                                                        key: "boss-{boss.pokemon_type_id}",
+                                                        key: "boss-{mid}-{position}",
                                                         class: "boss-row-btn",
                                                          disabled: actions_blocked || pokemon_list_empty,
-                                                         onclick: move |_| start_boss_adventure(mid, boss.pokemon_type_id),
+                                                         onclick: move |_| start_boss_adventure(mid, boss.pokemon_type_id, boss.boss_index),
                                                          div { class: "boss-row-content",
                                                              img {
                                                                  src: "{IMG_PATH_REMOTE}/pm/{boss.pokemon_type_id}.gif",
@@ -492,19 +499,19 @@ pub fn Adventure() -> Element {
                                                                     if !bosses.is_empty() {
                                                                         let map_id_for_boss_card = map_clone2.id;
                                                                         let total_boss_count = bosses.len();
-                                                                        let bosses_vec: Vec<_> = bosses.into_iter().take(3).collect();
+                                                                        let bosses_vec: Vec<_> = bosses.into_iter().enumerate().take(3).collect();
                                                                         let mid = map_id_for_boss_card;
                                                                         rsx! {
                                                                             div { class: "card-boss-list",
                                                                                 div { class: "card-boss-title", "👑 Boss:" }
                                                                                 Fragment {
-                                                                                    for boss in bosses_vec {
+                                                                                    for (position, boss) in bosses_vec {
                                                                                         div {
-                                                                                            key: "boss-{boss.pokemon_type_id}",
+                                                                                            key: "boss-{mid}-{position}",
                                                                                             class: "card-boss-item",
                                                                                             onclick: move |e| {
                                                                                                 e.stop_propagation();
-                                                                                                start_boss_adventure(mid, boss.pokemon_type_id);
+                                                                                                start_boss_adventure(mid, boss.pokemon_type_id, boss.boss_index);
                                                                                             },
                                                                                             img {
                                                                                                 src: "{IMG_PATH_REMOTE}/pm/{boss.pokemon_type_id}.gif",

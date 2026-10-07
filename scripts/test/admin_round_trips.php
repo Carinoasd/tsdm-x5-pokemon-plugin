@@ -9,6 +9,10 @@ class DB
 {
     public static $tables = ['pm_evolution' => [], 'pm_data' => [], 'pm_itemdata' => [], 'pm_map' => []];
     public static $writes = [];
+    public static $next_ids = [];
+    public static $last_insert_id = 0;
+
+    public static function insert_id() { return self::$last_insert_id; }
 
     public static function fetch_all($sql)
     {
@@ -62,6 +66,11 @@ class DB
             preg_match_all("/'(?:\\\\.|[^'\\\\])*'|-?\d+/s", $match[3], $values);
             if (count($columns) !== count($values[0])) throw new RuntimeException('Malformed INSERT: ' . $sql);
             $row = array_combine($columns, array_map([self::class, 'value'], $values[0]));
+            $table = $match[1];
+            $highest_seed = max(array_keys(self::$tables[$table]) ?: [0]);
+            $row['id'] = $row['id'] ?? max($highest_seed + 1, self::$next_ids[$table] ?? 1);
+            self::$next_ids[$table] = max(self::$next_ids[$table] ?? 1, $row['id'] + 1);
+            self::$last_insert_id = $row['id'];
             if ($match[1] === 'pm_map') $row += ['experience' => 0];
             self::$tables[$match[1]][$row['id']] = $row;
             return true;

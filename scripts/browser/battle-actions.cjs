@@ -23,10 +23,15 @@ function pet(id, species, name, hp, site) {
     base_info:{id:species,name,type_1:'normal',type_2:null}};
 }
 
-async function startFixture({fainted=false, holdList=false}={}) {
+async function startFixture({fainted=false, holdList=false, bossMap=false, hybridMap=false}={}) {
+  // Configuration order differs from display order; duplicate species are intentional.
+  const bosses=[
+    {boss_index:0,pokemon_type_id:25,pokemon_name:'Pikachu',level:80,boss_multiplier:2},
+    {boss_index:1,pokemon_type_id:25,pokemon_name:'Pikachu',level:20,boss_multiplier:1.5},
+  ];
   const state = {
     requests:[], unexpected:[], gates:new Map(), turn:3, pp:2,
-    engineId:37, revision:3, receipts:new Map(), loseNext:null, rejectNext:null, logFailure:false, finished:false, winNext:false, hp:fainted ? 0 : 50, activeId:501, activeName:'Pikachu', awaiting:fainted,
+    engineId:37, revision:3, receipts:new Map(), loseNext:null, rejectNext:null, logFailure:false, finished:bossMap, winNext:false, hp:fainted ? 0 : 50, activeId:501, activeName:'Pikachu', awaiting:fainted, boss:null,
     itemCounts:{17:3,18:2}, balls:2, failReplace:false,
   };
   const hold = key => {
@@ -40,7 +45,7 @@ async function startFixture({fainted=false, holdList=false}={}) {
   const scene = () => ({battle_id:'battle_1',engine_battle_id:state.engineId,revision:state.revision,phase:state.finished ? 'ended' : state.awaiting ? 'awaiting_switch' : 'active',events:[],map_id:1,map_name:'Fixture Meadow',turn:state.turn,
     my_pokemon:{id:state.activeId===501 ? 25 : 1,instance_id:state.activeId,name:state.activeName,
       level:5,hp:state.hp,max_hp:50,skills:[{id:12,name:'Tackle',power:40,pp:state.pp,max_pp:20,skill_type:'normal',category:'物攻'}]},
-    wild_pokemon:{id:19,name:'Rattata',level:5,hp:20,max_hp:30,gender:0,is_shiny:false,is_boss:false,boss_multiplier:1},
+    wild_pokemon:{id:state.boss?.pokemon_type_id || 19,name:state.boss ? '[BOSS] Pikachu' : 'Rattata',level:state.boss?.level || 5,hp:20,max_hp:30,gender:0,is_shiny:false,is_boss:!!state.boss,boss_multiplier:state.boss?.boss_multiplier || 1},
     status:state.finished ? 'victory' : state.awaiting ? 'defeat' : 'active',battle_over:state.finished,can_continue_switch:state.awaiting,message:'Fixture action completed'});
   const list = () => [
     pet(501,25,'Pikachu',state.activeId===501 ? state.hp : 0,state.activeId===501 ? 1 : 2),
@@ -61,7 +66,7 @@ async function startFixture({fainted=false, holdList=false}={}) {
         assert.deepEqual(receipt.body,body,'Retry must keep the exact original payload');
         return receipt.result;
       }
-      if(body.engine_battle_id!==state.engineId || body.expected_revision!==state.revision) {
+      if(key==='battle/start' ? body.engine_battle_id!==0 || body.expected_revision!==0 : body.engine_battle_id!==state.engineId || body.expected_revision!==state.revision) {
         return {status:409,result:{success:false,error:'battle_state_conflict'}};
       }
       const {request_id,engine_battle_id,expected_revision,...fields}=body; body=fields;
@@ -87,7 +92,21 @@ async function startFixture({fainted=false, holdList=false}={}) {
           turns:[{turn:3,lines:['皮卡丘使用撞击，造成12点伤害。','野怪陷入烧伤。']}],
           events:[{turn:3,seq:1,type:'damage',payload:{side:'ally',amount:12}}],
           bbcode:'[quote]第3回合：皮卡丘造成12点伤害。[/quote]'}; break;
-      case 'battle/maps': data={maps:[],total:0}; break;
+      case 'battle/maps': data={maps:bossMap ? [{id:1,name:'Boss Meadow',area_type:'g',area_type_name:'草丛',region:'kanto',pos_x:50,pos_y:50,is_enabled:true,min_level:1,max_level:100,mode:hybridMap ? 'hybrid' : 'boss',bosses:[bosses[1],bosses[0]],wild_pokemons:hybridMap ? [{id:19,name:'Rattata'}] : []}] : [],total:bossMap ? 1 : 0}; break;
+      case 'battle/start': {
+        assert.equal(body.map_id,1);
+        if(Object.hasOwn(body,'boss_pokemon_type_id')) {
+          assert.equal(body.boss_pokemon_type_id,25);
+          // Preserve the old species-only server contract so the pre-fix UI reproduces the wrong boss.
+          state.boss=Object.hasOwn(body,'boss_index') ? bosses[body.boss_index] : bosses.find(boss=>boss.pokemon_type_id===body.boss_pokemon_type_id);
+          assert(state.boss);
+        } else {
+          assert(hybridMap,'Only the hybrid fixture offers ordinary adventure');
+          assert.equal(Object.hasOwn(body,'boss_index'),false);
+          state.boss=null;
+        }
+        state.finished=false; state.turn=1; state.revision=0; data=scene(); break;
+      }
       case 'battle/get_battle_items': data={items:[
         {id:17,name:'Potion',img:'hp20',nums:state.itemCounts[17],item_type:1,module:'hp20',addhp:20},
         {id:18,name:'Ether',img:'pp5',nums:state.itemCounts[18],item_type:1,module:'pp5'},
@@ -116,7 +135,7 @@ async function startFixture({fainted=false, holdList=false}={}) {
       }
       case 'battle/turn': {
         if(state.winNext) {state.winNext=false; state.finished=true;}
-        else {state.hp=0; state.awaiting=true;}
+        else if (!state.boss) {state.hp=0; state.awaiting=true;}
         state.turn++; data=scene(); break;
       }
       case 'battle/replace_pokemon': {
@@ -182,7 +201,11 @@ async function withPage(browser,name,options,test) {
   page.on('pageerror',error=>errors.push(String(error)));
   try {
     await page.goto(fixture.url);
-    await expect(page.locator('.page-battle')).toBeVisible();
+    if(options.bossMap) {
+      await page.getByRole('button',{name:'野外冒险',exact:true}).click();
+      await page.locator('.map-marker').click();
+      await expect(page.locator('.zoomed-map-card')).toBeVisible();
+    } else await expect(page.locator('.page-battle')).toBeVisible();
     await test(page,fixture);
     assert.deepEqual(fixture.state.unexpected,[]);
     assert.deepEqual(errors,[]);
@@ -220,6 +243,55 @@ async function run() {
   await fs.mkdir(artifacts,{recursive:true});
   const browser=await chromium.launch({headless:true});
   try {
+    await withPage(browser,'boss-index-selects-sorted-card-and-survives-retry',{bossMap:true},async(page,fixture)=>{
+      fixture.state.loseNext='battle/start';
+      await page.locator('.card-boss-item').filter({hasText:'Lv.20'}).click();
+      await expect(page.getByTestId('battle-action-retry')).toBeEnabled();
+      const first=fixture.state.requests.find(request=>request.key==='battle/start').body;
+      assert.equal(first.boss_index,1,'A level-sorted card must send its original configuration index');
+      assert.equal(fixture.state.boss.level,20);
+      const pending=await page.evaluate(()=>JSON.parse(sessionStorage.getItem('pokemon_pending_battle_1')));
+      assert.equal(pending.request.boss_index,1);
+      await page.reload();
+      await expect(page.getByTestId('battle-action-retry')).toBeEnabled();
+      await page.getByTestId('battle-action-retry').click();
+      await expect(page.getByTestId('battle-connection')).toHaveCount(0);
+      const starts=fixture.state.requests.filter(request=>request.key==='battle/start');
+      assert.equal(starts.length,2); assert.deepEqual(starts[1].body,first);
+      assert.equal(fixture.state.revision,1);
+      await expect(page.locator('.enemy-pokemon-block')).toContainText('Lv.20');
+    });
+    await withPage(browser,'boss-index-selects-duplicate-species-in-details',{bossMap:true},async(page,fixture)=>{
+      await page.locator('.zoomed-map-header').click();
+      await page.locator('.boss-row-btn').filter({hasText:'Lv.80'}).click();
+      await expect(page.locator('.page-battle')).toBeVisible();
+      const request=fixture.state.requests.find(request=>request.key==='battle/start').body;
+      assert.equal(request.boss_index,0,'Index zero must be sent, not treated as an absent option');
+      assert.equal(request.boss_pokemon_type_id,25);
+      assert.equal(fixture.state.boss.level,80);
+      await expect(page.locator('.enemy-pokemon-block')).toContainText('Lv.80');
+      await page.getByRole('button',{name:/普通攻击/}).click();
+      await expect(page.locator('.turn-number')).toHaveText('2');
+      await page.reload();
+      await expect(page.locator('.enemy-pokemon-block')).toContainText('[BOSS] Pikachu');
+      await expect(page.locator('.enemy-pokemon-block')).toContainText('Lv.80');
+      assert.equal(fixture.state.revision,2);
+    });
+    await withPage(browser,'hybrid-map-keeps-ordinary-adventure-and-boss-choices',{bossMap:true,hybridMap:true},async(page,fixture)=>{
+      await expect(page.locator('.card-boss-item')).toHaveCount(2);
+      await page.getByRole('button',{name:'查看详情',exact:true}).click();
+      await expect(page.locator('.modal-map-details')).toContainText('混合模式');
+      await expect(page.locator('.modal-map-details')).toContainText('Rattata');
+      await expect(page.locator('.boss-row-btn')).toHaveCount(2);
+      await page.getByRole('button',{name:'开始冒险',exact:true}).click();
+      await expect(page.locator('.enemy-pokemon-block')).toContainText('Rattata');
+      const request=fixture.state.requests.find(request=>request.key==='battle/start').body;
+      const {request_id,engine_battle_id,expected_revision,...fields}=request;
+      assert.deepEqual(fields,{map_id:1},'Ordinary adventure must not silently force a Boss');
+      assert.equal(engine_battle_id,0); assert.equal(expected_revision,0);
+      assert.match(request_id,/^[A-Za-z0-9_-]{16,64}$/);
+      assert.equal(fixture.state.boss,null);
+    });
     await withPage(browser,'mobile-details-pp-and-log',{mobile:true},async(page,fixture)=>{
       await page.getByRole('button',{name:'道具',exact:true}).click();
       await openItem(page,17);

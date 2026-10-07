@@ -114,7 +114,7 @@ function set_skill_type($info)
     }
 
     if ($query['name'] != $info["name"]) {
-      DB::query("UPDATE pm_skill set name='{$info["name"]}' where id=$id");
+      DB::query("UPDATE pm_skill set name='" . addslashes($info["name"]) . "' where id=$id");
     }
 
     // 排序并去重
@@ -126,7 +126,7 @@ function set_skill_type($info)
     DB::query("UPDATE pm_skill set available_pokemons='$pokemon_list_str' where id=$id");
 
     if ($query['description'] != $info["description"]) {
-      DB::query("UPDATE pm_skill set description='{$info["description"]}' where id=$id");
+      DB::query("UPDATE pm_skill set description='" . addslashes($info["description"]) . "' where id=$id");
     }
 
     if (intval($query['level_required']) != intval($info["min_level_limit"])) {
@@ -183,7 +183,7 @@ function insert_skill_type($info)
     exit(json_encode($json_ret, JSON_UNESCAPED_UNICODE));
   }
 
-  $name = strval($info["name"]);
+  $name = addslashes(strval($info["name"]));
 
   // 排序并去重
   $available_pokemons = $info["available_pokemons"];
@@ -193,17 +193,13 @@ function insert_skill_type($info)
   // array_merge 需将技能种族列表作为独立参数展开，否则嵌套数组会被
   // implode 当作 "Array" 字符串写入
   $pmid = implode(',', array_merge(['k'], $available_pokemons, ['k']));
-  $txt = strval($info["description"]);
+  $txt = addslashes(strval($info["description"]));
   $lv = intval($info["min_level_limit"]);
   $num = intval($info["use_times_limit"]);
 
   $category = $effect[0];
   $tn = $effect[1];
   $powr = intval($effect[2]);
-
-  $last_id = DB::fetch_first("SELECT id from pm_skill order by id desc limit 1");
-  $last_id = intval($last_id['id']);
-  $new_id = $last_id + 1;
 
   $effect_id = isset($info["effect_id"]) ? intval($info["effect_id"]) : 0;
   if ($effect_id > 0) {
@@ -217,12 +213,12 @@ function insert_skill_type($info)
   }
 
   DB::query("INSERT INTO pm_skill (
-    id, name, available_pokemons, description, level_required, max_uses, category, element, power, effect_id
+    name, available_pokemons, description, level_required, max_uses, category, element, power, effect_id
   ) VALUES (
-    $new_id, '$name', '$pmid', '$txt', $lv, $num, '$category', '$tn', $powr, $effect_id
+    '$name', '$pmid', '$txt', $lv, $num, '$category', '$tn', $powr, $effect_id
   )");
 
-  return $new_id;
+  return intval(DB::insert_id());
 }
 
 function delete_skill_type($id)

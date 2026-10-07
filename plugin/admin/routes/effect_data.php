@@ -139,14 +139,12 @@ function insert_effect_data($info)
   }
 
   $description = isset($info["description"]) ? $info["description"] : "";
-  $last_id = intval(DB::result_first("SELECT max(id) from pm_effect"));
-  $new_id = $last_id + 1;
   $hooks_json = json_encode($effect["hooks"], JSON_UNESCAPED_UNICODE);
   $params_json = json_encode($effect["params"], JSON_UNESCAPED_UNICODE);
-  DB::query("INSERT INTO pm_effect (id, code, kind, hooks_json, params_json, description, version) VALUES (
-    $new_id, '" . addslashes($code) . "', '" . addslashes($effect["kind"]) . "', '" . addslashes($hooks_json) . "', '" . addslashes($params_json) . "', '" . addslashes($description) . "', " . $effect["version"] . "
+  DB::query("INSERT INTO pm_effect (code, kind, hooks_json, params_json, description, version) VALUES (
+    '" . addslashes($code) . "', '" . addslashes($effect["kind"]) . "', '" . addslashes($hooks_json) . "', '" . addslashes($params_json) . "', '" . addslashes($description) . "', " . $effect["version"] . "
   )");
-  return $new_id;
+  return intval(DB::insert_id());
 }
 
 function delete_effect_data($id)

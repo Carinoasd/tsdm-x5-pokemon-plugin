@@ -21,9 +21,9 @@ class DB
     public static function query($sql, $silent = false)
     {
         if (getenv('TSDM_TEST_PAUSE_NEWS_INSERT') === '1'
-            && str_starts_with($sql, 'INSERT IGNORE INTO pm_config') && str_contains($sql, 'news_announcements')) {
+            && preg_match('/^INSERT(?: IGNORE)? INTO pm_config/', $sql) && str_contains($sql, 'news_announcements')) {
             $ready = getenv('TSDM_TEST_READY');
-            file_put_contents($ready, 'announcement snapshot');
+            file_put_contents($ready, (string)self::$connection->thread_id);
             $deadline = microtime(true) + 15;
             while (!is_file($ready . '.resume')) {
                 if (microtime(true) > $deadline) throw new RuntimeException('Announcement barrier timed out');
@@ -46,7 +46,12 @@ class DB
             }
             throw new RuntimeException('Injected database failure');
         }
-        return self::$connection->query($sql);
+        try {
+            return self::$connection->query($sql);
+        } catch (mysqli_sql_exception $error) {
+            if ($silent === true || $silent === 'SILENT') return false;
+            throw $error;
+        }
     }
     public static function fetch_first($sql) { return self::query($sql)->fetch_assoc(); }
     public static function fetch_all($sql)
@@ -68,6 +73,7 @@ class DB
     public static function result($result, $row = 0) { $result->data_seek($row); return $result->fetch_row()[0]; }
     public static function insert_id() { return self::$connection->insert_id; }
     public static function affected_rows() { return self::$connection->affected_rows; }
+    public static function errno() { return self::$connection->errno; }
 }
 mysqli_report(MYSQLI_REPORT_ERROR | MYSQLI_REPORT_STRICT);
 DB::$connection = new mysqli(

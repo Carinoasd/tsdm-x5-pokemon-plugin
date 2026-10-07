@@ -40,6 +40,7 @@ class DB {
         $sql = preg_replace('/\s+/', ' ', trim($sql)); self::$log[] = $sql;
         if (preg_match('/^SELECT uid FROM pm_usersdata WHERE uid = (\d+) FOR UPDATE$/', $sql, $m)) return ['uid' => (int)$m[1]];
         if (preg_match("/FROM pm_battle_action WHERE uid = (\d+) AND request_id = '([^']+)'/", $sql, $m)) return self::$receipts[$m[1] . ':' . $m[2]] ?? false;
+        if (preg_match("/FROM pm_battle_unit WHERE battle_id = (\d+) AND side = 'enemy'/", $sql)) return ['boss_multiplier' => '3.0000'];
         if (strpos($sql, 'FROM pm_battle ') !== false) {
             preg_match('/uid = (\d+)/', $sql, $m); $uid = (int)$m[1];
             preg_match('/WHERE id = (\d+)/', $sql, $id);
@@ -176,4 +177,24 @@ $other = input_for(); $other['engine_battle_id'] = 8;
 check(battle_action_begin('turn', $other) === null, 'another user cannot receive the first users receipt');
 $owned = finish_scene();
 check($owned['data']['engine_battle_id'] === 8 && count(DB::$receipts) === 2, 'same opaque key is independently scoped per user');
+foreach (['turn', 'flee', 'capture', 'use_item', 'use_item_on_skill', 'switch_pokemon', 'replace_pokemon', 'recover'] as $action) {
+    DB::reset(); DB::$rows[7]['kind'] = 'boss';
+    battle_action_begin($action, $action === 'recover' ? [] : input_for());
+    $response = finish_scene(['wild_pokemon' => ['id' => 129, 'name' => 'Boss species', 'is_boss' => false]]);
+    $wild = $response['data']['wild_pokemon'];
+    check($wild['is_boss'] && ($wild['boss_multiplier'] ?? 0) === 3.0 && $wild['name'] === '[BOSS] Boss species',
+        $action . ' retains authoritative Boss metadata');
+}
+DB::reset(); DB::$rows = [];
+$variant_start = ['request_id' => 'boss-start-000001', 'engine_battle_id' => 0, 'expected_revision' => 0,
+    'map_id' => 1, 'boss_pokemon_type_id' => 129, 'boss_index' => 1];
+battle_action_begin('start', $variant_start);
+DB::$rows[9] = ['id' => 9, 'uid' => 1, 'revision' => 0, 'phase' => 'active', 'kind' => 'boss', 'updated_at' => time()];
+$boss_scene = finish_scene(['wild_pokemon' => ['id' => 129, 'name' => '[BOSS] Boss species', 'is_boss' => true]]);
+check($boss_scene['data']['wild_pokemon']['name'] === '[BOSS] Boss species', 'Start does not duplicate the Boss name prefix');
+DB::$rows[9]['phase'] = 'ended';
+check(json_encode(battle_action_begin('start', $variant_start)) === json_encode($boss_scene), 'Boss variant replay retains the exact authoritative scene');
+expect_error(function () use ($variant_start) { $variant_start['boss_index'] = 0; battle_action_begin('start', $variant_start); },
+    409, 'request_id_conflict', 'One request key cannot select a different same-species Boss variant');
+
 echo "Battle action tests: $passed passed.\n";

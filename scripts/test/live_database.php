@@ -530,8 +530,32 @@ try {
             $expected_news = [['title' => 'Fresh administrator notice', 'url' => 'https://example.com/new']];
             $saved_news = $db->real_escape_string(json_encode($expected_news));
             $db->query("INSERT INTO pm_config VALUES ('news_announcements', '$saved_news', 'string')");
+        } else {
+            // Hold an uncommitted duplicate so both first-read inserts wait on
+            // the same record. Rolling it back exposes INSERT IGNORE's shared-
+            // lock upgrade deadlock deterministically, rather than by chance.
+            $db->begin_transaction();
+            $db->query("INSERT INTO pm_config VALUES ('news_announcements', '[]', 'string')");
         }
         foreach ($news_workers as $worker) file_put_contents($worker['base'] . '.ready.resume', 'resume');
+        if (!$admin_saved) {
+            try {
+                $reader_ids = array_map(function ($worker) { return (int)file_get_contents($worker['base'] . '.ready'); }, $news_workers);
+                $deadline = microtime(true) + 10;
+                while ((int)scalar("SELECT COUNT(*) FROM information_schema.PROCESSLIST
+                    WHERE COMMAND = 'Query' AND INFO LIKE 'INSERT%INTO pm_config%'
+                    AND ID IN (" . implode(',', $reader_ids) . ')') !== 2) {
+                    // A deadlock victim can finish before the other reader is
+                    // visible in PROCESSLIST; report its actual response.
+                    if (!proc_get_status($news_workers[0]['process'])['running']
+                        || !proc_get_status($news_workers[1]['process'])['running']) break;
+                    if (microtime(true) > $deadline) throw new RuntimeException('Both announcement readers must reach the duplicate-record lock');
+                    usleep(10000);
+                }
+            } finally {
+                $db->rollback();
+            }
+        }
         foreach ($news_workers as $worker) {
             $result = finish_request($worker);
             check($result['success'] && $result['data']['news_announcements'] === $expected_news,
@@ -626,6 +650,83 @@ try {
     check($unequipped_stack['success'] && $equipment_view['success'] && $stack['quantity'] === 2
         && $stack['equipped_count'] === 0 && $stack['available_count'] === 2 && $stack['is_equipped'] === false,
         'Unequipping the row restores its full available quantity');
+
+    // Boss configuration must survive the actual dispatcher, persistence and replay.
+    $db->query("UPDATE pm_battle SET phase = 'ended', result = 'abandoned' WHERE uid = 7");
+    $db->query('UPDATE pm_usersdata SET npcid = 0, strength = 1 WHERE uid = 7');
+    $db->query('UPDATE pm_mypm SET site = 2 WHERE uid = 7');
+    $db->query("UPDATE pm_mypm SET site = 1, hp = 160, state = 1, level = 50, species_id = 1, pmname = 'Fixture ally',
+        equipmentid1 = 0, equipmentid2 = 0, equipmentid3 = 0, equipmentid4 = 0 WHERE id = $remaining_id");
+    $db->query('UPDATE pm_data SET atk = 1, speed = 1 WHERE id = 2');
+    $db->query('DELETE FROM pm_myskill WHERE uid = 7');
+    $db->query("INSERT INTO pm_myskill (id,uid,petid,skillid,skillnum) VALUES (1701,7,$remaining_id,12,20)");
+    $db->query("DELETE FROM pm_myitem WHERE uid = 7 AND itemid = '17'");
+    $db->query("INSERT INTO pm_myitem (uid,itemid,nums) VALUES (7,'17',10)");
+    $iv_keys = ['hit_points','attack','defense','special_attack','special_defense','speed'];
+    $bosses = [
+        ['pokemon_type_id' => 2, 'pokemon_name' => 'Fixture Boss', 'level' => 80, 'boss_multiplier' => 2, 'attributes' => array_fill_keys($iv_keys, 0)],
+        ['pokemon_type_id' => 2, 'pokemon_name' => 'Fixture Boss', 'level' => 50, 'boss_multiplier' => 3, 'attributes' => array_fill_keys($iv_keys, 255)],
+    ];
+    $boss_json = $db->real_escape_string(json_encode(['bosses' => $bosses]));
+    $db->query("UPDATE pm_map SET site = 'g', is_enabled = 1, experience = -1, boss_config = '$boss_json' WHERE id = 1");
+    $map_result = request('battle', 'maps');
+    $contracts['boss_maps'] = $map_result['data'];
+    $boss_list = $map_result['data']['maps'][0]['bosses'];
+    check($boss_list[0]['boss_index'] === 1 && $boss_list[0]['level'] === 50 && $boss_list[1]['boss_index'] === 0,
+        'Game map list preserves original Boss indices after sorting by level');
+    $boss_start = ['request_id' => 'fixture-boss-start-01', 'engine_battle_id' => 0, 'expected_revision' => 0,
+        'map_id' => 1, 'boss_pokemon_type_id' => 2, 'boss_index' => 1];
+    foreach ([['boss_index' => -1], ['boss_index' => '1'], ['boss_index' => null], ['boss_index' => 3], ['boss_pokemon_type_id' => 1]] as $invalid) {
+        $bad_boss = request('battle', 'start', array_merge($boss_start, $invalid));
+        check(!$bad_boss['success'] && $bad_boss['code'] === 400, 'Invalid Boss variant is rejected before creating a battle: ' . json_encode($invalid));
+    }
+    $boss_result = request('battle', 'start', $boss_start);
+    $boss_scene = $boss_result['data'] ?? [];
+    $contracts['boss_start'] = $boss_scene;
+    check($boss_result['success'] && $boss_scene['wild_pokemon']['level'] === 50 && $boss_scene['wild_pokemon']['boss_multiplier'] === 3,
+        'Explicit second same-species Boss uses its own configured level and multiplier');
+    $boss_id = (int)$boss_scene['engine_battle_id'];
+    check((int)scalar("SELECT hp FROM pm_battle_unit WHERE battle_id = $boss_id AND side = 'enemy'") >= 861,
+        'Configured Boss IV 255 reaches the persisted combat stats');
+    check(request('battle', 'start', $boss_start) === $boss_result, 'Lost Boss start response replays exactly');
+    $different_boss = request('battle', 'start', array_merge($boss_start, ['boss_index' => 0]));
+    check(!$different_boss['success'] && $different_boss['code'] === 409 && $different_boss['error_code'] === 'request_id_conflict',
+        'One request key cannot be changed to another same-species Boss');
+    $boss_turn = request('battle', 'turn', action_input($boss_scene, 'fixture-boss-turn-01', ['skill_id' => 12]));
+    $contracts['boss_turn'] = $boss_turn['data'] ?? [];
+    check($boss_turn['success'] && $boss_turn['data']['wild_pokemon']['is_boss'] && $boss_turn['data']['wild_pokemon']['boss_multiplier'] === 3
+        && str_starts_with($boss_turn['data']['wild_pokemon']['name'], '[BOSS] '), 'Boss identity remains visible after an actual turn');
+    $boss_recover = request('battle', 'recover');
+    check($boss_recover['success'] && $boss_recover['data']['wild_pokemon'] === $boss_turn['data']['wild_pokemon'],
+        'Recovered Boss metadata agrees with the latest action response');
+    $db->query("UPDATE pm_mypm SET hp = 100 WHERE id = $remaining_id");
+    $boss_item = request('battle', 'use_item', action_input($boss_turn['data'], 'fixture-boss-item-01', ['item_id' => 17]));
+    check($boss_item['success'] && $boss_item['data']['wild_pokemon']['is_boss'] && $boss_item['data']['wild_pokemon']['boss_multiplier'] === 3,
+        'Boss metadata also survives a healing item action');
+    $db->query("UPDATE pm_battle_unit SET hp = 1 WHERE battle_id = $boss_id AND side = 'enemy'");
+    $db->query('UPDATE pm_usersdata SET hp = 1 WHERE uid = 7');
+    $boss_victory = request('battle', 'turn', action_input($boss_item['data'], 'fixture-boss-victory', ['skill_id' => 12]));
+    $contracts['boss_victory'] = $boss_victory['data'] ?? [];
+    check($boss_victory['success'] && $boss_victory['data']['status'] === 'victory' && $boss_victory['data']['wild_pokemon']['is_boss']
+        && $boss_victory['data']['wild_pokemon']['boss_multiplier'] === 3, 'Final Boss result retains its identity after the mirror is cleared');
+
+    $db->query('UPDATE pm_map SET experience = 30 WHERE id = 1');
+    $hybrid_maps = request('battle', 'maps');
+    $contracts['hybrid_maps'] = $hybrid_maps['data'];
+    check($hybrid_maps['data']['maps'][0]['mode'] === 'hybrid', 'Existing mixed maps advertise both wild and Boss choices');
+    $hybrid_result = request('battle', 'start', ['map_id' => 1]);
+    check($hybrid_result['success'] && !$hybrid_result['data']['wild_pokemon']['is_boss'], 'Ordinary start in a mixed map remains a wild encounter');
+    $db->query("UPDATE pm_battle SET phase = 'ended', result = 'abandoned' WHERE uid = 7");
+    $db->query('UPDATE pm_usersdata SET npcid = 0 WHERE uid = 7');
+    $legacy_boss = request('battle', 'start', ['map_id' => 1, 'boss_pokemon_type_id' => 2]);
+    check($legacy_boss['success'] && $legacy_boss['data']['wild_pokemon']['level'] === 80,
+        'Legacy species-only Boss requests retain first-match selection');
+    $db->query("UPDATE pm_battle SET phase = 'ended', result = 'abandoned' WHERE uid = 7");
+    $db->query('UPDATE pm_usersdata SET npcid = 0 WHERE uid = 7');
+    $db->query("UPDATE pm_map SET experience = -1, boss_config = '{\"bosses\":[{\"pokemon_type_id\":2}]}' WHERE id = 1");
+    $default_boss = request('battle', 'start', ['map_id' => 1, 'boss_pokemon_type_id' => 2, 'boss_index' => 0]);
+    check($default_boss['success'] && $default_boss['data']['wild_pokemon']['level'] === 50 && $default_boss['data']['wild_pokemon']['boss_multiplier'] === 1.5,
+        'Legacy Boss configuration uses the management level and multiplier defaults');
 
     if ($output = getenv('TSDM_API_CONTRACT_FIXTURES')) {
         file_put_contents($output, json_encode($contracts, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR));

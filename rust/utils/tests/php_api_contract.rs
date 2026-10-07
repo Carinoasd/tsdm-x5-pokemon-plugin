@@ -2,6 +2,7 @@
 use _utils::types::api_battle::{
     BattleItemsResponse, BattleLogResponse, BattleScene, SkillSelectionResponse,
 };
+use _utils::types::api_map::{MapMode, MapsResponse};
 use _utils::types::api_user::InventoryResponse;
 use serde_json::Value;
 
@@ -55,4 +56,28 @@ fn real_php_responses_match_rust_models() {
     assert!(!log.events.is_empty());
     assert!(!log.turns.is_empty());
     assert!(!log.bbcode.is_empty());
+
+    for name in ["boss_maps", "hybrid_maps"] {
+        let maps: MapsResponse = serde_json::from_value(fixtures[name].clone()).unwrap();
+        let map = maps.maps.iter().find(|map| map.id == 1).unwrap();
+        assert_eq!(map.mode.has_wild_pokemon(), name == "hybrid_maps");
+        assert!(match &map.mode {
+            MapMode::Boss { .. } => name == "boss_maps",
+            MapMode::Hybrid { .. } => name == "hybrid_maps",
+            MapMode::Wild => false,
+        });
+        let bosses = map.mode.get_bosses();
+        assert_eq!(bosses[0].boss_index, Some(1));
+        assert_eq!(bosses[0].level, 50);
+        assert_eq!(bosses[1].boss_index, Some(0));
+        assert_eq!(bosses[1].level, 80);
+        assert_eq!(bosses[0].pokemon_type_id, bosses[1].pokemon_type_id);
+    }
+    for name in ["boss_start", "boss_turn", "boss_victory"] {
+        let scene: BattleScene = serde_json::from_value(fixtures[name].clone()).unwrap();
+        assert!(scene.wild_pokemon.is_boss);
+        assert_eq!(scene.wild_pokemon.boss_multiplier, 3.0);
+        assert!(scene.wild_pokemon.name.starts_with("[BOSS] "));
+        assert_eq!(scene.battle_over, name == "boss_victory");
+    }
 }

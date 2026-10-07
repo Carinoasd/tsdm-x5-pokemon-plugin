@@ -241,22 +241,18 @@ function insert_item_type($info)
   $equipment_sd = intval($info["effects"]["attribute_add_speed"]);
   $captmax = intval($info["effects"]["capture"]);
 
-  $last_id = DB::fetch_first("SELECT id from pm_itemdata order by id desc limit 1");
-  $last_id = intval($last_id['id']);
-  $new_id = $last_id + 1;
-
   $effects_json = '{"hp":' . intval($addhp) . ',"exp":' . intval($addexp) . ',"level":' . intval($addlv) . ',"intimacy":' . intval($addgood) . '}';
   $equipment_json = '{"hp":' . intval($equipment_hp) . ',"atk":' . intval($equipment_atk) . ',"def":' . intval($equipment_def) . ',"spatk":' . intval($equipment_spatk) . ',"spdef":' . intval($equipment_spdef) . ',"spd":' . intval($equipment_sd) . '}';
 
   DB::query("INSERT INTO pm_itemdata (
-    id, name, tpname, description, shop, money, type,
+    name, tpname, description, shop, money, type,
     ballid, upitem, sitemname, zbtype,
     lvask, xsask,
     effects,
     equipment,
     captmax
   ) VALUES (
-    $new_id, '$name', '$tpname', '$txt', $shop, $money, '$type',
+    '$name', '$tpname', '$txt', $shop, $money, '$type',
     $ballid, $upitem, '$sitemname', $zbtype,
     $lvask, '$xsask',
     '$effects_json',
@@ -264,7 +260,7 @@ function insert_item_type($info)
     $captmax
   )");
 
-  return $new_id;
+  return intval(DB::insert_id());
 }
 
 function delete_item_type($id)

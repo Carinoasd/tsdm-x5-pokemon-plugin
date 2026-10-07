@@ -11,6 +11,8 @@
 | Read repairs | A stale list or detail request cannot replace newer healing, battle damage, state or equipment-dependent HP values. Uncontested reads still repair invalid legacy values. | PHP snapshot regressions and MariaDB barriers around real CGI reads |
 | Admin filters | All conditions combine regardless of order. Names resolve to matching IDs, exclusions retain their meaning, and Chinese sale flags match the selected value. | Actual admin dispatch and SQL against MariaDB |
 | Admin inventory | Grants and edits preserve valid owners, item types, quantity limits and equipped references. Concurrent grants serialize, and failed writes roll back. | PHP integrity checks and MariaDB transactions |
+| Admin catalog identities | New records use database-generated IDs, including after deleting the highest record and during concurrent inserts. Existing references cannot silently attach to unrelated replacement records. | Actual catalog handlers against MariaDB in both SQL modes |
+| Configuration capacity | Long announcement lists and quoted skill text survive storage. Old configuration columns expand before any settings are written; explicit upgrades can run again. | MariaDB strict and non-strict SQL modes, upgrade failure checks and legacy announcement reads |
 | Maintenance | Either closed switch blocks player operations; named staff, authorized administration and public announcements retain access. | Actual router regressions and PHP CGI requests against MariaDB |
 | Legacy announcements | The first config, admin or topics read migrates legacy notices. An explicitly cleared list stays empty; concurrent readers cannot overwrite a new administrator notice. | Admin input round trips and MariaDB barriers before migration inserts |
 | Forum topics | The preview checks native forum permissions, passwords, paid access and group membership before reading thread metadata. Public announcements remain visible. | Actual topics handler, isolated forum tables and optional native Discuz permission helpers |
@@ -27,6 +29,7 @@
 | Player navigation | Pending purchases, starter claims and skill changes cannot be submitted repeatedly. Switching pets resets equipment selection; equipment and skill load errors can retry. Profile and pet refreshes survive navigation, and old responses cannot replace fresh data. | Chromium player action scenarios |
 | Navigation and equipment | Main navigation supports keyboard use, toasts expire across page changes, and badge reads cannot undo newer changes. Occupied inventory rows cannot be selected for reuse. Equipment operations finish after navigation and refresh even after a partially completed replacement. | Chromium delayed-request, keyboard and navigation scenarios |
 | Encounter and damage rules | Encounters use exact map membership and reject disabled maps. Current rules respect type immunities and resistance; legacy rules retain their original behavior. | PHP encounter, endpoint and deterministic battle-core regression tests |
+| Boss encounters | Same-species variants keep their configured identity after sorting and reconnect. Configured IVs apply, action responses retain Boss metadata, mixed maps allow ordinary encounters, and new Boss defaults match missing-field defaults. | PHP encounters and receipts, real CGI requests against MariaDB, Rust form/wire models and Chromium Boss choices |
 
 The server protocol, compatibility behavior and retention rules are described in
 [Battle request replay](battle-request-replay.md).
@@ -61,6 +64,8 @@ php scripts/test/live_database.php
 php scripts/test/pokemon_state_database.php
 php scripts/test/admin_filter_database.php
 php scripts/test/admin_item_database.php
+php scripts/test/admin_catalog_database.php
+php scripts/test/admin_identity_database.php
 TSDM_TOPICS_REAL_DB=1 php scripts/test/topics_permissions.php
 cargo test -p _utils --test php_api_contract --locked -- --ignored
 ```

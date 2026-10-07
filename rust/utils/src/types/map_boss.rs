@@ -9,7 +9,7 @@ pub struct MapBossConfig {
 }
 
 /// 单个 Boss 配置
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Default)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct MapBoss {
     /// 宠物类型 ID
     #[serde(default)]
@@ -33,6 +33,12 @@ fn default_boss_level() -> u64 {
 }
 fn default_boss_multiplier() -> f32 {
     1.5
+}
+
+impl Default for MapBoss {
+    fn default() -> Self {
+        Self::new(0, String::new())
+    }
 }
 
 impl MapBoss {
@@ -80,5 +86,35 @@ impl MapBossConfig {
     /// 是否有 boss 配置
     pub fn has_boss(&self) -> bool {
         !self.bosses.is_empty()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn new_boss_form_defaults_match_omitted_json_fields() {
+        // The Add Boss dialog starts with Default and lets the user select only a species.
+        let mut draft = MapBoss::default();
+        assert_eq!(draft.pokemon_type_id, 0);
+        assert!(draft.pokemon_name.is_empty());
+        assert_eq!(draft.attributes, PokemonAttributes::default());
+        draft.pokemon_type_id = 25;
+        draft.pokemon_name = "皮卡丘".into();
+
+        let omitted_fields: MapBoss = serde_json::from_value(serde_json::json!({
+            "pokemon_type_id": 25,
+            "pokemon_name": "皮卡丘"
+        }))
+        .unwrap();
+        assert_eq!(draft, omitted_fields);
+        assert_eq!(draft.level, 50);
+        assert_eq!(draft.boss_multiplier, 1.5);
+
+        let config = MapBossConfig {
+            bosses: vec![draft],
+        };
+        assert_eq!(MapBossConfig::from_expn(config.to_expn()), config);
     }
 }

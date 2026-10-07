@@ -339,9 +339,12 @@ pub struct LevelUpInfo {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct StartBattleRequest {
     pub map_id: u64,
-    /// 指定 Boss 寺孠类型 ID（仅 Boss 地图使用）
+    /// 指定 Boss 宠物类型 ID（仅 Boss 地图使用）
     #[serde(skip_serializing_if = "Option::is_none")]
     pub boss_pokemon_type_id: Option<u64>,
+    /// 地图配置的原始索引；缺省时兼容按物种选择的旧请求。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub boss_index: Option<u64>,
 }
 
 /// 使用技能请求
@@ -493,6 +496,33 @@ impl BattleItem {
 mod tests {
     use super::*;
     use crate::types::api_pokemon::ApiResponse;
+
+    #[test]
+    fn indexed_boss_selection_survives_pending_request_round_trip() {
+        let legacy: StartBattleRequest =
+            serde_json::from_value(serde_json::json!({"map_id":7,"boss_pokemon_type_id":25}))
+                .unwrap();
+        assert_eq!(legacy.boss_index, None);
+        assert_eq!(
+            serde_json::to_value(&legacy).unwrap(),
+            serde_json::json!({"map_id":7,"boss_pokemon_type_id":25})
+        );
+
+        for index in [0, 1] {
+            let request = StartBattleRequest {
+                boss_index: Some(index),
+                ..legacy.clone()
+            };
+            let pending =
+                PendingBattleAction::new("start", None, serde_json::to_value(request).unwrap());
+            let encoded = serde_json::to_string(&pending).unwrap();
+            let restored: PendingBattleAction = serde_json::from_str(&encoded).unwrap();
+            assert_eq!(restored, pending);
+            assert_eq!(restored.request.fields["boss_index"], index);
+            assert_eq!(restored.request.engine_battle_id, 0);
+            assert_eq!(restored.request.expected_revision, 0);
+        }
+    }
 
     // Shapes captured from the PHP battle endpoints, including migrated type=1 PP items.
     const BATTLE_ITEMS: &str = r#"{"success":true,"data":{"items":[

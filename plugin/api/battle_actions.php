@@ -149,6 +149,23 @@ function battle_action_finalize($response)
         $response['data']['revision'] = $row ? intval($row['revision']) : 0;
         $response['data']['phase'] = $row ? $row['phase'] : 'ended';
     }
+    // Every scene, including the final result saved for replay, uses the same
+    // persisted Boss identity. Individual action handlers also serve wild battles.
+    if ($is_scene && $row && !empty($response['data']['wild_pokemon']['id'])) {
+        $is_boss = ($row['kind'] ?? 'wild') === 'boss';
+        $wild = &$response['data']['wild_pokemon'];
+        $wild['is_boss'] = $is_boss;
+        $wild['boss_multiplier'] = 1.0;
+        if ($is_boss) {
+            $enemy = DB::fetch_first(pm_sql(
+                "SELECT boss_multiplier FROM " . pm_table('pm_battle_unit') . " WHERE battle_id = %d AND side = 'enemy' ORDER BY slot ASC LIMIT 1",
+                $row['id']
+            ));
+            $wild['boss_multiplier'] = (float)($enemy['boss_multiplier'] ?? 1.0);
+            if (strpos($wild['name'], '[BOSS] ') !== 0) $wild['name'] = '[BOSS] ' . $wild['name'];
+        }
+        unset($wild);
+    }
     if ($context && $context['request_id'] !== null) {
         $encoded = json_encode($response, JSON_UNESCAPED_UNICODE);
         if ($encoded === false) throw new RuntimeException('Battle response cannot be encoded');

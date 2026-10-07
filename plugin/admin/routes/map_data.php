@@ -191,18 +191,14 @@ function insert_map_info($info)
     }
   }
 
-  $last_id = DB::fetch_first("SELECT id from pm_map order by id desc limit 1");
-  $last_id = intval($last_id['id']);
-  $new_id = $last_id + 1;
-
   $expn_escaped = addslashes($expn);
   DB::query("INSERT INTO pm_map (
-    id, name, site, is_enabled, min_level, max_level, experience, boss_config
+    name, site, is_enabled, min_level, max_level, experience, boss_config
   ) VALUES (
-    $new_id, '$name', '$site', $kg, $minlevel, $maxlevel, $experience, '$expn_escaped'
+    '$name', '$site', $kg, $minlevel, $maxlevel, $experience, '$expn_escaped'
   )");
 
-  return $new_id;
+  return intval(DB::insert_id());
 }
 
 function delete_map_info($id)

@@ -5,7 +5,7 @@ SET NAMES utf8mb4;
 -- System config
 CREATE TABLE IF NOT EXISTS `pm_config` (
     `key` varchar(255) NOT NULL,
-    `value` varchar(255) NOT NULL,
+    `value` longtext NOT NULL,
     `data_type` varchar(20) NOT NULL DEFAULT 'string',
     PRIMARY KEY (`key`)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci;

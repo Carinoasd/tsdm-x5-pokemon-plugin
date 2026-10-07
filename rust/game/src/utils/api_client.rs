@@ -404,6 +404,17 @@ impl NewApiClient {
         map_id: u64,
         boss_pokemon_type_id: Option<u64>,
     ) -> Result<BattleScene> {
+        self.start_battle_at_index(map_id, boss_pokemon_type_id, None)
+            .await
+    }
+
+    /// 按地图配置索引挑战 Boss，避免同物种的多个配置被当成同一项。
+    pub async fn start_battle_at_index(
+        &self,
+        map_id: u64,
+        boss_pokemon_type_id: Option<u64>,
+        boss_index: Option<u64>,
+    ) -> Result<BattleScene> {
         self.post(
             "battle",
             "start",
@@ -411,6 +422,7 @@ impl NewApiClient {
             &StartBattleRequest {
                 map_id,
                 boss_pokemon_type_id,
+                boss_index,
             },
         )
         .await

@@ -406,27 +406,23 @@ function insert_pokemon_type($info)
   $minmoney = intval($info["drop_money_range"][0]);
   $maxmoney = intval($info["drop_money_range"][1]);
 
-  $last_id = DB::fetch_first("SELECT id from pm_data order by id desc limit 1");
-  $last_id = intval($last_id['id']);
-  $new_id = $last_id + 1;
-
   $effort_values = '{"hp":' . intval($hpn) . ',"atk":' . intval($atkn) . ',"def":' . intval($defn) . ',"spatk":' . intval($spatkn) . ',"spdef":' . intval($spdefn) . ',"spd":' . intval($sdn) . '}';
   $drop_money = '[' . intval($minmoney) . ',' . intval($maxmoney) . ']';
   DB::query("INSERT INTO pm_data (
-    id, name, description, money, shop, sex,
+    name, description, money, shop, sex,
     hp, atk, def, spatk, spdef, speed,
     effort_values,
     xs, xs2, is_legendary, mapid, capture, met,
     birth, strength, drop_money
   ) VALUES (
-    $new_id, '$name', '$txt', $money, $shop, $sex,
+    '$name', '$txt', $money, $shop, $sex,
     $hp, $atk, $def, $spatk, $spdef, $sd,
     '$effort_values',
     '$xs', '$xs2', $god, '$mapid', $capture, $met,
     $birth, $strength, '$drop_money'
   )");
 
-  return $new_id;
+  return intval(DB::insert_id());
 }
 
 function delete_pokemon_type($id)

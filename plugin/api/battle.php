@@ -753,6 +753,11 @@ function api_start_battle()
     }
 
     $boss_pokemon_type_id = isset($input['boss_pokemon_type_id']) ? intval($input['boss_pokemon_type_id']) : 0;
+    $boss_index = array_key_exists('boss_index', $input) ? $input['boss_index'] : null;
+    if (array_key_exists('boss_index', $input)
+        && (!is_int($boss_index) || $boss_index < 0 || $boss_pokemon_type_id <= 0)) {
+        api_error('Invalid boss selection', 400);
+    }
 
     global $_G, $myusersdata, $mypokemon, $settings;
 
@@ -808,7 +813,7 @@ function api_start_battle()
     }
 
     // 生成野怪
-    $wild = generate_wild_pokemon_legacy($map, $myusersdata['strength'], $boss_pokemon_type_id > 0 ? $boss_pokemon_type_id : null);
+    $wild = generate_wild_pokemon_legacy($map, $myusersdata['strength'], $boss_pokemon_type_id > 0 ? $boss_pokemon_type_id : null, $boss_index);
 
     // 计算 Boss 属性倍率
     $is_boss = isset($wild['is_boss']) && $wild['is_boss'];
@@ -825,7 +830,8 @@ function api_start_battle()
     list($npcmhp, $npcatk, $npcdef, $npcspatk, $npcspdef, $npcsd) = battle_calc_new_npc_stats(
         $npc,
         $wild['level'],
-        $myusersdata['strength'] * $npc['strength']
+        $myusersdata['strength'] * $npc['strength'],
+        $is_boss ? ($wild['attributes'] ?? null) : null
     );
 
     // 生成野怪的性别和闪光状态（只生成一次，战斗过程中保持不变）
@@ -1398,15 +1404,26 @@ function api_flee()
 /**
  * 生成野怪（旧版逻辑）
  */
-function generate_wild_pokemon_legacy($map, $strength, $force_boss_type_id = null)
+function generate_wild_pokemon_legacy($map, $strength, $force_boss_type_id = null, $boss_index = null)
 {
     $map_id = $map['id'];
 
     // 检查是否有 Boss 配置（使用 Boss API 函数）
     $boss_config = get_map_boss_config_from_map($map);
+    if ($boss_index !== null) {
+        $variants = $boss_config ? array_values($boss_config['bosses']) : [];
+        if (!is_int($boss_index) || $boss_index < 0 || $force_boss_type_id <= 0
+            || !isset($variants[$boss_index]['pokemon_type_id'])
+            || (int)$variants[$boss_index]['pokemon_type_id'] !== (int)$force_boss_type_id) {
+            api_error('Boss selection has changed. Please reload the map.', 400);
+        }
+    }
 
-    if ($boss_config && !empty($boss_config['bosses'])) {
-        if ($force_boss_type_id > 0) {
+    if ($boss_config && !empty($boss_config['bosses'])
+        && ($boss_index !== null || $force_boss_type_id > 0 || (int)($map['experience'] ?? -1) === -1)) {
+        if ($boss_index !== null) {
+            $boss = $variants[$boss_index];
+        } elseif ($force_boss_type_id > 0) {
             // 强制挑战指定 Boss（跳过刷新概率判定）
             $boss = null;
             foreach ($boss_config['bosses'] as $b) {
@@ -1438,7 +1455,11 @@ function generate_wild_pokemon_legacy($map, $strength, $force_boss_type_id = nul
                     'capture' => $pet['capture'] ?: 100,
                     'is_boss' => true,
                     'boss_multiplier' => $boss_multiplier,
+                    'attributes' => isset($boss['attributes']) && is_array($boss['attributes']) ? $boss['attributes'] : null,
                 ];
+            }
+            if ($boss_index !== null) {
+                api_error('Boss species no longer exists. Please reload the map.', 400);
             }
         }
     }
@@ -1548,15 +1569,25 @@ function battle_calc_my_stats($data, $pokemon)
  * 生成新野怪属性（随机IV/EV，10% 闪光概率）
  * @return array [hp, atk, def, spatk, spdef, sd]
  */
-function battle_calc_new_npc_stats($data, $level, $strength = 1)
+function battle_calc_new_npc_stats($data, $level, $strength = 1, $boss_attributes = null)
 {
     $level = intval($level);
     $flash = rand(1, 100) > 90 ? 1 : 0;
     if ($strength <= 0) $strength = 1;
     $stats = [];
+    $attribute_keys = ['hp' => 'hit_points', 'atk' => 'attack', 'def' => 'defense',
+        'spatk' => 'special_attack', 'spdef' => 'special_defense', 'speed' => 'speed'];
     foreach (['hp', 'atk', 'def', 'spatk', 'spdef', 'speed'] as $stat) {
         $base = $data[$stat];
         $iv = rand(0, 31);
+        // Preserve the old RNG sequence. Only explicitly configured Boss IVs
+        // replace the draw; the existing editor supports the range 0..255.
+        $key = $attribute_keys[$stat];
+        if (is_array($boss_attributes) && isset($boss_attributes[$key]) && is_numeric($boss_attributes[$key])
+            && $boss_attributes[$key] >= 0 && $boss_attributes[$key] <= 255
+            && (float)$boss_attributes[$key] === (float)(int)$boss_attributes[$key]) {
+            $iv = (int)$boss_attributes[$key];
+        }
         $ev = min(85, rand(0, 85) * $level / 100);
         $is_hp = ($stat === 'hp');
         $boost = $is_hp ? (10 + $level) : 5;
@@ -2103,13 +2134,14 @@ function api_get_maps()
         $has_boss_config = is_array($boss_json) && isset($boss_json['bosses']) && is_array($boss_json['bosses']);
 
         if ($has_boss_config) {
-            foreach ($boss_json['bosses'] as $b) {
+            foreach (array_values($boss_json['bosses']) as $boss_index => $b) {
                 if (!empty($b['pokemon_type_id'])) {
                     $bosses[] = [
+                        'boss_index'      => $boss_index,
                         'pokemon_type_id' => (int)$b['pokemon_type_id'],
                         'pokemon_name'    => isset($b['pokemon_name']) ? (string)$b['pokemon_name'] : '',
-                        'level'           => isset($b['level']) ? (int)$b['level'] : 1,
-                        'boss_multiplier' => isset($b['boss_multiplier']) ? (float)$b['boss_multiplier'] : 1.0,
+                        'level'           => isset($b['level']) ? (int)$b['level'] : 50,
+                        'boss_multiplier' => isset($b['boss_multiplier']) ? (float)$b['boss_multiplier'] : 1.5,
                     ];
                 }
             }
@@ -2132,7 +2164,7 @@ function api_get_maps()
                 'is_enabled' => (bool)$row['is_enabled'],
                 'min_level' => (int)$row['min_level'],
                 'max_level' => (int)$row['max_level'],
-                'mode' => 'boss',
+                'mode' => (int)$row['experience'] === -1 ? 'boss' : 'hybrid',
                 'bosses' => $bosses,
                 'wild_pokemons' => $pokemon_names,
             ];
