@@ -121,6 +121,7 @@ jobs:
           php-version: '8.3'
           extensions: mysqli
           tools: none
+          coverage: none
       - name: Install PHP CGI
         run: sudo apt-get update && sudo apt-get install -y php8.3-cgi
       - uses: dtolnay/rust-toolchain@stable

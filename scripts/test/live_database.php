@@ -36,7 +36,10 @@ function begin_request($endpoint, $action, $input = null, $extra = [])
     $cgi = getenv('TSDM_PHP_CGI') ?: 'php-cgi';
     $command = [$cgi];
     if ($ini = php_ini_loaded_file()) array_push($command, '-c', $ini);
-    array_push($command, '-d', 'display_errors=0', '-d', 'log_errors=1');
+    // CI images may preload coverage extensions that conflict with PHP's JIT.
+    // These request tests do not need JIT; keep genuine PHP warnings fatal below.
+    array_push($command, '-d', 'display_errors=0', '-d', 'log_errors=1',
+        '-d', 'opcache.jit=0', '-d', 'opcache.jit_buffer_size=0');
     $process = proc_open($command, [0 => ['pipe', 'r'], 1 => ['file', $base, 'w'],
         2 => ['file', $base . '.err', 'w']], $pipes, null, $env, ['bypass_shell' => true]);
     if (!is_resource($process)) throw new RuntimeException('Cannot start PHP CGI');
