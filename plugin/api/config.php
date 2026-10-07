@@ -41,8 +41,6 @@ function api_get_global_config()
         switch ($obj['data_type']) {
             case "string":
                 $value = strval($obj['value']);
-                // 对所有字符串字段使用 stripslashes 还原
-                $value = stripslashes($value);
                 // 对于 news_announcements，解析 JSON 字符串为数组
                 if ($obj['key'] === 'news_announcements') {
                     $decoded = json_decode($value, true);

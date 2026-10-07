@@ -1,0 +1,212 @@
+<?php
+/** Deterministic regressions for status, faint and PP handling in one battle turn. */
+error_reporting(E_ALL);
+set_error_handler(function ($severity, $message, $file, $line) {
+    throw new ErrorException($message, 0, $severity, $file, $line);
+});
+define('IN_DISCUZ', true);
+require __DIR__ . '/../../plugin/api/battle_core.php';
+
+$checks = 0;
+$failures = 0;
+function check_turn($condition, $label)
+{
+    $GLOBALS['checks']++;
+    if (!$condition) {
+        $GLOBALS['failures']++;
+        echo "FAIL: $label\n";
+    }
+}
+function turn_state($ally_speed = 60, $enemy_speed = 30)
+{
+    $unit = [
+        'level' => 20, 'hp' => 500, 'types' => ['普通'],
+        'stats' => ['max_hp' => 500, 'atk' => 40, 'def' => 40, 'spatk' => 40, 'spdef' => 40, 'speed' => 30],
+    ];
+    $ally = $enemy = $unit;
+    $ally['stats']['speed'] = $ally_speed;
+    $enemy['stats']['speed'] = $enemy_speed;
+    return battle_core_initial_state(['kind' => 'wild', 'rng_seed' => 42, 'allies' => [$ally], 'enemies' => [$enemy]]);
+}
+function turn_move($power = 40, $effects = [])
+{
+    return ['id' => 1, 'name' => 'Test move', 'power' => $power, 'type' => '普通', 'category' => 0, 'effects' => $effects];
+}
+function turn_events($result, $type, $side = null)
+{
+    return array_values(array_filter($result['events'], function ($event) use ($type, $side) {
+        return $event['type'] === $type && ($side === null || ($event['payload']['side'] ?? null) === $side);
+    }));
+}
+$max_rng = function ($min, $max) { return $max; };
+$boost = ['code' => 'stages_boost', 'kind' => 'move', 'hooks' => ['on_after_move'], 'params' => ['stat' => 'atk', 'stages' => 1], 'version' => 1];
+$passive = ['code' => 'stages_boost', 'kind' => 'ability', 'hooks' => ['on_switch_in'], 'params' => ['stat' => 'def', 'stages' => 1], 'version' => 1];
+
+// Each enemy action, including the legacy counter fallback, gets one status check.
+foreach (['sleep', 'freeze', 'paralysis'] as $status) {
+    foreach ([true, false] as $ally_first) {
+        foreach ([true, false] as $enemy_skill) {
+            $state = turn_state($ally_first ? 100 : 10, 60);
+            $state['sides']['enemy'][0]['status'] = ['code' => $status, 'turns_left' => 3];
+            $action = ['type' => 'move', 'skill' => turn_move()];
+            if ($enemy_skill) $action['enemy_move'] = turn_move();
+            $rng = function ($min, $max) use ($status) {
+                return $status === 'paralysis' && $min === 1 && $max === 100 ? 1 : $max;
+            };
+            $result = battle_core_apply_action($state, $action, $rng);
+            $label = "$status ally_first=" . (int)$ally_first . ' enemy_skill=' . (int)$enemy_skill;
+            check_turn(count(turn_events($result, 'status_prevent', 'enemy')) === 1, "$label prevents one enemy action");
+            check_turn(!turn_events($result, 'move', 'enemy') && !turn_events($result, 'counter'), "$label emits no enemy attack");
+            check_turn($result['state']['sides']['ally'][0]['hp'] === 500, "$label causes no enemy damage");
+            check_turn($result['state']['rng_counter'] === 0, "$label uses only injected RNG");
+        }
+    }
+}
+
+// Item, capture and failed-flee turns enter the counter helper directly.
+foreach (['sleep', 'freeze', 'paralysis'] as $status) {
+    $state = turn_state();
+    $state['sides']['enemy'][0]['status'] = ['code' => $status, 'turns_left' => 3];
+    $events = [];
+    $rng = function ($min, $max) use ($status) {
+        return $status === 'paralysis' && $min === 1 && $max === 100 ? 1 : $max;
+    };
+    battle_core_counter_attack($state, $events, $rng);
+    check_turn($state['sides']['ally'][0]['hp'] === 500 && count($events) === 1 && $events[0]['type'] === 'status_prevent', "$status also prevents a standalone counter");
+}
+foreach ([true, false] as $enemy_skill) {
+    $state = turn_state();
+    $state['sides']['enemy'][0]['status'] = ['code' => 'paralysis', 'turns_left' => 0];
+    $action = ['type' => 'move', 'skill' => turn_move(0)];
+    if ($enemy_skill) $action['enemy_move'] = turn_move(0);
+    $status_rolls = 0;
+    $rng = function ($min, $max) use (&$status_rolls) {
+        if ($min === 1 && $max === 100) return ++$status_rolls === 1 ? 100 : 1;
+        return $max;
+    };
+    $result = battle_core_apply_action($state, $action, $rng);
+    check_turn($status_rolls === 1 && !turn_events($result, 'status_prevent'), 'Enemy action has one successful paralysis roll, enemy_skill=' . (int)$enemy_skill);
+    check_turn(count(turn_events($result, $enemy_skill ? 'move' : 'counter', 'enemy')) === 1, 'Successful enemy paralysis roll allows its action, enemy_skill=' . (int)$enemy_skill);
+}
+
+// A successful first paralysis roll must not be followed by a second roll.
+$state = turn_state(100, 30);
+$state['sides']['ally'][0]['status'] = ['code' => 'paralysis', 'turns_left' => 0];
+$status_rolls = 0;
+$rng = function ($min, $max) use (&$status_rolls) {
+    if ($min === 1 && $max === 100) return ++$status_rolls === 1 ? 100 : 1;
+    return $max;
+};
+$result = battle_core_apply_action($state, ['type' => 'move', 'skill' => turn_move()], $rng);
+check_turn($status_rolls === 1, 'Fast paralyzed ally gets one prevention roll');
+check_turn(count(turn_events($result, 'move', 'ally')) === 1, 'Successful paralysis roll lets ally attack');
+check_turn(count(turn_events($result, 'counter')) === 1, 'Paralysis roll cannot silently remove enemy action');
+check_turn(!turn_events($result, 'status_prevent'), 'No prevention event after a successful paralysis roll');
+
+// Both units can be prevented in the same turn; their temporary skill effects expire.
+$state = turn_state();
+foreach (['ally', 'enemy'] as $side) {
+    $state['sides'][$side][0]['status'] = ['code' => 'freeze', 'turns_left' => 3];
+    $state['sides'][$side][0]['effects'] = [$passive];
+}
+$result = battle_core_apply_action($state, ['type' => 'move', 'skill' => turn_move(0, [$boost]), 'enemy_move' => turn_move(0, [$boost])], $max_rng);
+check_turn(count(turn_events($result, 'status_prevent')) === 2, 'Frozen opponents each lose their own action');
+check_turn(!turn_events($result, 'stage_change'), 'Prevented moves cannot apply their temporary effects');
+foreach (['ally', 'enemy'] as $side) {
+    check_turn($result['state']['sides'][$side][0]['effects'] === [$passive], "$side retains only its original effects after a prevented turn");
+}
+check_turn($result['pp_refund'] === false, 'Status prevention still consumes the selected move PP');
+
+// An effect inflicted by the faster ally must prevent the enemy's upcoming move.
+$freeze = ['code' => 'status_inflict', 'kind' => 'move', 'hooks' => ['on_hit'], 'params' => ['status' => 'freeze', 'chance' => 100], 'version' => 1];
+$result = battle_core_apply_action(turn_state(), ['type' => 'move', 'skill' => turn_move(40, [$freeze]), 'enemy_move' => turn_move(0, [$boost])], $max_rng);
+check_turn(count(turn_events($result, 'status_inflict', 'enemy')) === 1 && count(turn_events($result, 'status_prevent', 'enemy')) === 1, 'Newly inflicted freeze blocks the same turn enemy action');
+check_turn(!turn_events($result, 'stage_change') && $result['state']['sides']['ally'][0]['hp'] === 500, 'Frozen enemy cannot execute its queued effect');
+
+// Persistent stages survive a save/load boundary without retaining the move's effects.
+$state = turn_state();
+$state['battle_id'] = 7;
+foreach (['ally', 'enemy'] as $side) $state['sides'][$side][0]['effects'] = [$passive];
+$result = battle_core_apply_action($state, ['type' => 'move', 'skill' => turn_move(0, [$boost]), 'enemy_move' => turn_move(0, [$boost])], $max_rng);
+$rows = battle_state_to_rows($result['state']);
+$rows['battle']['id'] = 7;
+$resumed = battle_state_from_rows($rows['battle'], $rows['units']);
+$next = battle_core_apply_action($resumed, ['type' => 'move', 'skill' => turn_move(0), 'enemy_move' => turn_move(0)], $max_rng);
+foreach (['ally', 'enemy'] as $side) {
+    check_turn($next['state']['sides'][$side][0]['stages']['atk'] === 1, "$side skill applies once across save/load and the next turn");
+    check_turn($next['state']['sides'][$side][0]['effects'] === [$passive], "$side temporary skill effect never persists");
+}
+check_turn(!turn_events($next, 'stage_change'), 'A later plain move cannot retrigger a previous skill effect');
+
+// Added enemy status checks remain reproducible with the built-in RNG and persisted counter.
+$state = turn_state();
+$state['battle_id'] = 7;
+$state['sides']['enemy'][0]['status'] = ['code' => 'paralysis', 'turns_left' => 0];
+$action = ['type' => 'move', 'skill' => turn_move(), 'enemy_move' => turn_move()];
+$first = battle_core_apply_action($state, $action);
+$rows = battle_state_to_rows($first['state']);
+$rows['battle']['id'] = 7;
+$resumed = battle_state_from_rows($rows['battle'], $rows['units']);
+check_turn(battle_core_apply_action($first['state'], $action) == battle_core_apply_action($resumed, $action), 'Status turns replay identically after persistence');
+check_turn(battle_core_apply_action($state, $action) === $first, 'Same seed and status action produce identical state and events');
+
+// The endpoint decides whether a fainted ally has a replacement in the player's party.
+foreach ([true, false] as $ally_first) {
+    $state = turn_state($ally_first ? 60 : 10, 30);
+    $state['sides']['ally'][0]['hp'] = 1;
+    $state['sides']['ally'][0]['effects'] = [$passive];
+    $result = battle_core_apply_action($state, ['type' => 'move', 'skill' => turn_move(0, [$boost]), 'enemy_move' => turn_move()], $max_rng);
+    check_turn($result['state']['phase'] === 'awaiting_switch' && $result['state']['result'] === null, 'Enemy skill KO leaves replacement decision to endpoint');
+    check_turn(count(turn_events($result, 'switch_required')) === 1 && !turn_events($result, 'battle_end'), 'Enemy skill KO emits one switch request without premature defeat');
+    check_turn($result['pp_refund'] === !$ally_first, 'Enemy skill KO refunds PP only if ally never acted');
+    check_turn($result['state']['sides']['ally'][0]['effects'] === [$passive], 'Enemy skill KO strips temporary ally effects');
+}
+
+// Once residual damage interrupts the turn, no later unit can overwrite the outcome.
+$state = turn_state();
+foreach (['ally', 'enemy'] as $side) {
+    $state['sides'][$side][0]['hp'] = 1;
+    $state['sides'][$side][0]['status'] = ['code' => 'poison', 'turns_left' => 0];
+}
+$result = battle_core_apply_action($state, ['type' => 'move', 'skill' => turn_move(0), 'enemy_move' => turn_move(0)], $max_rng);
+check_turn($result['state']['phase'] === 'awaiting_switch' && $result['state']['result'] === null, 'Ally poison KO waits for a replacement');
+check_turn(count(turn_events($result, 'status_damage')) === 1 && $result['state']['sides']['enemy'][0]['hp'] === 1, 'Status resolution stops as soon as the turn is interrupted');
+check_turn(count(turn_events($result, 'switch_required')) === 1 && !turn_events($result, 'battle_end'), 'Residual damage cannot emit contradictory battle outcomes');
+
+$state = turn_state();
+$state['sides']['enemy'][0]['hp'] = 1;
+$state['sides']['enemy'][0]['status'] = ['code' => 'poison', 'turns_left' => 0];
+$result = battle_core_apply_action($state, ['type' => 'move', 'skill' => turn_move(0), 'enemy_move' => turn_move(0)], $max_rng);
+check_turn($result['state']['phase'] === 'ended' && $result['state']['result'] === 'victory', 'Enemy poison KO still produces victory');
+check_turn(count(turn_events($result, 'battle_end')) === 1, 'Enemy poison KO ends the battle exactly once');
+
+$state = turn_state();
+$state['sides']['ally'][0]['hp'] = $state['sides']['enemy'][0]['hp'] = 1;
+$state['sides']['ally'][0]['status'] = ['code' => 'poison', 'turns_left' => 0];
+$result = battle_core_apply_action($state, ['type' => 'move', 'skill' => turn_move()], $max_rng);
+check_turn($result['state']['result'] === 'victory' && $result['state']['sides']['ally'][0]['hp'] === 1, 'Direct victory remains final before residual damage');
+check_turn(!turn_events($result, 'status_damage') && count(turn_events($result, 'battle_end')) === 1, 'No residual ticks after direct victory');
+
+// Stage-adjusted turn order can make a slower enemy act first and miss.
+$state = turn_state(50, 30);
+$state['sides']['enemy'][0]['stages']['speed'] = 2;
+$miss_rng = function ($min, $max) { return $min === 1 && $max === 100 ? 1 : $max; };
+$result = battle_core_apply_action($state, ['type' => 'move', 'skill' => turn_move(), 'enemy_move' => turn_move()], $miss_rng);
+check_turn(count(turn_events($result, 'miss', 'enemy')) === 1 && count(turn_events($result, 'damage', 'ally')) === 1, 'Enemy misses before the ally successfully hits');
+check_turn($result['pp_refund'] === false, 'Enemy miss never refunds the ally skill PP');
+$state = turn_state(30, 60);
+$result = battle_core_apply_action($state, ['type' => 'move', 'skill' => turn_move(), 'enemy_move' => turn_move()], $miss_rng);
+check_turn(count(turn_events($result, 'miss', 'ally')) === 1 && $result['pp_refund'] === true, 'An actual ally miss still refunds PP');
+
+// Existing version-one battles keep their pre-status rules and fixed counter.
+$state = turn_state();
+$state['rules_version'] = 1;
+$state['sides']['enemy'][0]['status'] = ['code' => 'freeze', 'turns_left' => 3];
+$result = battle_core_apply_action($state, ['type' => 'move', 'skill' => turn_move(), 'enemy_move' => turn_move()], $max_rng);
+check_turn(count(turn_events($result, 'counter')) === 1 && !turn_events($result, 'status_prevent'), 'Version-one battles retain their legacy counter behavior');
+
+if ($failures) {
+    echo "$failures of $checks battle turn regression assertions failed\n";
+    exit(1);
+}
+echo "$checks battle turn regression assertions passed\n";

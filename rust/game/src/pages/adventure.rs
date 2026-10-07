@@ -12,6 +12,7 @@ use crate::{
     utils::api_client::NewApiClient,
 };
 use _utils::types::{
+    api_battle::{BattleItem, PpRestoreSkill},
     api_map::MapInfo,
     api_map_region::MapRegion,
     api_pokemon::{ApiResponse as PokemonApiResponse, PokemonBasic},
@@ -31,11 +32,10 @@ pub fn Adventure() -> Element {
     let mut maps: Signal<Vec<MapInfo>> = use_signal(Vec::new);
     let mut maps_loading = use_signal(|| true);
 
-    let mut battle_items = use_signal(Vec::<InventoryItem>::new);
+    let mut battle_items = use_signal(Vec::<BattleItem>::new);
     let mut battle_balls = use_signal(Vec::<InventoryItem>::new);
 
-    let mut skill_selection_mode =
-        use_signal(|| None::<(u64, String, Vec<_utils::types::api_battle::BattleSkill>)>);
+    let mut skill_selection_mode = use_signal(|| None::<(u64, String, Vec<PpRestoreSkill>)>);
 
     let _resource = use_resource(move || async move {
         let api = NewApiClient::new();
@@ -46,7 +46,7 @@ pub fn Adventure() -> Element {
                 message_log.set(vec!["战斗已恢复".to_string()]);
 
                 let api2 = NewApiClient::new();
-                if let Ok(data) = api2.get_user_inventory(Some(1), 1).await {
+                if let Ok(data) = api2.get_battle_items().await {
                     battle_items.set(data.items);
                 }
                 let api3 = NewApiClient::new();
@@ -188,12 +188,14 @@ pub fn Adventure() -> Element {
         }
     };
 
-    let use_item_on_skill = move |item_id: u64, skill_id: u64| {
+    let mut use_item_on_skill = move |item_id: u64, skill_record_id: u64| {
+        if *loading.read() {
+            return;
+        }
+        loading.set(true);
         let api = NewApiClient::new();
         spawn(async move {
-            loading.set(true);
-
-            match api.use_item_on_skill(item_id, skill_id).await {
+            match api.use_item_on_skill(item_id, skill_record_id).await {
                 Ok(scene) => {
                     skill_selection_mode.set(None);
                     message_log
@@ -220,11 +222,13 @@ pub fn Adventure() -> Element {
         });
     };
 
-    let use_item_in_battle = move |item_id: u64| {
+    let mut use_item_in_battle = move |item_id: u64| {
+        if *loading.read() {
+            return;
+        }
+        loading.set(true);
         let api = NewApiClient::new();
         spawn(async move {
-            loading.set(true);
-
             // 只发起一次请求：服务端在该请求中已扣道具、结算并让野怪反击，
             // 之前的实现会再调用一次同一端点，导致道具被扣两次/报"您没有该物品"
             match api.use_item_in_battle_raw(item_id).await {
@@ -331,10 +335,13 @@ pub fn Adventure() -> Element {
         }
     };
 
-    let capture = move |ball_id: u64| {
+    let mut capture = move |ball_id: u64| {
+        if *loading.read() {
+            return;
+        }
+        loading.set(true);
         let api = NewApiClient::new();
         spawn(async move {
-            loading.set(true);
             match api.capture(ball_id).await {
                 Ok(scene) => {
                     message_log.write().push(scene.message.clone());

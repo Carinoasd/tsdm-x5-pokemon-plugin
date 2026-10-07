@@ -65,7 +65,7 @@ function get_global_config()
           $val = strval($query['value']);
           // 对 news_announcements 进行 JSON 解码
           if ($query['key'] === 'news_announcements') {
-            $decoded = json_decode(stripslashes($val), true);
+            $decoded = json_decode($val, true);
             if (is_array($decoded)) {
               $val = $decoded;
             }

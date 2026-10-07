@@ -420,6 +420,8 @@ def main():
     test_php_regression("Hunger item regression", "item_hunger.php")
     test_php_regression("Pokemon progression regression", "progression_regressions.php")
     test_php_regression("Battle core engine regression", "battle_core_engine.php")
+    test_php_regression("Battle status and turn order regressions", "battle_core_regressions.php")
+    test_php_regression("Admin input and public config regressions", "admin_input_regressions.php")
     test_php_regression("Battle turn endpoint regression", "battle_engine_turn.php")
 
     print("\n" + "=" * 60)

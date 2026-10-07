@@ -360,8 +360,8 @@ function insert_pokemon_type($info)
     exit(json_encode($json_ret, JSON_UNESCAPED_UNICODE));
   }
 
-  $name = strval($info["name"]);
-  $txt = strval($info["description"]);
+  $name = addslashes(strval($info["name"]));
+  $txt = addslashes(strval($info["description"]));
   $money = intval($info["cost"]);
   $shop = boolval($info["is_selling"]) ? 1 : 0;
   $sex = is_null($info["sex_weight"]) ? -1 : intval(floatval($info["sex_weight"]) * 1000);
@@ -399,8 +399,8 @@ function insert_pokemon_type($info)
   $mapid = array_unique($mapid);
   sort($mapid, SORT_NUMERIC);
   $mapid = implode(",", $mapid);
-  $capture = boolval($info["capture_weight"]) ? 1 : 0;
-  $met = boolval($info["meet_weight"]) ? 1 : 0;
+  $capture = intval($info["capture_weight"]);
+  $met = intval($info["meet_weight"]);
   $birth = intval($info["birth_order"]);
   $strength = intval($info["strength_weight"]);
   $minmoney = intval($info["drop_money_range"][0]);

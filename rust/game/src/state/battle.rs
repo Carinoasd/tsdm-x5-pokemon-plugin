@@ -58,22 +58,7 @@ pub fn set_battle_scene(scene: Option<BattleScene>) {
             remember_map_id(scene.map_id);
         }
 
-        let needs_replace = scene.my_pokemon.hp <= 0 && !scene.battle_over;
-
-        // 检查是否有可用替换宠物
-        let has_replacements = crate::state::POKEMON_STATE
-            .read()
-            .list
-            .iter()
-            .filter(|p| p.hp > 0 && (p.site == 1 || p.site == 2))
-            .count()
-            > 0;
-
-        if needs_replace && has_replacements {
-            save_replace_state(true);
-        } else {
-            save_replace_state(false);
-        }
+        save_replace_state(scene.needs_replacement());
     } else {
         save_replace_state(false);
     }

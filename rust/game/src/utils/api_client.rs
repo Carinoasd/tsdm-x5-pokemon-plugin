@@ -15,7 +15,8 @@ use gloo_net::http::{Request, Response};
 
 // 导入API类型
 use _utils::types::api_battle::{
-    BattleScene, FleeRequest, StartBattleRequest, UseItemOnSkillRequest, UseSkillRequest,
+    BattleItemsResponse, BattleScene, FleeRequest, StartBattleRequest, UseItemOnSkillRequest,
+    UseSkillRequest,
 };
 use _utils::types::api_config::{GlobalConfigData, GlobalConfigResponse};
 use _utils::types::api_evolution::{
@@ -479,12 +480,19 @@ impl NewApiClient {
     }
 
     /// 在战斗中对指定技能使用PP恢复道具
-    pub async fn use_item_on_skill(&self, item_id: u64, skill_id: u64) -> Result<BattleScene> {
+    pub async fn use_item_on_skill(
+        &self,
+        item_id: u64,
+        skill_record_id: u64,
+    ) -> Result<BattleScene> {
         self.post(
             "battle",
             "use_item_on_skill",
             "",
-            &UseItemOnSkillRequest { item_id, skill_id },
+            &UseItemOnSkillRequest {
+                item_id,
+                skill_record_id,
+            },
         )
         .await
     }
@@ -513,7 +521,7 @@ impl NewApiClient {
     }
 
     /// 获取可以在战斗中使用的物品（只包含HP恢复和PP恢复道具）
-    pub async fn get_battle_items(&self) -> Result<InventoryResponse> {
+    pub async fn get_battle_items(&self) -> Result<BattleItemsResponse> {
         self.get("battle", "get_battle_items", "").await
     }
 

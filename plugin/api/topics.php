@@ -63,7 +63,7 @@ function api_get_topics()
   try {
     $news_config = DB::fetch_first("SELECT * FROM pm_config WHERE `key` = 'news_announcements'");
     if ($news_config) {
-      $decoded = json_decode(stripslashes($news_config['value']), true);
+      $decoded = json_decode($news_config['value'], true);
       if (is_array($decoded)) {
         // 限制最多 6 条
         $news_announcements = array_slice($decoded, 0, 6);
@@ -74,8 +74,8 @@ function api_get_topics()
       $old_title = DB::fetch_first("SELECT * FROM pm_config WHERE `key` = 'ann_title'");
       $old_url = DB::fetch_first("SELECT * FROM pm_config WHERE `key` = 'ann_url'");
       if ($old_title && $old_url) {
-        $title = stripslashes($old_title['value']);
-        $url = stripslashes($old_url['value']);
+        $title = $old_title['value'];
+        $url = $old_url['value'];
         if (!empty($title)) {
           $news_announcements = array(array('title' => $title, 'url' => $url));
         }

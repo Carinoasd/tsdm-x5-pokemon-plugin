@@ -16,7 +16,7 @@ define('IN_DISCUZ', 1);
 require __DIR__ . '/../../plugin/api/battle_core.php';
 require __DIR__ . '/../../plugin/api/pokemon_utils.php';
 
-$wanted = ['api_capture_pokemon'];
+$wanted = ['battle_reload_action_context', 'battle_consume_owned_item', 'api_capture_pokemon'];
 $tokens = token_get_all(file_get_contents($source));
 for ($i = 0; $i < count($tokens); $i++) {
     if (!is_array($tokens[$i]) || $tokens[$i][0] !== T_FUNCTION) continue;
@@ -105,7 +105,7 @@ function pm_sql($sql, ...$args)
     }, $sql);
 }
 function api_my_usersdata($uid) { return $GLOBALS['user']; }
-function api_my_pokemon($name) { return ['id' => 10, 'uid' => 7, 'level' => 20, 'hp' => 100, 'species_id' => 1]; }
+function api_my_pokemon($name) { return ['id' => 10, 'uid' => 7, 'level' => 20, 'hp' => 100, 'state' => 1, 'species_id' => 1]; }
 function pm_data($id) { return $GLOBALS['species']; }
 function clear_battle_state($uid) { $GLOBALS['user']['npcid'] = 0; }
 function build_battle_response($user, $pet) { return []; }
@@ -114,6 +114,8 @@ class DB
 {
     public static $captured;
     public static $balls;
+    public static $affected = 0;
+    public static function affected_rows() { return self::$affected; }
     public static function fetch_first($sql)
     {
         if (strpos($sql, 'FOR UPDATE') !== false) {
@@ -137,8 +139,11 @@ class DB
         if (preg_match('/^(INSERT INTO pm_battle|UPDATE pm_battle|DELETE FROM pm_battle_unit|INSERT INTO pm_battle_event)/', $sql)) {
             return;
         }
-        if ($sql === 'DELETE FROM pm_myitem WHERE id = 1') {
-            self::$balls = 0;
+        if ($sql === 'UPDATE pm_myitem SET nums = nums - 1 WHERE id = 1 AND uid = 7 AND nums > 0') {
+            self::$affected = self::$balls > 0 ? 1 : 0;
+            if (self::$affected) self::$balls--;
+        } elseif ($sql === 'DELETE FROM pm_myitem WHERE id = 1 AND uid = 7 AND nums <= 0') {
+            self::$affected = self::$balls <= 0 ? 1 : 0;
         } elseif (preg_match('/^INSERT INTO pm_mypm\s*\(([^)]+)\)\s*VALUES\s*\(([^)]+)\)\s*$/s', $sql, $match)) {
             $columns = array_map('trim', explode(',', $match[1]));
             $values = array_map('trim', str_getcsv($match[2], ',', "'", '\\'));

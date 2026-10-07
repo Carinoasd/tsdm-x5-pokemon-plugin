@@ -756,6 +756,14 @@ function battle_core_actor_move(&$state, &$events, $rng, $side, $move)
         }
         battle_core_emit($state, $events, 'faint', ['side' => $target_side_key, 'slot' => $target['slot']]);
         battle_core_apply_effects($state, $events, 'on_faint', ['actor_side' => $target_side_key, 'actor_slot' => $target['slot']]);
+        if ($target_side_key === 'ally') {
+            // The endpoint checks the player's party for replacements, just as
+            // it does after the fixed counter attack. The core only holds the
+            // current combatant, so it cannot decide that the whole party lost.
+            $state['phase'] = 'awaiting_switch';
+            battle_core_emit($state, $events, 'switch_required', ['side' => 'ally']);
+            return false;
+        }
         if (battle_core_active_unit($state, $target_side_key) === null) {
             $state['phase'] = 'ended';
             $state['result'] = $actor_side_key === 'ally' ? 'victory' : 'defeat';
@@ -774,6 +782,10 @@ function battle_core_counter_attack(&$state, &$events, $rng = null)
     $enemy = battle_core_active_unit($state, 'enemy');
     $ally = battle_core_active_unit($state, 'ally');
     if ($enemy === null || $ally === null) {
+        return;
+    }
+    // Item, capture and failed-flee turns call this entry point directly.
+    if (battle_core_pre_move_status($state, $events, $rng, 'enemy')) {
         return;
     }
 
@@ -947,13 +959,16 @@ function battle_core_resolve_statuses(&$state, &$events, $rng = null)
                 if ($new_hp <= 0) {
                     $state['sides'][$side][$i]['fainted'] = true;
                     battle_core_emit($state, $events, 'faint', ['side' => $side, 'slot' => $unit['slot']]);
-                    if (battle_core_active_unit($state, $side) === null) {
-                        $state['phase'] = 'ended';
-                        $state['result'] = $side === 'ally' ? 'defeat' : 'victory';
-                        battle_core_emit($state, $events, 'battle_end', ['result' => $state['result']]);
-                    } elseif ($side === 'ally') {
+                    if ($side === 'ally') {
                         $state['phase'] = 'awaiting_switch';
                         battle_core_emit($state, $events, 'switch_required', ['side' => 'ally']);
+                        return;
+                    }
+                    if (battle_core_active_unit($state, $side) === null) {
+                        $state['phase'] = 'ended';
+                        $state['result'] = 'victory';
+                        battle_core_emit($state, $events, 'battle_end', ['result' => $state['result']]);
+                        return;
                     }
                     continue; // 倒下后不再解除判定
                 }
@@ -1189,6 +1204,9 @@ function battle_core_apply_action($state, $action, $rng = null)
     /** 敌方行动（先手/后手路径共用） */
     $enemy_act = function () use (&$state, &$events, $rng, $enemy_move) {
         if ($enemy_move !== null) {
+            if (battle_core_pre_move_status($state, $events, $rng, 'enemy')) {
+                return;
+            }
             battle_core_actor_move($state, $events, $rng, 'enemy', $enemy_move);
         } else {
             battle_core_counter_attack($state, $events, $rng);
@@ -1206,17 +1224,13 @@ function battle_core_apply_action($state, $action, $rng = null)
             battle_core_finish_turn($state, $events, $ally['slot'], $mounted, $rng, $enemy_mounted);
             return ['state' => $state, 'events' => $events, 'pp_refund' => $pp_refund];
         }
-        if (battle_core_pre_move_status($state, $events, $rng, 'ally')) {
-            battle_core_finish_turn($state, $events, $ally['slot'], $mounted, $rng, $enemy_mounted);
-            return ['state' => $state, 'events' => $events, 'pp_refund' => $pp_refund];
-        }
         battle_core_actor_move($state, $events, $rng, 'ally', $move);
         if ($state['phase'] === 'ended') {
             // 先手击倒：回合结束（旧版此时野怪不再反击）
             battle_core_finish_turn($state, $events, $ally['slot'], $mounted, $rng, $enemy_mounted);
             return ['state' => $state, 'events' => $events, 'pp_refund' => $pp_refund];
         }
-        if (battle_core_events_has($events, 'miss')) {
+        if (battle_core_events_has($events, 'miss', 'ally')) {
             $pp_refund = true;
         }
         $enemy_act();
@@ -1242,7 +1256,7 @@ function battle_core_apply_action($state, $action, $rng = null)
             battle_core_finish_turn($state, $events, $ally['slot'], $mounted, $rng, $enemy_mounted);
             return ['state' => $state, 'events' => $events, 'pp_refund' => $pp_refund];
         }
-        if (battle_core_events_has($events, 'miss')) {
+        if (battle_core_events_has($events, 'miss', 'ally')) {
             $pp_refund = true;
         }
     }
@@ -1251,10 +1265,10 @@ function battle_core_apply_action($state, $action, $rng = null)
     return ['state' => $state, 'events' => $events, 'pp_refund' => $pp_refund];
 }
 
-function battle_core_events_has($events, $type)
+function battle_core_events_has($events, $type, $side = null)
 {
     foreach ($events as $e) {
-        if ($e['type'] === $type) {
+        if ($e['type'] === $type && ($side === null || ($e['payload']['side'] ?? null) === $side)) {
             return true;
         }
     }
