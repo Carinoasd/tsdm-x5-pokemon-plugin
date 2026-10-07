@@ -258,5 +258,43 @@ check_input('Topics retains its six announcement limit', function () {
     expect_input($data['news_announcements'], array_slice($news, 0, 6));
 });
 
+foreach (['config', 'admin'] as $firstReader) {
+    check_input("Legacy announcements survive $firstReader before topics", function () use ($firstReader) {
+        $title = 'Trainer\'s "news" C:\\news\\today';
+        $url = 'https://example.com/?q="news"';
+        $tables = DB::$tables;
+        foreach (['ann_title' => $title, 'ann_url' => $url] as $key => $value) {
+            $tables['pm_config'][$key] = ['key' => $key, 'value' => $value, 'data_type' => 'string'];
+        }
+        $expected = [['title' => $title, 'url' => $url]];
+        if ($firstReader === 'admin') {
+            [$first, $tables] = admin_input_request('get::global_config', [], $tables);
+            $first = $first[0];
+        } else {
+            [$first, $tables] = input_request(['endpoint' => 'config', 'tables' => $tables]);
+        }
+        expect_input($first['news_announcements'], $expected);
+        expect_input(json_decode($tables['pm_config']['news_announcements']['value'], true), $expected);
+        [$topics] = input_request(['endpoint' => 'topics', 'tables' => $tables]);
+        expect_input($topics['news_announcements'], $expected);
+    });
+}
+
+foreach (['config', 'admin', 'topics'] as $reader) {
+    check_input("Explicitly cleared announcements stay empty through $reader", function () use ($reader) {
+        $tables = DB::$tables;
+        foreach (['ann_title' => 'Retired notice', 'ann_url' => 'https://example.com/old', 'news_announcements' => '[]'] as $key => $value) {
+            $tables['pm_config'][$key] = ['key' => $key, 'value' => $value, 'data_type' => 'string'];
+        }
+        if ($reader === 'admin') {
+            [$data] = admin_input_request('get::global_config', [], $tables);
+            $data = $data[0];
+        } else {
+            [$data] = input_request(['endpoint' => $reader, 'tables' => $tables]);
+        }
+        expect_input($data['news_announcements'], []);
+    });
+}
+
 echo "Admin input regressions: $passed passed, $failed failed\n";
 exit($failed === 0 ? 0 : 1);

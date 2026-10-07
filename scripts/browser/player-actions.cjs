@@ -18,6 +18,8 @@ async function fixture(options={}) {
   state.items=options.medicine ? [17,18].map(id=>({id:1000+id,type_id:id,item_type:1,name:`药水${id}`,description:'回复20点HP',image:'hp20',quantity:2,type_name:'回复药',can_use:true})) : [];
   state.equipment={25:[{myitem_id:125,type_id:50,name:'A的装备',image:'equip',quantity:1,available_count:0,is_equipped:true},null,null,null],1:[{myitem_id:101,type_id:51,name:'B的装备',image:'equip',quantity:1,available_count:0,is_equipped:true},null,null,null]};
   state.equipmentFailures=options.readFailures?1:0;state.skillFailures=options.readFailures?1:0;
+  state.badgeHidden=!!options.badgeHidden;state.badgeFailure=false;
+  state.gear={125:{...structuredClone(state.equipment[25][0]),equipment_hp:10,equipment_atk:3},126:{myitem_id:126,type_id:52,name:'替换装备',image:'equip',quantity:1,available_count:1,is_equipped:false,equipment_hp:20,equipment_atk:5}};
   const scene=()=>({battle_id:'battle_37',engine_battle_id:37,revision:2,phase:'active',events:[],map_id:1,map_name:'Test',turn:2,my_pokemon:{id:25,instance_id:25,name:'皮卡丘',level:5,hp:20,max_hp:50,skills:[]},wild_pokemon:{id:19,name:'小拉达',level:5,hp:30,max_hp:30},status:'active',battle_over:false,can_continue_switch:false,message:''});
   const pendingReleases=new Set();
   const hold=(key,once=false)=>{let release;const promise=new Promise(resolve=>{release=resolve});const done=()=>{state.gates.delete(key);pendingReleases.delete(done);release()};pendingReleases.add(done);state.gates.set(key,{promise,once});return done};
@@ -25,6 +27,7 @@ async function fixture(options={}) {
     const key=`${url.searchParams.get('endpoint')}/${url.searchParams.get('action')}`;
     state.requests.push({key,body,query:Object.fromEntries(url.searchParams)});
     const profileMoney=state.money;
+    const badgeSnapshot=state.badgeHidden;
     // Each delayed list response represents the snapshot captured by that read.
     const pokemonSnapshot=structuredClone(state.pets);
     const gate=state.gates.get(key);if(gate){if(gate.once)state.gates.delete(key);await gate.promise;}
@@ -34,7 +37,8 @@ async function fixture(options={}) {
         if(state.profileFailures-- > 0) return {success:false,error:'模拟账户载入失败',code:503};
         data={uid:1,username:'Fixture Trainer',group_id:10,is_admin:false,is_new_player:state.newPlayer,money:profileMoney,adventure_strength:100,strength_level:1,wins:0,losses:0,total_pokemons:state.newPlayer?0:state.pets.length,total_items:2,npcid:state.battle?19:0};break;
       case 'user/inventory_stats':data={categories:[]};break;
-      case 'user/badge_status':data={hidden:false,initialized:true};break;
+      case 'user/badge_status':data={hidden:badgeSnapshot,initialized:true};break;
+      case 'user/refresh_badge':if(state.badgeFailure){state.badgeFailure=false;return {success:false,error:'模拟徽章保存失败',code:503};}state.badgeHidden=body.hide;data={hidden:state.badgeHidden,initialized:true};break;
       case 'user/online_players':data={total:0,players:[],max_display:20};break;
       case 'topics/list':data={topics:[],news_announcements:[],total:0};break;
       case 'config/global':data={is_open:true,is_enable_catch:true};break;
@@ -42,9 +46,27 @@ async function fixture(options={}) {
       case 'pokemon/detail':{const p=state.pets.find(p=>p.id===Number(url.searchParams.get('pokemon_id')));assert(p);data={...p,stats:{hp:50,attack:p.id*10,defense:10,sp_attack:10,sp_defense:10,speed:10}};break;}
       case 'pokemon/equipment': {
         if(state.equipmentFailures-- > 0)return {success:false,error:'模拟装备服务不可用',code:503};
-        const pid=Number(url.searchParams.get('pokemon_id'));data={pokemon_id:pid,equipment_slots:state.equipment[pid].map((item,slot_index)=>({slot_index,equipment_id:item?.myitem_id||0,item})),owned_items:[],shop_items:[],user_money:state.money};break;
+        const pid=Number(url.searchParams.get('pokemon_id'));
+        const used126=Object.values(state.equipment).filter(slots=>slots.some(item=>item?.myitem_id===126)).length;
+        const spareGear={...state.gear[126],equipped_count:used126,available_count:used126?0:1,is_equipped:state.equipment[pid].some(item=>item?.myitem_id===126)};
+        let owned=options.equipmentLifecycle?[spareGear]:[];
+        if(options.occupiedStack){
+          owned=[{...state.equipment[1][0],quantity:2,equipped_count:1,available_count:state.legacyAvailability?1:0,is_equipped:pid===1},
+            spareGear];
+        }
+        data={pokemon_id:pid,equipment_slots:state.equipment[pid].map((item,slot_index)=>({slot_index,equipment_id:item?.myitem_id||0,item})),owned_items:owned,shop_items:[],user_money:state.money};break;
       }
-      case 'pokemon/unequip_item':state.equipment[body.pokemon_id][body.slot_index]=null;data={message:'已卸下',pokemon_id:body.pokemon_id,slot_index:body.slot_index,item_name:'装备',new_hp:20,new_maxhp:50};break;
+      case 'pokemon/unequip_item': {
+        state.equipment[body.pokemon_id][body.slot_index]=null;const p=state.pets.find(p=>p.id===body.pokemon_id);assert(p);
+        if(options.equipmentLifecycle){p.hp=18;p.max_hp=45;}
+        data={message:'已卸下',pokemon_id:body.pokemon_id,slot_index:body.slot_index,item_name:'装备',new_hp:p.hp,new_maxhp:p.max_hp};break;
+      }
+      case 'pokemon/equip_item': {
+        if(state.equipmentWriteFailure){state.equipmentWriteFailure=false;return {success:false,error:'模拟装载失败',code:400};}
+        assert(state.gear[body.myitem_id]);assert.equal(state.equipment[body.pokemon_id][body.slot_index],null);
+        state.equipment[body.pokemon_id][body.slot_index]=state.gear[body.myitem_id];const p=state.pets.find(p=>p.id===body.pokemon_id);assert(p);p.hp=24;p.max_hp=60;
+        data={message:'已装备',pokemon_id:body.pokemon_id,slot_index:body.slot_index,item_name:state.gear[body.myitem_id].name,new_hp:p.hp,new_maxhp:p.max_hp};break;
+      }
       case 'pokemon/learnable_skills':
         if(state.skillFailures-- > 0)return {success:false,error:'模拟技能服务不可用',code:503};
         data={pokemon_id:25,pokemon_level:5,available_skills:[{id:12,name:'电光',description:'测试技能',type:'电',category:'特殊',power:40,max_pp:10,required_level:1,is_available:true}],unlocked_skills:[]};break;
@@ -99,6 +121,131 @@ async function runCase(browser,name,options,test) {
 async function run() {
   await fs.mkdir(artifacts,{recursive:true});const browser=await chromium.launch({headless:true});
   try {
+    await runCase(browser,'occupied-equipment-stacks-cannot-replace-current-gear',{occupiedStack:true},async(page,app)=>{
+      // Also tolerate the older availability field while respecting equipped_count.
+      app.state.legacyAvailability=true;
+      await page.getByText('个人中心',{exact:true}).click();await page.locator('.mypm-tab').filter({hasText:'装备'}).click();
+      const occupied=page.locator('.inventory-item-wrapper').filter({has:page.locator('img[alt="B的装备"]')});
+      await expect(occupied).toContainText('其他宠物使用中');
+      await expect(occupied.locator('.inventory-item')).toHaveClass(/equipped/);
+      await occupied.locator('.inventory-item').click();await page.locator('.equip-slot').nth(1).click();
+      await occupied.locator('.inventory-item').click();await page.locator('.equip-slot').first().click();
+      assert.equal(app.state.requests.filter(r=>r.key==='pokemon/equip_item'||r.key==='pokemon/unequip_item').length,0);
+      assert.equal(app.state.equipment[25][0].myitem_id,125);
+      assert.equal(app.state.equipment[1][0].myitem_id,101);
+      app.state.legacyAvailability=false;
+      await page.getByRole('button',{name:/昵称1 Lv/}).click();
+      await expect(occupied).toContainText('已装备');
+      await expect(occupied.locator('.inventory-item')).toHaveClass(/equipped/);
+      await page.getByRole('button',{name:/昵称25 Lv/}).click();
+      await expect(occupied).toContainText('其他宠物使用中');
+      await page.locator('.inventory-item-wrapper').filter({has:page.locator('img[alt="替换装备"]')}).locator('.inventory-item').click();
+      await page.locator('.equip-slot').nth(1).click();
+      await expect(page.locator('.equip-icon[alt="替换装备"]')).toBeVisible();
+      assert.equal(app.state.requests.filter(r=>r.key==='pokemon/equip_item').length,1);
+      assert.equal(app.state.requests.filter(r=>r.key==='pokemon/unequip_item').length,0);
+      assert.equal(app.state.equipment[25][0].myitem_id,125);
+      assert.equal(app.state.equipment[25][1].myitem_id,126);
+      await page.screenshot({path:path.join(artifacts,'occupied-equipment-stacks.png'),fullPage:true});
+    });
+    await runCase(browser,'header-navigation-works-with-keyboard',{},async(page)=>{
+      await expect(page.locator('.page-home')).toBeVisible();
+      for(const target of ['.logo-link','.nav-link']) {
+        await page.keyboard.press('Tab');await expect(page.locator(target).first()).toBeFocused();
+      }
+      await page.keyboard.press('Enter');await expect(page.locator('.page-my-pokemon')).toBeVisible();
+      await page.keyboard.press('Tab');await expect(page.locator('.nav-link').nth(1)).toBeFocused();
+      await page.keyboard.press('Enter');await expect(page.locator('.page-shop')).toBeVisible();
+      await page.keyboard.press('Tab');await expect(page.locator('.nav-link').nth(2)).toBeFocused();
+      await page.keyboard.press('Enter');await expect(page.locator('.page-pokemon-center')).toBeVisible();
+      await page.keyboard.press('Tab');await expect(page.locator('.nav-link').nth(3)).toBeFocused();
+      await page.keyboard.press('Enter');await expect(page.locator('.page-adventure')).toBeVisible();
+      await page.locator('.logo-link').focus();await page.keyboard.press('Enter');await expect(page.locator('.page-home')).toBeVisible();
+      await page.screenshot({path:path.join(artifacts,'header-keyboard.png'),fullPage:true});
+    });
+    await runCase(browser,'badge-state-load-does-not-overwrite-mutation',{},async(page,app)=>{
+      const release=app.hold('user/badge_status',true);await page.getByText('商店',{exact:true}).click();
+      await expect.poll(()=>app.state.requests.filter(r=>r.key==='user/badge_status').length).toBe(1);
+      await expect(page.locator('.badge-toggle-btn')).toBeDisabled();
+      // Explicit refresh can safely initialize visibility while the older read is pending.
+      await page.getByRole('button',{name:'刷新徽章',exact:true}).click();
+      await expect(page.locator('.badge-toggle-btn')).toBeEnabled();
+      const releaseMutation=app.hold('user/refresh_badge',true);
+      await page.locator('.badge-toggle-btn').evaluate(node=>{node.click();node.click();node.click()});
+      await expect.poll(()=>app.state.requests.filter(r=>r.key==='user/refresh_badge').length).toBe(2);
+      releaseMutation();await expect(page.locator('.badge-toggle-btn')).toHaveText('显示宠物');
+      const response=page.waitForResponse(r=>r.url().includes('action=badge_status'));release();await response;
+      await expect(page.locator('.badge-toggle-btn')).toHaveText('显示宠物');assert.equal(app.state.badgeHidden,true);
+      app.state.badgeFailure=true;await page.locator('.badge-toggle-btn').click();
+      await expect(page.locator('.toast-item.error')).toContainText('模拟徽章保存失败');
+      await expect(page.locator('.badge-toggle-btn')).toHaveText('显示宠物');
+      await page.locator('.badge-toggle-btn').click();await expect(page.locator('.badge-toggle-btn')).toHaveText('隐藏宠物');
+      assert.equal(app.state.badgeHidden,false);
+    });
+    await runCase(browser,'badge-initial-hidden-state-can-be-shown',{badgeHidden:true},async(page,app)=>{
+      await page.getByText('商店',{exact:true}).click();
+      await expect(page.locator('.badge-toggle-btn')).toHaveText('显示宠物');
+      await page.locator('.badge-toggle-btn').click();
+      await expect(page.locator('.badge-toggle-btn')).toHaveText('隐藏宠物');
+      assert.equal(app.state.badgeHidden,false);
+    });
+    await runCase(browser,'toast-expiration-survives-navigation',{},async(page,app)=>{
+      await page.getByText('商店',{exact:true}).click();await page.locator('.buy-btn').click();
+      await expect(page.locator('.toast-item.success')).toContainText('成功购买');
+      await page.locator('.logo-link').click();await expect(page.locator('.page-home')).toBeVisible();
+      await expect(page.locator('.toast-item.success')).toHaveCount(0,{timeout:5000});
+      await page.getByText('商店',{exact:true}).click();app.state.badgeFailure=true;
+      await page.locator('.badge-refresh-btn').click();await expect(page.locator('.toast-item.error')).toBeVisible();
+      await page.locator('.logo-link').click();await expect(page.locator('.toast-item.error')).toHaveCount(0,{timeout:10000});
+    });
+    await runCase(browser,'equipment-operations-finish-after-navigation',{equipmentLifecycle:true},async(page,app)=>{
+      for(const operation of ['unequip','move','replace','replace-fails']) {
+        app.state.equipment[25]=[structuredClone(app.state.gear[125]),null,null,null];
+        app.state.pets[0].hp=20;app.state.pets[0].max_hp=50;
+        await page.getByText('个人中心',{exact:true}).click();
+        await page.locator('.mypm-tab').filter({hasText:'装备'}).click();
+        await expect(page.locator('.equip-icon')).toHaveAttribute('alt','A的装备');
+        const release=app.hold('pokemon/unequip_item',true);
+        const beforeUnequip=app.state.requests.filter(r=>r.key==='pokemon/unequip_item').length;
+        app.state.equipmentWriteFailure=operation==='replace-fails';
+        if(operation.startsWith('replace')) await page.locator('.inventory-item').click();
+        await page.locator('.equip-slot').first().click();
+        if(operation==='unequip') await page.locator('.equipment-inventory-section .inventory-header').click();
+        if(operation==='move') await page.locator('.equip-slot').nth(1).click();
+        await expect.poll(()=>app.state.requests.filter(r=>r.key==='pokemon/unequip_item').length).toBe(beforeUnequip+1);
+        const beforeList=app.state.requests.filter(r=>r.key==='pokemon/list').length;
+        await page.getByText('商店',{exact:true}).click();release();
+        await expect.poll(()=>app.state.requests.filter(r=>r.key==='pokemon/list').length).toBeGreaterThan(beforeList);
+        const expectedHP=operation==='unequip'||operation==='replace-fails'?'18/45':'24/60';
+        await page.locator('.pm-mini-slot').first().hover();await expect(page.locator('.stat-hp-bar .stat-value-inside')).toHaveText(expectedHP);
+        if(operation==='unequip'||operation==='replace-fails')assert.equal(app.state.equipment[25][0],null);
+        else assert.equal(app.state.equipment[25][operation==='move'?1:0].myitem_id,operation==='move'?125:126);
+        if(operation==='replace-fails')await expect(page.locator('.toast-item.error')).toContainText('模拟装载失败');
+      }
+      // Stay on the equipment page: refreshing the global list must also refresh
+      // the equipment resource, including slot icons and calculated bonus tags.
+      app.state.equipment[25]=[structuredClone(app.state.gear[125]),null,null,null];
+      await page.getByText('个人中心',{exact:true}).click();
+      await expect(page.locator('.equip-icon')).toHaveAttribute('alt','A的装备');
+      await expect(page.locator('.bonus-tag-small.hp')).toHaveText('+10 HP');
+      await expect(page.locator('.bonus-tag-small.atk')).toHaveText('+3 攻击');
+      const equipmentReads=()=>app.state.requests.filter(r=>r.key==='pokemon/equipment').length;
+      const beforeUnequipRead=equipmentReads();
+      await page.locator('.equip-slot').first().click();
+      await page.locator('.equipment-inventory-section .inventory-header').click();
+      await expect(page.locator('.equip-icon')).toHaveCount(0);
+      await expect(page.locator('.bonus-tag-small')).toHaveCount(0);
+      await expect(page.locator('.equipment-loading-overlay')).toHaveCount(0);
+      await expect.poll(equipmentReads).toBeGreaterThan(beforeUnequipRead);
+      const beforeEquipRead=equipmentReads();
+      await page.locator('.inventory-item').click();await page.locator('.equip-slot').first().click();
+      await expect(page.locator('.equip-icon')).toHaveAttribute('alt','替换装备');
+      await expect(page.locator('.bonus-tag-small.hp')).toHaveText('+20 HP');
+      await expect(page.locator('.bonus-tag-small.atk')).toHaveText('+5 攻击');
+      await expect(page.locator('.equipment-loading-overlay')).toHaveCount(0);
+      await expect.poll(equipmentReads).toBeGreaterThan(beforeEquipRead);
+      assert.equal(app.state.equipment[25][0].myitem_id,126);
+    });
     await runCase(browser,'equipment-selection-stays-with-its-pokemon',{},async(page,app)=>{
       await page.getByText('个人中心',{exact:true}).click();
       await page.getByRole('button',{name:'装备',exact:true}).click();

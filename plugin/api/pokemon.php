@@ -1363,7 +1363,7 @@ LEFT JOIN " . pm_table('pm_itemdata') . " i ON m.itemid=i.id WHERE m.uid=%d AND 
             'image' => $row['tpname'] ?: '',
             'quantity' => (int) $row['nums'],
             'equipped_count' => $equipped_count,
-            'available_count' => max(0, (int) $row['nums'] - $equipped_count),
+            'available_count' => $equipped_count > 0 ? 0 : (int) $row['nums'],
             'is_equipped' => $is_equipped_by_current,
             'zbtype' => (int) $row['zbtype'],
             'equipment_hp' => (int) (isset($equipment['hp']) ? $equipment['hp'] : 0),

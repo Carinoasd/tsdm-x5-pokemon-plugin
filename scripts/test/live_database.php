@@ -491,6 +491,142 @@ try {
     $staff_maps = request('battle', 'maps', null, $closed_route + ['TSDM_TEST_STAFF' => '1']);
     check($staff_maps['success'], 'Named game staff retains routed API access with both switches closed');
 
+    // Readers must share legacy migration and never erase an administrator's newer list.
+    $old_news = [['title' => 'Trainer\'s "news" C:\\news\\today', 'url' => 'https://example.com/?q="news"']];
+    $db->query("DELETE FROM pm_config WHERE `key` IN ('news_announcements', 'ann_title', 'ann_url')");
+    $legacy_title = $db->real_escape_string($old_news[0]['title']);
+    $legacy_url = $db->real_escape_string($old_news[0]['url']);
+    $db->query("INSERT INTO pm_config VALUES ('ann_title', '$legacy_title', 'string'), ('ann_url', '$legacy_url', 'string')");
+    $config_news = request('config', 'global_config', null, $closed_route);
+    check($config_news['success'] && $config_news['data']['news_announcements'] === $old_news,
+        'First config read migrates legacy announcements without changing escaped text');
+    $topics_news = request('topics', 'list');
+    check($topics_news['success'] && $topics_news['data']['news_announcements'] === $old_news,
+        'Topics retains announcements after config performed the migration');
+    $db->query("UPDATE pm_config SET value = '[]' WHERE `key` = 'news_announcements'");
+    $cleared_news = request('config', 'global_config', null, $closed_route);
+    check($cleared_news['success'] && $cleared_news['data']['news_announcements'] === [],
+        'Explicitly cleared announcements do not restore legacy notices');
+
+    foreach ([false, true] as $admin_saved) {
+        $db->query("DELETE FROM pm_config WHERE `key` = 'news_announcements'");
+        $news_workers = [];
+        foreach ([1, 2] as $_) {
+            $news_workers[] = begin_request('config', 'global_config', null,
+                $closed_route + ['TSDM_TEST_PAUSE_NEWS_INSERT' => '1']);
+        }
+        $deadline = microtime(true) + 10;
+        foreach ($news_workers as $worker) {
+            while (!is_file($worker['base'] . '.ready')) {
+                if (microtime(true) > $deadline || !proc_get_status($worker['process'])['running']) {
+                    throw new RuntimeException('Announcement reader failed to reach insert barrier');
+                }
+                usleep(10000);
+                clearstatcache();
+            }
+        }
+        $expected_news = $old_news;
+        if ($admin_saved) {
+            $expected_news = [['title' => 'Fresh administrator notice', 'url' => 'https://example.com/new']];
+            $saved_news = $db->real_escape_string(json_encode($expected_news));
+            $db->query("INSERT INTO pm_config VALUES ('news_announcements', '$saved_news', 'string')");
+        }
+        foreach ($news_workers as $worker) file_put_contents($worker['base'] . '.ready.resume', 'resume');
+        foreach ($news_workers as $worker) {
+            $result = finish_request($worker);
+            check($result['success'] && $result['data']['news_announcements'] === $expected_news,
+                $admin_saved ? 'Stale reader returns the newer administrator announcement'
+                    : 'Concurrent first reads migrate announcements without duplicate-key failure');
+        }
+        check(json_decode(scalar("SELECT value FROM pm_config WHERE `key` = 'news_announcements'"), true) === $expected_news,
+            $admin_saved ? 'Read migration cannot overwrite a committed administrator list'
+                : 'Concurrent migration persists the original legacy announcement');
+    }
+
+    // Signed SMALLINT inventory capacity must be enforced before either SQL mode truncates/errors.
+    $db->query("INSERT INTO common_member (uid, username) VALUES (14, 'fixture-player-14')");
+    $db->query('INSERT INTO pm_usersdata (uid, money) VALUES (14, 10000)');
+    foreach (['0', '1'] as $strict) {
+        $shopper = ['TSDM_TEST_UID' => '14', 'TSDM_TEST_STRICT' => $strict];
+        $db->query('UPDATE pm_usersdata SET money = 10000 WHERE uid = 14');
+        $db->query('DELETE FROM pm_myitem WHERE uid = 14');
+        $bulk = request('shop', 'buy', ['item_id' => 24, 'quantity' => 99], $shopper);
+        check($bulk['success'] && $bulk['data']['items_purchased'] === 99
+            && $bulk['data']['total_cost'] === 5940 && $bulk['data']['remaining_money'] === 4060,
+            "A 99-item order preserves the purchase response in SQL strict=$strict");
+        check((int)scalar("SELECT nums FROM pm_myitem WHERE uid = 14 AND itemid = '24'") === 99
+            && (int)scalar('SELECT money FROM pm_usersdata WHERE uid = 14') === 4060,
+            "A 99-item order charges and delivers the full quantity in SQL strict=$strict");
+
+        $db->query('UPDATE pm_usersdata SET money = 10000 WHERE uid = 14');
+        $db->query('UPDATE pm_myitem SET nums = 32668 WHERE uid = 14');
+        $exact = request('shop', 'buy', ['item_id' => 24, 'quantity' => 99], $shopper);
+        check($exact['success'] && (int)scalar('SELECT nums FROM pm_myitem WHERE uid = 14') === 32767
+            && (int)scalar('SELECT money FROM pm_usersdata WHERE uid = 14') === 4060,
+            "Purchasing up to exactly 32767 succeeds in SQL strict=$strict");
+
+        foreach ([[32767, 1], [32766, 2], [-1, 1]] as [$stock, $quantity]) {
+            $db->query('UPDATE pm_usersdata SET money = 10000 WHERE uid = 14');
+            $db->query("UPDATE pm_myitem SET nums = $stock WHERE uid = 14");
+            $rejected = request('shop', 'buy', ['item_id' => 24, 'quantity' => $quantity], $shopper);
+            check(!$rejected['success'] && $rejected['code'] === 400
+                && (int)scalar('SELECT nums FROM pm_myitem WHERE uid = 14') === $stock
+                && (int)scalar('SELECT money FROM pm_usersdata WHERE uid = 14') === 10000,
+                "Invalid stock/capacity rolls back the complete order: $stock + $quantity, SQL strict=$strict");
+        }
+
+        $db->query('UPDATE pm_myitem SET nums = 0 WHERE uid = 14');
+        $stack_id = scalar('SELECT id FROM pm_myitem WHERE uid = 14');
+        $refilled = request('shop', 'buy', ['item_id' => 24, 'quantity' => 99], $shopper);
+        check($refilled['success'] && (int)scalar('SELECT COUNT(*) FROM pm_myitem WHERE uid = 14') === 1
+            && scalar('SELECT id FROM pm_myitem WHERE uid = 14') === $stack_id
+            && (int)scalar('SELECT nums FROM pm_myitem WHERE uid = 14') === 99,
+            "Purchases reuse an empty existing stack in SQL strict=$strict");
+
+        $db->query('UPDATE pm_usersdata SET money = 10000 WHERE uid = 14');
+        $db->query('UPDATE pm_myitem SET nums = 32766 WHERE uid = 14');
+        $contenders = race('shop', 'buy', [['item_id' => 24, 'quantity' => 1], ['item_id' => 24, 'quantity' => 1]], $shopper);
+        $accepted = array_values(array_filter($contenders, fn($r) => $r['success']));
+        $denied = array_values(array_filter($contenders, fn($r) => !$r['success']));
+        check(count($accepted) === 1 && count($denied) === 1 && $denied[0]['code'] === 400,
+            "Only one simultaneous purchase can fill the final inventory slot in SQL strict=$strict");
+        check((int)scalar('SELECT nums FROM pm_myitem WHERE uid = 14') === 32767
+            && (int)scalar('SELECT money FROM pm_usersdata WHERE uid = 14') === 9940,
+            "Inventory capacity race charges only for the delivered item in SQL strict=$strict");
+
+        $db->query('UPDATE pm_usersdata SET money = 10000 WHERE uid = 14');
+        $db->query('UPDATE pm_myitem SET nums = 10 WHERE uid = 14');
+        $failed_bulk = request('shop', 'buy', ['item_id' => 24, 'quantity' => 99],
+            $shopper + ['TSDM_TEST_FAIL_SQL' => 'UPDATE pm_myitem']);
+        check(!$failed_bulk['success'] && $failed_bulk['code'] === 500
+            && (int)scalar('SELECT nums FROM pm_myitem WHERE uid = 14') === 10
+            && (int)scalar('SELECT money FROM pm_usersdata WHERE uid = 14') === 10000,
+            "Failed bulk delivery rolls back the entire debit in SQL strict=$strict");
+    }
+
+    // Equipment slots reference a whole inventory row even when its quantity exceeds one.
+    $db->query("INSERT INTO pm_myitem (uid, itemid, nums) VALUES (14, '40', 2)");
+    $occupied_stack = $db->insert_id;
+    $db->query("INSERT INTO pm_mypm (id, uid, species_id, pmname, site, level, hp, state, equipmentid1) VALUES
+        (801, 14, 1, 'Equipment owner', 1, 50, 160, 1, $occupied_stack),
+        (802, 14, 1, 'Equipment observer', 2, 50, 160, 1, 0)");
+    foreach ([801 => true, 802 => false] as $pet_id => $equipped_here) {
+        $equipment_view = request('pokemon', 'equipment', null,
+            ['TSDM_TEST_UID' => '14', 'QUERY_STRING' => 'action=equipment&pokemon_id=' . $pet_id]);
+        $stack = $equipment_view['data']['owned_items'][0] ?? [];
+        check($equipment_view['success'] && ($stack['myitem_id'] ?? 0) === $occupied_stack
+            && $stack['quantity'] === 2 && $stack['equipped_count'] === 1 && $stack['available_count'] === 0
+            && $stack['is_equipped'] === $equipped_here,
+            "Occupied inventory row cannot be reused despite quantity 2: Pokemon $pet_id");
+    }
+    $unequipped_stack = request('pokemon', 'unequip_item', ['pokemon_id' => 801, 'slot_index' => 0], ['TSDM_TEST_UID' => '14']);
+    $equipment_view = request('pokemon', 'equipment', null,
+        ['TSDM_TEST_UID' => '14', 'QUERY_STRING' => 'action=equipment&pokemon_id=802']);
+    $stack = $equipment_view['data']['owned_items'][0] ?? [];
+    check($unequipped_stack['success'] && $equipment_view['success'] && $stack['quantity'] === 2
+        && $stack['equipped_count'] === 0 && $stack['available_count'] === 2 && $stack['is_equipped'] === false,
+        'Unequipping the row restores its full available quantity');
+
     if ($output = getenv('TSDM_API_CONTRACT_FIXTURES')) {
         file_put_contents($output, json_encode($contracts, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR));
     }

@@ -232,7 +232,7 @@ pub fn MyPokemon() -> Element {
                                             }
                                         },
                                         MyPokemonTab::Equipment => rsx! {
-                                            EquipmentTabContent { key: "equipment-{pm.id}", pokemon_id: pm.id, refresh_trigger }
+                                            EquipmentTabContent { key: "equipment-{pm.id}", pokemon_id: pm.id }
                                         },
                                         MyPokemonTab::Skills => rsx! {
                                             SkillsTabContent { key: "skills-{pm.id}", pokemon_id: pm.id, pokemon_level: pm.level as u32, refresh_trigger }
@@ -719,7 +719,7 @@ fn RadarChart(
 }
 
 #[component]
-fn EquipmentTabContent(pokemon_id: u64, refresh_trigger: Signal<u64>) -> Element {
+fn EquipmentTabContent(pokemon_id: u64) -> Element {
     let mut action_loading = use_signal(|| false);
     // 此组件按宠物 ID 重建，选择不能流入另一只宠物或下一次打开的装备页。
     let mut selected_item = use_signal(|| None::<SelectedItem>);
@@ -804,7 +804,6 @@ fn EquipmentTabContent(pokemon_id: u64, refresh_trigger: Signal<u64>) -> Element
                         slot: slot.clone(),
                         slot_index: idx as u32,
                         action_loading,
-                        refresh_trigger,
                         selected_item,
                     }
                 }
@@ -834,8 +833,7 @@ fn EquipmentTabContent(pokemon_id: u64, refresh_trigger: Signal<u64>) -> Element
                                     if let Some(from_slot) = item.slot_index {
                                         action_loading.set(true);
                                         let pid = pokemon_id;
-                                        let mut refresh = refresh_trigger;
-                                        spawn(async move {
+                                        dioxus_core::spawn_forever(async move {
                                             let api = NewApiClient::new();
                                             match api.unequip_item(pid, from_slot).await {
                                                 Ok(resp) => {
@@ -847,13 +845,12 @@ fn EquipmentTabContent(pokemon_id: u64, refresh_trigger: Signal<u64>) -> Element
                                                             resp.new_maxhp as i64,
                                                         );
                                                     }
-                                                    refresh += 1;
                                                 }
                                                 Err(e) => {
                                                     show_error(format!("卸下装备失败: {}", e));
                                                 }
                                             }
-                                            action_loading.set(false);
+                                            finish_equipment_action(action_loading);
                                         });
                                         *selected_item.write() = None;
                                     }
@@ -871,7 +868,6 @@ fn EquipmentTabContent(pokemon_id: u64, refresh_trigger: Signal<u64>) -> Element
                                 pokemon_id,
                                 owned_items: owned_items.clone(),
                                 action_loading,
-                                refresh_trigger,
                                 selected_item,
                             }
                         }
@@ -887,15 +883,13 @@ fn InventoryGridContent(
     owned_items: Vec<EquipmentItem>,
     action_loading: Signal<bool>,
     pokemon_id: u64,
-    refresh_trigger: Signal<u64>,
     selected_item: Signal<Option<SelectedItem>>,
 ) -> Element {
     let _pokemon_id = pokemon_id;
-    let _refresh_trigger = refresh_trigger;
 
     let available_items: Vec<EquipmentItem> = owned_items
         .into_iter()
-        .filter(|item| item.available_count > 0)
+        .filter(|item| item.quantity > 0)
         .collect();
 
     if available_items.is_empty() {
@@ -917,7 +911,6 @@ fn EquipmentSlotDraggable(
     slot_index: u32,
     action_loading: Signal<bool>,
     pokemon_id: u64,
-    refresh_trigger: Signal<u64>,
     selected_item: Signal<Option<SelectedItem>>,
 ) -> Element {
     let has_equipment = slot.item.is_some();
@@ -950,13 +943,12 @@ fn EquipmentSlotDraggable(
                 action_loading.set(true);
                 let pid = pokemon_id;
                 let myitem_id = item.myitem_id;
-                let mut refresh = refresh_trigger;
-                spawn(async move {
+                dioxus_core::spawn_forever(async move {
                     let api = NewApiClient::new();
                     if need_unequip_first {
                         if let Err(e) = api.unequip_item(pid, slot_index).await {
                             show_error(format!("卸下装备失败: {}", e));
-                            action_loading.set(false);
+                            finish_equipment_action(action_loading);
                             return;
                         }
                     }
@@ -969,13 +961,12 @@ fn EquipmentSlotDraggable(
                             if resp.new_maxhp > 0 {
                                 update_pokemon_hp(pid, resp.new_hp as i64, resp.new_maxhp as i64);
                             }
-                            refresh += 1;
                         }
                         Err(e) => {
                             show_error(format!("装备失败: {}", e));
                         }
                     }
-                    action_loading.set(false);
+                    finish_equipment_action(action_loading);
                 });
                 *selected_item.write() = None;
             } else if item.source_type == "equipment" {
@@ -985,19 +976,18 @@ fn EquipmentSlotDraggable(
                         action_loading.set(true);
                         let pid = pokemon_id;
                         let myitem_id = item.myitem_id;
-                        let mut refresh = refresh_trigger;
-                        spawn(async move {
+                        dioxus_core::spawn_forever(async move {
                             let api = NewApiClient::new();
                             if need_unequip_first {
                                 if let Err(e) = api.unequip_item(pid, slot_index).await {
                                     show_error(format!("卸下装备失败: {}", e));
-                                    action_loading.set(false);
+                                    finish_equipment_action(action_loading);
                                     return;
                                 }
                             }
                             if let Err(e) = api.unequip_item(pid, from_slot).await {
                                 show_error(format!("卸下装备失败: {}", e));
-                                action_loading.set(false);
+                                finish_equipment_action(action_loading);
                                 return;
                             }
                             match api
@@ -1013,13 +1003,12 @@ fn EquipmentSlotDraggable(
                                             resp.new_maxhp as i64,
                                         );
                                     }
-                                    refresh += 1;
                                 }
                                 Err(e) => {
                                     show_error(format!("装备失败: {}", e));
                                 }
                             }
-                            action_loading.set(false);
+                            finish_equipment_action(action_loading);
                         });
                     }
                 }
@@ -1095,13 +1084,22 @@ fn EquipmentSlotDraggable(
     }
 }
 
+fn finish_equipment_action(mut action_loading: Signal<bool>) {
+    // 卸装和装载可能是多个请求，失败时也要显示服务端已经完成的步骤。
+    refresh_pokemon_list();
+    if let Ok(mut loading) = action_loading.try_write() {
+        *loading = false;
+    }
+}
+
 #[component]
 fn InventoryItemCard(
     item: EquipmentItem,
     selected_item: Signal<Option<SelectedItem>>,
     action_loading: Signal<bool>,
 ) -> Element {
-    let is_equipped = item.is_equipped;
+    // 一条背包装备记录只能占一个槽位，叠加数量不代表可以重复装备。
+    let is_equipped = item.is_equipped || item.equipped_count > 0;
     let available_count = item.available_count;
 
     let item_for_click = item.clone();
@@ -1158,7 +1156,9 @@ fn InventoryItemCard(
                     }
                 }
                 if is_equipped {
-                    div { class: "equipped-badge", "已装备" }
+                    div { class: "equipped-badge",
+                        if item_for_display.is_equipped { "已装备" } else { "其他宠物使用中" }
+                    }
                 }
                 if available_count > 1 {
                     div { class: "item-count-badge", "{available_count}" }
@@ -1225,6 +1225,8 @@ fn EquipmentTooltipInline(item: EquipmentItem, left: f64, bottom: f64, width: f6
             }
             if item.is_equipped {
                 div { class: "tooltip-equipped-hint", "⚠ 此装备已被装备" }
+            } else if item.equipped_count > 0 {
+                div { class: "tooltip-equipped-hint", "⚠ 其他宠物使用中，请先卸下装备" }
             }
         }
     }

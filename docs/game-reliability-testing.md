@@ -6,11 +6,15 @@
 |------|-------------------|--------------|
 | Battle reconnect | An interrupted action retains its request ID; recovery reads the current battle; retry replays a committed result without repeating it. | PHP replay tests, MariaDB concurrency, Chromium lost-response scenarios |
 | Database transactions | Money, inventory, HP, PP, events and action receipts commit or roll back together. | Independent PHP CGI processes against MariaDB |
+| Purchase capacity | A bulk purchase writes its quantity once. Full or invalid inventory rejects the whole purchase without keeping the debit, including in non-strict SQL mode. | Both MariaDB SQL modes, final-capacity races and injected failures |
 | Player mutations | Concurrent starter claims, item uses, releases and equipment changes preserve account and inventory limits. Failed writes roll back all effects. | MariaDB request races and injected database failures |
 | Read repairs | A stale list or detail request cannot replace newer healing, battle damage, state or equipment-dependent HP values. Uncontested reads still repair invalid legacy values. | PHP snapshot regressions and MariaDB barriers around real CGI reads |
 | Admin filters | All conditions combine regardless of order. Names resolve to matching IDs, exclusions retain their meaning, and Chinese sale flags match the selected value. | Actual admin dispatch and SQL against MariaDB |
 | Admin inventory | Grants and edits preserve valid owners, item types, quantity limits and equipped references. Concurrent grants serialize, and failed writes roll back. | PHP integrity checks and MariaDB transactions |
 | Maintenance | Either closed switch blocks player operations; named staff, authorized administration and public announcements retain access. | Actual router regressions and PHP CGI requests against MariaDB |
+| Legacy announcements | The first config, admin or topics read migrates legacy notices. An explicitly cleared list stays empty; concurrent readers cannot overwrite a new administrator notice. | Admin input round trips and MariaDB barriers before migration inserts |
+| Forum topics | The preview checks native forum permissions, passwords, paid access and group membership before reading thread metadata. Public announcements remain visible. | Actual topics handler, isolated forum tables and optional native Discuz permission helpers |
+| Avatar compatibility | Standard and legacy two-digit UID filenames resolve in priority order. Unsupported sizes and missing files use safe fallbacks. | Actual avatar routes against isolated temporary forum directories |
 | Skills and evolution | Concurrent learning preserves four unique skills. Learning and forgetting respect battles that start while waiting for a lock; the active Pokemon cannot evolve during battle. | MariaDB races and PHP mutation regressions |
 | Experience rewards | Experience beyond the last threshold remains capped at level 100. Large rewards can reach the cap; responses match the level stored for legacy pets. Explicit zero gold remains zero. | Real experience helper and reward handler regression |
 | Random Pokemon state | State, experience, HP and timestamps update together with valid SQL. Updates reject active battles and roll back failed writes. | Deterministic state transitions against MariaDB |
@@ -21,6 +25,7 @@
 | Inventory and storage | Item search runs before pagination; storage filters and ordering apply to the whole collection; hidden selections cannot be released. | PHP search tests, Rust filter tests, Chromium collections over 60 entries |
 | Touch and keyboard items | Opening an item displays its details; only explicit confirmation consumes it; pending actions prevent double submission. | Chromium touch, Enter/Space and pending-request checks |
 | Player navigation | Pending purchases, starter claims and skill changes cannot be submitted repeatedly. Switching pets resets equipment selection; equipment and skill load errors can retry. Profile and pet refreshes survive navigation, and old responses cannot replace fresh data. | Chromium player action scenarios |
+| Navigation and equipment | Main navigation supports keyboard use, toasts expire across page changes, and badge reads cannot undo newer changes. Occupied inventory rows cannot be selected for reuse. Equipment operations finish after navigation and refresh even after a partially completed replacement. | Chromium delayed-request, keyboard and navigation scenarios |
 | Encounter and damage rules | Encounters use exact map membership and reject disabled maps. Current rules respect type immunities and resistance; legacy rules retain their original behavior. | PHP encounter, endpoint and deterministic battle-core regression tests |
 
 The server protocol, compatibility behavior and retention rules are described in
@@ -56,6 +61,7 @@ php scripts/test/live_database.php
 php scripts/test/pokemon_state_database.php
 php scripts/test/admin_filter_database.php
 php scripts/test/admin_item_database.php
+TSDM_TOPICS_REAL_DB=1 php scripts/test/topics_permissions.php
 cargo test -p _utils --test php_api_contract --locked -- --ignored
 ```
 
@@ -82,6 +88,19 @@ The admin suites use independent `tsdm_test_filters_<random>` and
 filter queries, inventory transactions, equipped references and injected failure
 rollback. The filter fixtures include combined conditions in both orders, names
 shared by multiple rows, unmatched names and invalid operators.
+
+The topics suite runs without a database by default; `TSDM_TOPICS_REAL_DB=1`
+adds an isolated `tsdm_test_topics_<random>` database. Table adapters supply the
+Discuz boundary. To also exercise unmodified native helpers from a local Discuz
+checkout, set `TSDM_DISCUZ_FORUMPERM` to `helper_forumperm.php` and
+`TSDM_DISCUZ_GROUP` to `function_group.php`. These optional checks do not install
+the forum or verify its login flow.
+
+Forums using legacy `formulaperm` rules are omitted from the game preview for
+non-moderators because that native evaluator can exit with an HTML message.
+Readers can open the forum directly to use its normal permission flow. Native
+X5 rules stored in `viewperm` are evaluated by Discuz's own permission helper.
+Configured public announcements are unaffected by this preview restriction.
 
 ## Seed and upgrade checks
 

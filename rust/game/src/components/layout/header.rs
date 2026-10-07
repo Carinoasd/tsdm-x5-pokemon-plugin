@@ -15,7 +15,9 @@ pub fn Header() -> Element {
             div { class: "header-inner",
                 // 左侧 Logo：精灵球 + 品牌名
                 div { class: "header-logo",
-                    a {
+                    button {
+                        r#type: "button",
+                        style: "border: 0; background: transparent; padding: 0; font: inherit; color: inherit;",
                         class: "logo-link",
                         onclick: move |_| *CURRENT_PAGE.write() = Page::Home,
                         img {
@@ -29,22 +31,30 @@ pub fn Header() -> Element {
 
                 // 右侧导航 — 设计稿: 个人中心 商店 宠物中心 野外冒险
                 nav { class: "header-nav",
-                    a {
+                    button {
+                        r#type: "button",
+                        style: "border: 0; background: transparent;",
                         class: if *CURRENT_PAGE.read() == Page::MyPokemon { "nav-link active" } else { "nav-link" },
                         onclick: move |_| *CURRENT_PAGE.write() = Page::MyPokemon,
                         "个人中心"
                     }
-                    a {
+                    button {
+                        r#type: "button",
+                        style: "border: 0; background: transparent;",
                         class: if *CURRENT_PAGE.read() == Page::Shop { "nav-link active" } else { "nav-link" },
                         onclick: move |_| *CURRENT_PAGE.write() = Page::Shop,
                         "商店"
                     }
-                    a {
+                    button {
+                        r#type: "button",
+                        style: "border: 0; background: transparent;",
                         class: if *CURRENT_PAGE.read() == Page::PokemonCenter { "nav-link active" } else { "nav-link" },
                         onclick: move |_| *CURRENT_PAGE.write() = Page::PokemonCenter,
                         "宠物中心"
                     }
-                    a {
+                    button {
+                        r#type: "button",
+                        style: "border: 0; background: transparent;",
                         class: if *CURRENT_PAGE.read() == Page::Adventure { "nav-link active" } else { "nav-link" },
                         onclick: move |_| *CURRENT_PAGE.write() = Page::Adventure,
                         "野外冒险"

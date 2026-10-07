@@ -249,7 +249,7 @@ pub struct EquipmentItem {
     /// 已装备数量 (仅 owned_items 有)
     #[serde(default)]
     pub equipped_count: u32,
-    /// 可用数量 = 总数量 - 已装备数量 (仅 owned_items 有)
+    /// 可用数量；该背包记录已被任何宠物占用时为 0，否则为总数量 (仅 owned_items 有)
     #[serde(default)]
     pub available_count: u32,
     /// 是否已被当前宝可梦装备 (仅 owned_items 有)

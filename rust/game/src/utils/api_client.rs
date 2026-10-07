@@ -337,7 +337,7 @@ impl NewApiClient {
         myitem_id: u64,
         slot_index: Option<i32>,
     ) -> Result<EquipItemResponse> {
-        self.post(
+        self.player_mutation(self.post(
             "pokemon",
             "equip_item",
             "",
@@ -346,7 +346,7 @@ impl NewApiClient {
                 myitem_id,
                 slot_index,
             },
-        )
+        ))
         .await
     }
 
@@ -356,7 +356,7 @@ impl NewApiClient {
         pokemon_id: u64,
         slot_index: u32,
     ) -> Result<UnequipItemResponse> {
-        self.post(
+        self.player_mutation(self.post(
             "pokemon",
             "unequip_item",
             "",
@@ -364,7 +364,7 @@ impl NewApiClient {
                 pokemon_id,
                 slot_index,
             },
-        )
+        ))
         .await
     }
 
@@ -772,18 +772,18 @@ impl NewApiClient {
 
     /// 刷新（hide=false，重新同步宠物数据并显示）或隐藏（hide=true）帖子宠物徽章
     pub async fn refresh_forum_badge(&self, hide: bool) -> Result<BadgeStatusResponse> {
-        self.post(
+        self.player_mutation(self.post(
             "user",
             "refresh_badge",
             "",
             &serde_json::json!({ "hide": hide }),
-        )
+        ))
         .await
     }
 
     /// 查询帖子宠物徽章当前是否隐藏
     pub async fn get_badge_status(&self) -> Result<BadgeStatusResponse> {
-        self.get("user", "badge_status", "").await
+        battle_timeout(self.get("user", "badge_status", "")).await?
     }
 
     /// 使用物品

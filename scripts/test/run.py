@@ -433,6 +433,8 @@ def main():
     test_php_regression("Pet read repair concurrency regression", "pet_read_repairs.php")
     test_php_regression("Admin inventory integrity regression", "admin_item_integrity.php")
     test_php_regression("Game maintenance route regression", "game_maintenance.php")
+    test_php_regression("Avatar route compatibility regression", "avatar_routes.php")
+    test_php_regression("Forum topic permission regression", "topics_permissions.php")
 
     print("\n" + "=" * 60)
     print(f"Results: {PASS} passed, {FAIL} failed, {WARN} warnings")

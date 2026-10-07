@@ -26,6 +26,9 @@ rename failures, healing state, account load retries, delayed balance updates,
 and changing item targets during loading without duplicate item use. It also checks
 equipment selection across Pokemon, retrying equipment and skill reads, duplicate
 skill mutations, and pet-list updates that outlive navigation or arrive out of order.
+It checks keyboard navigation, badge visibility during delayed reads, notification
+expiration after navigation, and completing equipment changes after leaving the page.
+Equipment stacks already in use remain visible and cannot displace another item.
 
 Screenshots and Playwright traces are written to the ignored `artifacts/`
 directory. Set `PLAYWRIGHT_BROWSERS_PATH` if Chromium is installed in a custom

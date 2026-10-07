@@ -2,10 +2,11 @@
 
 function get_global_config()
 {
+  require_once __DIR__ . '/../../announcements.php';
+  $news_announcements = pm_get_news_announcements();
   // 兜底：确保必要的配置项存在
   $required_configs = [
     // 基础设定
-    'news_announcements' => '[]',
     'is_open' => '1',  // boolean: 1 = true, 0 = false
     'version' => 'Unknown',
     'ann_title' => '',
@@ -85,6 +86,7 @@ function get_global_config()
       }
       $item[$query['key']] = $val;
     }
+    $item['news_announcements'] = $news_announcements;
     return [$item];
   } else {
     $json_ret = [];

@@ -20,6 +20,17 @@ class DB
     public static function table($name) { return $name; }
     public static function query($sql, $silent = false)
     {
+        if (getenv('TSDM_TEST_PAUSE_NEWS_INSERT') === '1'
+            && str_starts_with($sql, 'INSERT IGNORE INTO pm_config') && str_contains($sql, 'news_announcements')) {
+            $ready = getenv('TSDM_TEST_READY');
+            file_put_contents($ready, 'announcement snapshot');
+            $deadline = microtime(true) + 15;
+            while (!is_file($ready . '.resume')) {
+                if (microtime(true) > $deadline) throw new RuntimeException('Announcement barrier timed out');
+                usleep(10000);
+                clearstatcache();
+            }
+        }
         // Signal immediately before the account lock, allowing the parent to
         // prove that both independent database connections reached the race.
         $at_lock = stripos($sql, 'FOR UPDATE') !== false
