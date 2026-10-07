@@ -235,8 +235,9 @@ function api_get_pet_exp_level($no_or_data, $exp)
 
     $level = 0;
     foreach ($no_or_data as $lv => $v) {
+        // Past the final threshold, keep the last level instead of returning 0.
+        $level = $lv;
         if ($exp <= $v) {
-            $level = $lv;
             if ($exp == $v && !($lv == $v && $v < 1)) {
                 ++$level;
             }

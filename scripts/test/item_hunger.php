@@ -59,6 +59,7 @@ class DB
     public static function fetch_first($sql)
     {
         $sql = preg_replace('/\s+/', ' ', trim($sql));
+        if ($sql === 'SELECT * FROM pm_usersdata WHERE uid = 7 FOR UPDATE') return ['uid' => 7, 'npcid' => 0];
         if ($sql === 'SELECT * FROM pm_itemdata WHERE id = 42') return self::$item;
         if ($sql === "SELECT * FROM pm_myitem WHERE uid = 7 AND itemid = '42'") return self::$stock;
         if ($sql === 'SELECT * FROM pm_mypm WHERE id = 1') return self::$pet;
@@ -79,6 +80,7 @@ class DB
     public static function query($sql)
     {
         $sql = preg_replace('/\s+/', ' ', trim($sql));
+        if (in_array($sql, ['START TRANSACTION', 'COMMIT', 'ROLLBACK'], true)) return;
         self::$writes[] = $sql;
         if (preg_match('/^UPDATE pm_mypm SET hp = (\d+)(?:, state = (\d+), statetime = (\d+))? WHERE id = 1$/', $sql, $m)) {
             self::$pet['hp'] = (int) $m[1];
@@ -97,7 +99,7 @@ $GLOBALS['_G'] = ['uid' => 7];
 function fixture($state, $hp = 10, $type = 1, $module = 'hunger')
 {
     $GLOBALS['input'] = ['item_id' => 42, 'pokemon_id' => 1];
-    DB::$pet = ['id' => 1, 'uid' => 7, 'species_id' => 1, 'nickname' => 'Test', 'hp' => $hp, 'level' => 50, 'hpg' => 20, 'hpn' => 0, 'state' => $state, 'is_shiny' => 0, 'equipmentid1' => 9, 'equipmentid2' => 0, 'equipmentid3' => 0, 'equipmentid4' => 0];
+    DB::$pet = ['id' => 1, 'uid' => 7, 'site' => 1, 'species_id' => 1, 'nickname' => 'Test', 'hp' => $hp, 'level' => 50, 'hpg' => 20, 'hpn' => 0, 'state' => $state, 'is_shiny' => 0, 'equipmentid1' => 9, 'equipmentid2' => 0, 'equipmentid3' => 0, 'equipmentid4' => 0];
     // The seeded milk selects hunger through sitemname, not module.
     DB::$item = ['id' => 42, 'name' => 'Milk', 'type' => $type, 'module' => '', 'sitemname' => $module, 'tpname' => 'yypg', 'effects' => '{"hp":50}'];
     DB::$stock = ['id' => 2, 'uid' => 7, 'itemid' => 42, 'nums' => 2];

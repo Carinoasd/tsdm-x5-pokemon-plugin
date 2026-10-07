@@ -212,6 +212,67 @@ $state['sides']['enemy'][0]['status'] = ['code' => 'freeze', 'turns_left' => 3];
 $result = battle_core_apply_action($state, ['type' => 'move', 'skill' => turn_move(), 'enemy_move' => turn_move()], $max_rng);
 check_turn(count(turn_events($result, 'counter')) === 1 && !turn_events($result, 'status_prevent'), 'Version-one battles retain their legacy counter behavior');
 
+// Modern type directions follow Pokemon Showdown's typechart.ts damageTaken:
+// 0 = neutral, 1 = weakness, 2 = resistance, 3 = immunity (sim/dex-data.ts).
+// https://github.com/smogon/pokemon-showdown/blob/master/data/typechart.ts
+foreach ([['妖精', '龙', 2.0], ['钢', '毒', 1.0], ['龙', '妖精', 0.0], ['毒', '钢', 0.0],
+    ['格斗', '毒', 0.5], ['格斗', '虫', 0.5], ['火', '岩石', 0.5]] as $case) {
+    check_turn(battle_core_type_effectiveness($case[0], [$case[1]]) === $case[2], "Modern chart direction $case[0] -> $case[1]");
+}
+foreach ([['普通', '幽灵'], ['格斗', '幽灵'], ['毒', '钢'], ['地面', '飞行'],
+    ['电', '地面'], ['超能', '恶'], ['幽灵', '普通'], ['龙', '妖精']] as $pair) {
+    $state = turn_state();
+    $state['sides']['enemy'][0]['types'] = [$pair[1]];
+    $move = array_merge(turn_move(), ['type' => $pair[0]]);
+    $damage = battle_core_calc_damage($state, $state['sides']['ally'][0], $state['sides']['enemy'][0], $move, $max_rng);
+    check_turn($damage['effectiveness'] === 0.0 && $damage['amount'] === 0, "Modern immunity deals zero damage: $pair[0] -> $pair[1]");
+}
+$state = turn_state();
+$state['sides']['enemy'][0]['types'] = ['飞行', '地面'];
+$electric = array_merge(turn_move(), ['type' => '电']);
+$damage = battle_core_calc_damage($state, $state['sides']['ally'][0], $state['sides']['enemy'][0], $electric, $max_rng);
+check_turn($damage['effectiveness'] === 0.0 && $damage['amount'] === 0, 'Dual-type weakness does not cancel immunity');
+
+$poison_hit = ['code' => 'status_inflict', 'kind' => 'move', 'hooks' => ['on_hit'],
+    'params' => ['status' => 'poison', 'chance' => 100], 'version' => 1];
+check_turn(battle_core_validate_effect($poison_hit) === true, 'Immunity regression uses a supported secondary effect');
+foreach (['ally', 'enemy'] as $actor_side) {
+    foreach ([1, 100] as $hp) {
+        $state = turn_state(60, 60);
+        $target_side = $actor_side === 'ally' ? 'enemy' : 'ally';
+        $state['sides'][$target_side][0]['types'] = ['幽灵'];
+        $state['sides'][$target_side][0]['hp'] = $hp;
+        $action = ['type' => 'move', 'skill' => turn_move(0), 'enemy_move' => turn_move(0)];
+        $action[$actor_side === 'ally' ? 'skill' : 'enemy_move'] = turn_move(40, [$poison_hit]);
+        $result = battle_core_apply_action($state, $action, $max_rng);
+        check_turn($result['state']['sides'][$target_side][0]['hp'] === $hp,
+            "$actor_side immune hit preserves target HP=$hp");
+        check_turn($result['state']['phase'] === 'active' && !turn_events($result, 'faint') && !turn_events($result, 'battle_end'),
+            "$actor_side immune hit cannot decide the battle at HP=$hp");
+        check_turn($result['state']['sides'][$target_side][0]['status'] === null && !turn_events($result, 'status_inflict'),
+            "$actor_side immune hit cannot apply its secondary poison at HP=$hp");
+        check_turn(!$result['pp_refund'], "$actor_side immunity preserves consumed PP at HP=$hp");
+    }
+}
+
+// Explicit v1 formula compatibility keeps its original chart and minimum damage.
+foreach ([['普通', '幽灵'], ['妖精', '龙'], ['钢', '毒']] as $pair) {
+    $state = turn_state();
+    $state['rules_version'] = 1;
+    $state['sides']['enemy'][0]['types'] = [$pair[1]];
+    $move = array_merge(turn_move(), ['type' => $pair[0]]);
+    $damage = battle_core_calc_damage($state, $state['sides']['ally'][0], $state['sides']['enemy'][0], $move, $max_rng);
+    check_turn($damage['effectiveness'] === 0.0 && $damage['amount'] === 1, "Version-one damage stays compatible: $pair[0] -> $pair[1]");
+}
+foreach ([['格斗', '毒'], ['格斗', '虫'], ['火', '岩石']] as $pair) {
+    $state = turn_state();
+    $state['rules_version'] = 1;
+    $state['sides']['enemy'][0]['types'] = [$pair[1]];
+    $move = array_merge(turn_move(), ['type' => $pair[0]]);
+    $damage = battle_core_calc_damage($state, $state['sides']['ally'][0], $state['sides']['enemy'][0], $move, $max_rng);
+    check_turn($damage['effectiveness'] === 1.0 && $damage['amount'] > 0, "Version-one resistance stays compatible: $pair[0] -> $pair[1]");
+}
+
 if ($failures) {
     echo "$failures of $checks battle turn regression assertions failed\n";
     exit(1);

@@ -6,10 +6,18 @@
 |------|-------------------|--------------|
 | Battle reconnect | An interrupted action retains its request ID; recovery reads the current battle; retry replays a committed result without repeating it. | PHP replay tests, MariaDB concurrency, Chromium lost-response scenarios |
 | Database transactions | Money, inventory, HP, PP, events and action receipts commit or roll back together. | Independent PHP CGI processes against MariaDB |
+| Player mutations | Concurrent starter claims, item uses, releases and equipment changes preserve account and inventory limits. Failed writes roll back all effects. | MariaDB request races and injected database failures |
+| Skills and evolution | Concurrent learning preserves four unique skills. Learning and forgetting respect battles that start while waiting for a lock; the active Pokemon cannot evolve during battle. | MariaDB races and PHP mutation regressions |
+| Experience rewards | Experience beyond the last threshold remains capped at level 100. Large rewards can reach the cap; responses match the level stored for legacy pets. | Real experience helper and reward handler regression |
+| Random Pokemon state | State, experience, HP and timestamps update together with valid SQL. Updates reject active battles and roll back failed writes. | Deterministic state transitions against MariaDB |
+| Center treatment | Healing and abandoning a battle commit together; reconnect cannot restore the abandoned battle. | MariaDB strict SQL mode and Chromium success/failure scenarios |
+| Names and input | Unicode names use character limits, quotes round-trip unchanged, malformed JSON returns 400, and unexpected errors hide server details. | Real PHP requests and persisted MariaDB values |
 | PHP/Rust contracts | Real PHP responses deserialize into the Rust models used by the game. | Generated fixtures decoded by the Rust integration test |
 | Battle reports | Players can open persisted turns and copy the existing BBCode report. | PHP event grouping and Chromium report/retry/clipboard scenarios |
 | Inventory and storage | Item search runs before pagination; storage filters and ordering apply to the whole collection; hidden selections cannot be released. | PHP search tests, Rust filter tests, Chromium collections over 60 entries |
 | Touch and keyboard items | Opening an item displays its details; only explicit confirmation consumes it; pending actions prevent double submission. | Chromium touch, Enter/Space and pending-request checks |
+| Player navigation | Pending purchases and starter claims cannot be submitted repeatedly; switching pets loads matching details; profile errors can retry and old responses cannot replace fresh data. | Chromium player action scenarios |
+| Encounter and damage rules | Encounters use exact map membership and reject disabled maps. Current rules respect type immunities and resistance; legacy rules retain their original behavior. | PHP encounter, endpoint and deterministic battle-core regression tests |
 
 The server protocol, compatibility behavior and retention rules are described in
 [Battle request replay](battle-request-replay.md).
@@ -41,6 +49,7 @@ export TSDM_PHP_CGI=php-cgi
 mkdir -p target
 export TSDM_API_CONTRACT_FIXTURES="$PWD/target/api-contract-fixtures.json"
 php scripts/test/live_database.php
+php scripts/test/pokemon_state_database.php
 cargo test -p _utils --test php_api_contract --locked -- --ignored
 ```
 
@@ -58,11 +67,42 @@ The CI job repeats these checks with an isolated MariaDB service and passes the
 fresh PHP response file directly to Rust. The contract test is explicitly ignored
 in the ordinary Rust suite because it requires those generated responses.
 
+The random-state suite uses its own `tsdm_test_state_<random>` database and the
+actual state handler with fixed random seeds. It checks persisted state changes,
+battle restrictions, owner isolation and rollback after an injected write failure.
+
+## Seed and upgrade checks
+
+With the same `TSDM_DB_*` environment variables, run:
+
+```sh
+php scripts/test/seed_upgrade_database.php
+```
+
+This test requires MariaDB and PHP with `mysqli`; it does not require PHP CGI,
+Rust or an installed forum. It creates two independent databases named
+`tsdm_test_seed_<random>`, records ownership only after successful creation, and
+removes only those databases in its cleanup block.
+
+The suite imports all 14 Docker seed files in order, including the minimal forum
+tables needed by theme and plugin registration. It checks game references,
+callable item modules and actual item evolution results. Separate populated
+fixtures exercise complete and partial X3 migrations, preservation of already
+migrated values, and repeated migration runs. It also verifies that the targeted
+item evolution repair restores original seed rows, leaves customized rules
+unchanged, and can be run again without changes.
+
+This checks SQL and game data behavior; it does not install Discuz or test forum
+authentication. For existing sites affected by the original item evolution seed,
+see [Seed data repairs](../migrations/seed-fixes/README.md).
+
 ## Browser checks
 
 See [Game browser regressions](../scripts/browser/README.md). These tests load the
-actual compiled game WASM with an isolated HTTP fixture server. They cover UI
-behavior; the MariaDB suite separately covers server transaction behavior.
+actual compiled game WASM with an isolated HTTP fixture server. The optional
+live suite connects that WASM to the real PHP routes and MariaDB, then checks
+purchases, item use, battle turns, reconnect and reports against stored values.
+Both suites supply the Discuz login boundary and use no production player data.
 
 The repository's complete Sass build requires the maintainer's ignored
 `styles-core/variables` dependency. When it is unavailable, preserve the shipped

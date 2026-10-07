@@ -743,7 +743,8 @@ function api_rename_pokemon()
         api_error('Missing parameter: name', 400);
     }
 
-    $new_name = validate_string($input['name'], 'name', 20);
+    $new_name = trim(validate_string($input['name'], 'name', 20));
+    if ($new_name === '') api_error('昵称不能为空', 400);
 
     global $_G;
     $uid = validate_uid($_G['uid']);
@@ -751,7 +752,7 @@ function api_rename_pokemon()
     // 更新名称
     DB::query(pm_sql(
         "UPDATE " . pm_table('pm_mypm') . " SET nickname = %s WHERE id = %d AND uid = %d",
-        addslashes($new_name),
+        $new_name,
         $pet_id,
         $uid
     ));
@@ -777,55 +778,54 @@ function api_release_pokemon()
     global $_G;
     $uid = validate_uid($_G['uid']);
 
-    // 验证宠物归属
-    $pm = DB::fetch_first(pm_sql(
-        "SELECT id, site, state, hp FROM " . pm_table('pm_mypm') . " WHERE id = %d AND uid = %d",
-        $pet_id,
-        $uid
-    ));
-
-    if (!$pm) {
-        api_error('Pokemon not found', 404);
-    }
-
-    // 检查是否为濒危状态
-    if ((int)$pm['state'] === 0) {
-        api_error('濒危状态的宠物无法放生', 400);
-    }
-
-    // 检查血量是否为0
-    if ((int)$pm['hp'] <= 0) {
-        api_error('血量为0的宠物无法放生', 400);
-    }
-
-    // 检查用户是否在战斗中且这是首位宠物
-    $user_data = api_my_usersdata($uid);
-    if (!empty($user_data['npcid']) && $user_data['npcid'] > 0 && (int)$pm['site'] === 1) {
-        api_error('战斗中的首位宠物无法放生', 400);
-    }
-
-    // 检查是否为最后一个宠物
-    $total_count = DB::result_first(pm_sql("SELECT COUNT(*) FROM " . pm_table('pm_mypm') . " WHERE uid = %d", $uid));
-    if ($total_count <= 1) {
-        api_error('无法放生最后一只宠物，您至少需要保留一只宠物', 400);
-    }
-
-    // 如果放生的是首位宠物，需要自动指定新的首位
-    if ((int)$pm['site'] === 1) {
-        // 找到下一个可用的宠物作为首位
-        $next_first = DB::fetch_first(pm_sql(
-            "SELECT id FROM " . pm_table('pm_mypm') . " WHERE uid = %d AND id != %d ORDER BY site ASC, id ASC LIMIT 1",
-            $uid,
-            $pet_id
+    // Serialize with team changes, captures and purchases. The count, active
+    // slot and battle status must all describe the same committed account state.
+    DB::query("START TRANSACTION");
+    try {
+        $user_data = DB::fetch_first(pm_sql(
+            "SELECT uid, npcid FROM " . pm_table('pm_usersdata') . " WHERE uid = %d FOR UPDATE", $uid
         ));
-        if ($next_first) {
-            DB::query(pm_sql("UPDATE " . pm_table('pm_mypm') . " SET site = 1 WHERE id = %d", intval($next_first['id'])));
+        if (!$user_data) {
+            api_my_usersdata($uid);
+            $user_data = DB::fetch_first(pm_sql(
+                "SELECT uid, npcid FROM " . pm_table('pm_usersdata') . " WHERE uid = %d FOR UPDATE", $uid
+            ));
+            if (!$user_data) pm_abort_battle_transaction('User state not found', 500);
         }
-    }
 
-    // 删除宠物及技能
-    DB::query(pm_sql("DELETE FROM " . pm_table('pm_mypm') . " WHERE id = %d AND uid = %d", $pet_id, $uid));
-    DB::query(pm_sql("DELETE FROM " . pm_table('pm_myskill') . " WHERE petid = %d AND uid = %d", $pet_id, $uid));
+        $pm = DB::fetch_first(pm_sql(
+            "SELECT id, site, state, hp FROM " . pm_table('pm_mypm') . " WHERE id = %d AND uid = %d FOR UPDATE",
+            $pet_id, $uid
+        ));
+        if (!$pm) pm_abort_battle_transaction('Pokemon not found', 404);
+        if ((int)$pm['state'] === 0) pm_abort_battle_transaction('濒危状态的宠物无法放生', 400);
+        if ((int)$pm['hp'] <= 0) pm_abort_battle_transaction('血量为0的宠物无法放生', 400);
+        if (!empty($user_data['npcid']) && $user_data['npcid'] > 0 && (int)$pm['site'] === 1) {
+            pm_abort_battle_transaction('战斗中的首位宠物无法放生', 400);
+        }
+
+        $total_count = DB::result_first(pm_sql("SELECT COUNT(*) FROM " . pm_table('pm_mypm') . " WHERE uid = %d", $uid));
+        if ($total_count <= 1) {
+            pm_abort_battle_transaction('无法放生最后一只宠物，您至少需要保留一只宠物', 400);
+        }
+
+        if ((int)$pm['site'] === 1) {
+            $next_first = DB::fetch_first(pm_sql(
+                "SELECT id FROM " . pm_table('pm_mypm') . " WHERE uid = %d AND id != %d ORDER BY site ASC, id ASC LIMIT 1 FOR UPDATE",
+                $uid, $pet_id
+            ));
+            if ($next_first) {
+                DB::query(pm_sql("UPDATE " . pm_table('pm_mypm') . " SET site = 1 WHERE id = %d AND uid = %d", intval($next_first['id']), $uid));
+            }
+        }
+
+        DB::query(pm_sql("DELETE FROM " . pm_table('pm_mypm') . " WHERE id = %d AND uid = %d", $pet_id, $uid));
+        DB::query(pm_sql("DELETE FROM " . pm_table('pm_myskill') . " WHERE petid = %d AND uid = %d", $pet_id, $uid));
+        DB::query("COMMIT");
+    } catch (Throwable $error) {
+        DB::query("ROLLBACK");
+        throw $error;
+    }
 
     api_success(['message' => 'Pokemon released successfully']);
 }
@@ -1040,59 +1040,78 @@ function api_forget_skill()
     global $_G;
     $uid = validate_uid($_G['uid']);
 
-    // 检查战斗状态
-    $user_data = DB::fetch_first(pm_sql("SELECT npcid FROM " . pm_table('pm_usersdata') . " WHERE uid = %d", $uid));
+    $abort = function ($message, $code = 400, $debug = null, $error_code = null) {
+        DB::query('ROLLBACK');
+        api_error($message, $code, $debug, $error_code);
+    };
+    DB::query('START TRANSACTION');
+    try {
+        // 与战斗、进化、放生共用账户锁；等待后重新读取当前战斗状态。
+        $user_data = DB::fetch_first(pm_sql("SELECT uid, npcid FROM " . pm_table('pm_usersdata') . " WHERE uid = %d FOR UPDATE", $uid));
+        if (!$user_data) {
+            api_my_usersdata($uid);
+            $user_data = DB::fetch_first(pm_sql("SELECT uid, npcid FROM " . pm_table('pm_usersdata') . " WHERE uid = %d FOR UPDATE", $uid));
+            if (!$user_data) $abort('User state not found', 500);
+        }
 
-    if ($user_data && !empty($user_data['npcid']) && $user_data['npcid'] > 0) {
-        api_error('战斗中不能遗忘技能', 400, null, 'skill_battle_restricted');
+        if ($user_data && !empty($user_data['npcid']) && $user_data['npcid'] > 0) {
+            $abort('战斗中不能遗忘技能', 400, null, 'skill_battle_restricted');
+        }
+
+        // 验证宠物归属
+        $pm = DB::fetch_first(pm_sql(
+            "SELECT * FROM " . pm_table('pm_mypm') . " WHERE id = %d AND uid = %d FOR UPDATE",
+            $pet_id,
+            $uid
+        ));
+
+        if (!$pm) {
+            $abort('Pokemon not found', 404);
+        }
+
+        // 检查宠物是否有这个技能
+        $myskill = DB::fetch_first(pm_sql(
+            "SELECT * FROM " . pm_table('pm_myskill') . "
+    WHERE petid=%d AND skillid=%d AND uid=%d",
+            $pet_id,
+            $skill_id,
+            $uid
+        ));
+
+        if (!$myskill) {
+            $abort('该宠物没有学会这个技能', 404, null, 'skill_not_learned');
+        }
+
+        // 检查 PP 值是否已满（必须满 PP 才能遗忘）
+        $current_pp = (int) $myskill['skillnum'];
+        $skill_info = DB::fetch_first(pm_sql("SELECT max_uses FROM " . pm_table('pm_skill') . " WHERE id = %d", $skill_id));
+        $max_pp = $skill_info ? (int) $skill_info['max_uses'] : 0;
+
+        if ($current_pp < $max_pp) {
+            $abort(
+                "技能PP未满，无法遗忘（当前PP：{$current_pp}/{$max_pp}，需先用PP恢复道具补满后才能遗忘）",
+                400,
+                null,
+                'skill_pp_not_full'
+            );
+        }
+
+        // 删除技能
+        DB::query(pm_sql(
+            "DELETE FROM " . pm_table('pm_myskill') . "
+    WHERE petid=%d AND skillid=%d AND uid=%d",
+            $pet_id,
+            $skill_id,
+            $uid
+        ));
+
+        $response = ['message' => '技能遗忘成功'];
+        DB::query('COMMIT');
+    } catch (Throwable $error) {
+        DB::query('ROLLBACK');
+        throw $error;
     }
-
-    // 验证宠物归属
-    $pm = DB::fetch_first(pm_sql(
-        "SELECT * FROM " . pm_table('pm_mypm') . " WHERE id = %d AND uid = %d",
-        $pet_id,
-        $uid
-    ));
-
-    if (!$pm) {
-        api_error('Pokemon not found', 404);
-    }
-
-    // 检查宠物是否有这个技能
-    $myskill = DB::fetch_first(pm_sql(
-        "SELECT * FROM " . pm_table('pm_myskill') . "
-WHERE petid=%d AND skillid=%d",
-        $pet_id,
-        $skill_id
-    ));
-
-    if (!$myskill) {
-        api_error('该宠物没有学会这个技能', 404, null, 'skill_not_learned');
-    }
-
-    // 检查 PP 值是否已满（必须满 PP 才能遗忘）
-    $current_pp = (int) $myskill['skillnum'];
-    $skill_info = DB::fetch_first(pm_sql("SELECT max_uses FROM " . pm_table('pm_skill') . " WHERE id = %d", $skill_id));
-    $max_pp = $skill_info ? (int) $skill_info['max_uses'] : 0;
-
-    if ($current_pp < $max_pp) {
-        api_error(
-            "技能PP未满，无法遗忘（当前PP：{$current_pp}/{$max_pp}，需先用PP恢复道具补满后才能遗忘）",
-            400,
-            null,
-            'skill_pp_not_full'
-        );
-    }
-
-    // 删除技能
-    DB::query(pm_sql(
-        "DELETE FROM " . pm_table('pm_myskill') . "
-WHERE petid=%d AND skillid=%d",
-        $pet_id,
-        $skill_id
-    ));
-
-    api_success(['message' => '技能遗忘成功']);
+    api_success($response);
 }
 
 /**
@@ -1119,92 +1138,110 @@ function api_learn_skill()
     global $_G;
     $uid = validate_uid($_G['uid']);
 
-    // 检查战斗状态
-    $user_data = DB::fetch_first(pm_sql("SELECT npcid FROM " . pm_table('pm_usersdata') . " WHERE uid = %d", $uid));
+    $abort = function ($message, $code = 400, $debug = null, $error_code = null) {
+        DB::query('ROLLBACK');
+        api_error($message, $code, $debug, $error_code);
+    };
+    DB::query('START TRANSACTION');
+    try {
+        // 与战斗、进化、放生共用账户锁；等待后重新读取当前战斗状态。
+        $user_data = DB::fetch_first(pm_sql("SELECT uid, npcid FROM " . pm_table('pm_usersdata') . " WHERE uid = %d FOR UPDATE", $uid));
+        if (!$user_data) {
+            api_my_usersdata($uid);
+            $user_data = DB::fetch_first(pm_sql("SELECT uid, npcid FROM " . pm_table('pm_usersdata') . " WHERE uid = %d FOR UPDATE", $uid));
+            if (!$user_data) $abort('User state not found', 500);
+        }
 
-    if ($user_data && !empty($user_data['npcid']) && $user_data['npcid'] > 0) {
-        api_error('战斗中不能学习技能', 400, null, 'skill_battle_restricted');
+        if ($user_data && !empty($user_data['npcid']) && $user_data['npcid'] > 0) {
+            $abort('战斗中不能学习技能', 400, null, 'skill_battle_restricted');
+        }
+
+        // 验证宠物归属
+        $pm = DB::fetch_first(pm_sql(
+            "SELECT * FROM " . pm_table('pm_mypm') . " WHERE id = %d AND uid = %d FOR UPDATE",
+            $pet_id,
+            $uid
+        ));
+
+        if (!$pm) {
+            $abort('Pokemon not found', 404);
+        }
+
+        $pet_level = (int) $pm['level'];
+        $pmno = (int) $pm['species_id'];
+
+        // 检查技能是否存在
+        $skill = DB::fetch_first(pm_sql(
+            "SELECT * FROM " . pm_table('pm_skill') . " WHERE id = %d",
+            $skill_id
+        ));
+
+        if (!$skill) {
+            $abort('技能不存在', 404, null, 'skill_not_found');
+        }
+
+        // 检查等级是否满足
+        $required_level = (int) $skill['level_required'];
+
+        if ($pet_level < $required_level) {
+            $abort("等级不足，需要达到 Lv {$required_level} 才能学习这个技能", 400, null, 'skill_level_not_met');
+        }
+
+        // 检查宠物是否可以学习这个技能（种族或全局）
+        if (!pokemon_can_learn_skill($skill['available_pokemons'], $pmno)) {
+            $abort('该宠物无法学习这个技能', 400, null, 'skill_not_learnable');
+        }
+
+        // 检查是否已学习该技能
+        $existing = DB::fetch_first(pm_sql(
+            "SELECT * FROM " . pm_table('pm_myskill') . "
+    WHERE petid=%d AND skillid=%d AND uid=%d",
+            $pet_id,
+            $skill_id,
+            $uid
+        ));
+
+        if ($existing) {
+            $abort('已经学会了这个技能', 400, null, 'skill_already_learned');
+        }
+
+        // 检查技能槽是否已满（pm_myskill 无槽位列，技能按插入顺序生效；
+        // 如需替换技能，客户端需先调用遗忘接口，遗忘要求技能PP为满）
+        $current_skills_count = DB::result_first(pm_sql(
+            "SELECT COUNT(*) FROM " . pm_table('pm_myskill') . " WHERE petid = %d AND uid = %d",
+            $pet_id, $uid
+        ));
+
+        if ($current_skills_count >= 4) {
+            $abort('技能槽已满，请先遗忘一个技能', 400, null, 'skill_slots_full');
+        }
+
+        // 学习技能
+        $max_pp = (int) $skill['max_uses'];
+        DB::query(
+            "INSERT INTO " . pm_table('pm_myskill') . "
+    (uid, petid, skillid, skillnum) VALUES ($uid, $pet_id, $skill_id, $max_pp)"
+        );
+
+        $response = [
+            'message' => '技能学习成功',
+            'pokemon_id' => $pet_id,
+            'skill' => [
+                'type_id' => $skill_id,
+                'pp' => $max_pp,
+                'name' => $skill['name'],
+                'skill_type' => $skill['element'] ?: '',
+                'category' => $skill['category'] ?: '',
+                'level' => (int) $skill['level_required'],
+                'max_pp' => $max_pp,
+            ],
+        ];
+        DB::query('COMMIT');
+    } catch (Throwable $error) {
+        DB::query('ROLLBACK');
+        throw $error;
     }
-
-    // 验证宠物归属
-    $pm = DB::fetch_first(pm_sql(
-        "SELECT * FROM " . pm_table('pm_mypm') . " WHERE id = %d AND uid = %d",
-        $pet_id,
-        $uid
-    ));
-
-    if (!$pm) {
-        api_error('Pokemon not found', 404);
-    }
-
-    $pet_level = (int) $pm['level'];
-    $pmno = (int) $pm['species_id'];
-
-    // 检查技能是否存在
-    $skill = DB::fetch_first(pm_sql(
-        "SELECT * FROM " . pm_table('pm_skill') . " WHERE id = %d",
-        $skill_id
-    ));
-
-    if (!$skill) {
-        api_error('技能不存在', 404, null, 'skill_not_found');
-    }
-
-    // 检查等级是否满足
-    $required_level = (int) $skill['level_required'];
-
-    if ($pet_level < $required_level) {
-        api_error("等级不足，需要达到 Lv {$required_level} 才能学习这个技能", 400, null, 'skill_level_not_met');
-    }
-
-    // 检查宠物是否可以学习这个技能（种族或全局）
-    if (!pokemon_can_learn_skill($skill['available_pokemons'], $pmno)) {
-        api_error('该宠物无法学习这个技能', 400, null, 'skill_not_learnable');
-    }
-
-    // 检查是否已学习该技能
-    $existing = DB::fetch_first(pm_sql(
-        "SELECT * FROM " . pm_table('pm_myskill') . "
-WHERE petid=%d AND skillid=%d",
-        $pet_id,
-        $skill_id
-    ));
-
-    if ($existing) {
-        api_error('已经学会了这个技能', 400, null, 'skill_already_learned');
-    }
-
-    // 检查技能槽是否已满（pm_myskill 无槽位列，技能按插入顺序生效；
-    // 如需替换技能，客户端需先调用遗忘接口，遗忘要求技能PP为满）
-    $current_skills_count = DB::result_first(pm_sql(
-        "SELECT COUNT(*) FROM " . pm_table('pm_myskill') . " WHERE petid = %d",
-        $pet_id
-    ));
-
-    if ($current_skills_count >= 4) {
-        api_error('技能槽已满，请先遗忘一个技能', 400, null, 'skill_slots_full');
-    }
-
-    // 学习技能
-    $max_pp = (int) $skill['max_uses'];
-    DB::query(
-        "INSERT INTO " . pm_table('pm_myskill') . "
-(uid, petid, skillid, skillnum) VALUES ($uid, $pet_id, $skill_id, $max_pp)"
-    );
-
-    api_success([
-        'message' => '技能学习成功',
-        'pokemon_id' => $pet_id,
-        'skill' => [
-            'type_id' => $skill_id,
-            'pp' => $max_pp,
-            'name' => $skill['name'],
-            'skill_type' => $skill['element'] ?: '',
-            'category' => $skill['category'] ?: '',
-            'level' => (int) $skill['level_required'],
-            'max_pp' => $max_pp,
-        ],
-    ]);
+    api_success($response);
 }
 
 /**
@@ -1416,120 +1453,142 @@ function api_equip_item()
     global $_G;
     $uid = validate_uid($_G['uid']);
 
-    // 验证宠物归属
-    $pm = DB::fetch_first(pm_sql(
-        "SELECT * FROM " . pm_table('pm_mypm') . " WHERE id = %d AND uid = %d",
-        $pet_id,
-        $uid
-    ));
+    // Keep the HP ratio and equipment slots in one account-serialized change.
+    DB::query("START TRANSACTION");
+    try {
+        $user_data = DB::fetch_first(pm_sql(
+            "SELECT uid, npcid FROM " . pm_table('pm_usersdata') . " WHERE uid = %d FOR UPDATE", $uid
+        ));
+        if (!$user_data) {
+            api_my_usersdata($uid);
+            $user_data = DB::fetch_first(pm_sql(
+                "SELECT uid, npcid FROM " . pm_table('pm_usersdata') . " WHERE uid = %d FOR UPDATE", $uid
+            ));
+            if (!$user_data) pm_abort_battle_transaction('User state not found', 500);
+        }
 
-    if (!$pm) {
-        api_error('Pokemon not found', 404);
-    }
+        // 验证宠物归属
+        $pm = DB::fetch_first(pm_sql(
+            "SELECT * FROM " . pm_table('pm_mypm') . " WHERE id = %d AND uid = %d FOR UPDATE",
+            $pet_id,
+            $uid
+        ));
 
-    // 验证物品归属
-    $myitem = DB::fetch_first(pm_sql(
-        "SELECT m.*, i.type, i.name, i.equipment FROM " . pm_table('pm_myitem') . " m LEFT JOIN " . pm_table('pm_itemdata') . " i ON m.itemid=i.id WHERE m.id=%d AND m.uid=%d",
-        $myitem_id, $uid
-    ));
+        if (!$pm) {
+            pm_abort_battle_transaction('Pokemon not found', 404);
+        }
+        if ((int)$pm['site'] === 1 && (int)$user_data['npcid'] > 0) {
+            pm_abort_battle_transaction('战斗中的首位宠物无法更换装备', 400);
+        }
 
-    if (!$myitem) {
-        api_error('Item not found or not owned by user', 404);
-    }
+        // 验证物品归属
+        $myitem = DB::fetch_first(pm_sql(
+            "SELECT m.*, i.type, i.name, i.equipment FROM " . pm_table('pm_myitem') . " m LEFT JOIN " . pm_table('pm_itemdata') . " i ON m.itemid=i.id WHERE m.id=%d AND m.uid=%d FOR UPDATE",
+            $myitem_id, $uid
+        ));
 
-    if ((int) $myitem['type'] !== 5) {
-        api_error('This item is not an equipment', 400);
-    }
+        if (!$myitem) {
+            pm_abort_battle_transaction('Item not found or not owned by user', 404);
+        }
 
-    if ((int) $myitem['nums'] <= 0) {
-        api_error('No items available', 400);
-    }
+        if ((int) $myitem['type'] !== 5) {
+            pm_abort_battle_transaction('This item is not an equipment', 400);
+        }
 
-    // 同一背包装备记录只能占用一个槽位，也要检查当前宠物。
-    $equipped_on = DB::fetch_first(pm_sql(
-        "SELECT id, nickname FROM " . pm_table('pm_mypm') . "
-WHERE (equipmentid1=%d OR equipmentid2=%d OR equipmentid3=%d OR equipmentid4=%d) AND uid=%d",
-        $myitem_id, $myitem_id, $myitem_id, $myitem_id, $uid
-    ));
+        if ((int) $myitem['nums'] <= 0) {
+            pm_abort_battle_transaction('No items available', 400);
+        }
 
-    if ($equipped_on) {
-        api_error("该装备已被 {$equipped_on['nickname']} 使用", 400);
-    }
+        // 同一背包装备记录只能占用一个槽位，也要检查当前宠物。
+        $equipped_on = DB::fetch_first(pm_sql(
+            "SELECT id, nickname FROM " . pm_table('pm_mypm') . "
+    WHERE (equipmentid1=%d OR equipmentid2=%d OR equipmentid3=%d OR equipmentid4=%d) AND uid=%d",
+            $myitem_id, $myitem_id, $myitem_id, $myitem_id, $uid
+        ));
 
-    // 确定槽位
-    if ($slot_index === -1) {
+        if ($equipped_on) {
+            pm_abort_battle_transaction("该装备已被 {$equipped_on['nickname']} 使用", 400);
+        }
 
-        // 自动选择第一个空槽
-        for ($i = 1; $i <= 4; $i++) {
-            if ((int) $pm["equipmentid$i"] === 0) {
-                $slot_index = $i - 1;
-                break;
+        // 确定槽位
+        if ($slot_index === -1) {
+
+            // 自动选择第一个空槽
+            for ($i = 1; $i <= 4; $i++) {
+                if ((int) $pm["equipmentid$i"] === 0) {
+                    $slot_index = $i - 1;
+                    break;
+                }
+            }
+
+            if ($slot_index === -1) {
+                pm_abort_battle_transaction('All equipment slots are full', 400);
             }
         }
 
-        if ($slot_index === -1) {
-            api_error('All equipment slots are full', 400);
+        $slot_field = "equipmentid" . ($slot_index + 1);
+
+        // 检查目标槽位是否已有装备
+        if ((int) $pm[$slot_field] !== 0) {
+            pm_abort_battle_transaction('Target slot already has equipment. Please unequip first.', 400);
         }
+
+        // 装备前的当前血量百分比
+        $old_hp = (int) $pm['hp'];
+        $old_maxhp = api_calculate_pokemon_max_hp($pm);
+
+        if ($old_maxhp <= 0) {
+            $old_maxhp = $old_hp > 0 ? $old_hp : 1;
+        }
+
+        $hp_percent = $old_hp / $old_maxhp;
+
+        // 原子占用：只有目标槽位仍为空、且该背包记录未被同账号任何宠物（含当前宠物）占用时才写入。
+        // 上方的占用预检只负责给出友好的错误提示，并发窗口由这里的条件 UPDATE 关闭：
+        // 抢占失败的请求不会写入任何数据。
+        // 注意不能用括号子查询（NOT EXISTS (SELECT ...)）：Discuz querysafe 拦截 "(select"
+        // （见 user.php 背包列表的同类规避），这里用自连接反连接实现同一守卫。
+        DB::query(pm_sql(
+            "UPDATE " . pm_table('pm_mypm') . " pet
+    LEFT JOIN " . pm_table('pm_mypm') . " occupier
+        ON occupier.uid = pet.uid
+       AND (occupier.equipmentid1=%d OR occupier.equipmentid2=%d OR occupier.equipmentid3=%d OR occupier.equipmentid4=%d)
+    SET pet.$slot_field=%d
+    WHERE pet.id=%d AND pet.uid=%d AND pet.$slot_field=0 AND occupier.id IS NULL",
+            $myitem_id, $myitem_id, $myitem_id, $myitem_id, $myitem_id, $pet_id, $uid
+        ));
+
+        if (!DB::affected_rows()) {
+            pm_abort_battle_transaction('Equipment conflict, please retry', 409);
+        }
+
+        // 重新获取宠物数据并计算完整属性
+        $pm = DB::fetch_first(pm_sql(
+            "SELECT * FROM " . pm_table('pm_mypm') . " WHERE id = %d AND uid = %d FOR UPDATE",
+            $pet_id,
+            $uid
+        ));
+
+        $pmno = (int) $pm['species_id'];
+        $pm_data = DB::fetch_first(pm_sql("SELECT * FROM " . pm_table('pm_data') . " WHERE id = %d", $pmno));
+        $full_stats = calculate_pokemon_full_stats($pm, $pm_data);
+
+        // 计算新的 HP（保持血量百分比）
+        $new_maxhp = $full_stats['total_hp'];
+        $new_hp = (int) round($new_maxhp * $hp_percent);
+        $new_hp = $old_hp <= 0 ? 0 : max(1, min($new_hp, $new_maxhp));
+
+        // 更新数据库中的 hp
+        DB::query(pm_sql(
+            "UPDATE " . pm_table('pm_mypm') . " SET hp = %d WHERE id = %d",
+            $new_hp,
+            $pet_id
+        ));
+        DB::query("COMMIT");
+    } catch (Throwable $error) {
+        DB::query("ROLLBACK");
+        throw $error;
     }
-
-    $slot_field = "equipmentid" . ($slot_index + 1);
-
-    // 检查目标槽位是否已有装备
-    if ((int) $pm[$slot_field] !== 0) {
-        api_error('Target slot already has equipment. Please unequip first.', 400);
-    }
-
-    // 装备前的当前血量百分比
-    $old_hp = (int) $pm['hp'];
-    $old_maxhp = api_calculate_pokemon_max_hp($pm);
-
-    if ($old_maxhp <= 0) {
-        $old_maxhp = $old_hp > 0 ? $old_hp : 1;
-    }
-
-    $hp_percent = $old_hp / $old_maxhp;
-
-    // 原子占用：只有目标槽位仍为空、且该背包记录未被同账号任何宠物（含当前宠物）占用时才写入。
-    // 上方的占用预检只负责给出友好的错误提示，并发窗口由这里的条件 UPDATE 关闭：
-    // 抢占失败的请求不会写入任何数据。
-    // 注意不能用括号子查询（NOT EXISTS (SELECT ...)）：Discuz querysafe 拦截 "(select"
-    // （见 user.php 背包列表的同类规避），这里用自连接反连接实现同一守卫。
-    DB::query(pm_sql(
-        "UPDATE " . pm_table('pm_mypm') . " pet
-LEFT JOIN " . pm_table('pm_mypm') . " occupier
-    ON occupier.uid = pet.uid
-   AND (occupier.equipmentid1=%d OR occupier.equipmentid2=%d OR occupier.equipmentid3=%d OR occupier.equipmentid4=%d)
-SET pet.$slot_field=%d
-WHERE pet.id=%d AND pet.uid=%d AND pet.$slot_field=0 AND occupier.id IS NULL",
-        $myitem_id, $myitem_id, $myitem_id, $myitem_id, $myitem_id, $pet_id, $uid
-    ));
-
-    if (!DB::affected_rows()) {
-        api_error('Equipment conflict, please retry', 409);
-    }
-
-    // 重新获取宠物数据并计算完整属性
-    $pm = DB::fetch_first(pm_sql(
-        "SELECT * FROM " . pm_table('pm_mypm') . " WHERE id = %d AND uid = %d",
-        $pet_id,
-        $uid
-    ));
-
-    $pmno = (int) $pm['species_id'];
-    $pm_data = DB::fetch_first(pm_sql("SELECT * FROM " . pm_table('pm_data') . " WHERE id = %d", $pmno));
-    $full_stats = calculate_pokemon_full_stats($pm, $pm_data);
-
-    // 计算新的 HP（保持血量百分比）
-    $new_maxhp = $full_stats['total_hp'];
-    $new_hp = (int) round($new_maxhp * $hp_percent);
-    $new_hp = $old_hp <= 0 ? 0 : max(1, min($new_hp, $new_maxhp));
-
-    // 更新数据库中的 hp
-    DB::query(pm_sql(
-        "UPDATE " . pm_table('pm_mypm') . " SET hp = %d WHERE id = %d",
-        $new_hp,
-        $pet_id
-    ));
 
     api_success([
         'message' => 'Equipment equipped successfully',
@@ -1587,72 +1646,94 @@ function api_unequip_item()
     global $_G;
     $uid = validate_uid($_G['uid']);
 
-    // 验证宠物归属
-    $pm = DB::fetch_first(pm_sql(
-        "SELECT * FROM " . pm_table('pm_mypm') . " WHERE id = %d AND uid = %d",
-        $pet_id,
-        $uid
-    ));
+    // Keep the HP ratio and equipment slots in one account-serialized change.
+    DB::query("START TRANSACTION");
+    try {
+        $user_data = DB::fetch_first(pm_sql(
+            "SELECT uid, npcid FROM " . pm_table('pm_usersdata') . " WHERE uid = %d FOR UPDATE", $uid
+        ));
+        if (!$user_data) {
+            api_my_usersdata($uid);
+            $user_data = DB::fetch_first(pm_sql(
+                "SELECT uid, npcid FROM " . pm_table('pm_usersdata') . " WHERE uid = %d FOR UPDATE", $uid
+            ));
+            if (!$user_data) pm_abort_battle_transaction('User state not found', 500);
+        }
 
-    if (!$pm) {
-        api_error('Pokemon not found', 404);
+        // 验证宠物归属
+        $pm = DB::fetch_first(pm_sql(
+            "SELECT * FROM " . pm_table('pm_mypm') . " WHERE id = %d AND uid = %d FOR UPDATE",
+            $pet_id,
+            $uid
+        ));
+
+        if (!$pm) {
+            pm_abort_battle_transaction('Pokemon not found', 404);
+        }
+        if ((int)$pm['site'] === 1 && (int)$user_data['npcid'] > 0) {
+            pm_abort_battle_transaction('战斗中的首位宠物无法更换装备', 400);
+        }
+
+        $slot_field = "equipmentid" . ($slot_index + 1);
+        $equipment_id = (int) $pm[$slot_field];
+
+        if ($equipment_id === 0) {
+            pm_abort_battle_transaction('No equipment in this slot', 400);
+        }
+
+        // 获取装备信息
+        $myitem = DB::fetch_first(pm_sql(
+            "SELECT m.*, i.name FROM " . pm_table('pm_myitem') . " m
+    LEFT JOIN " . pm_table('pm_itemdata') . " i ON m.itemid=i.id WHERE m.id=%d",
+            $equipment_id
+        ));
+
+        $item_name = $myitem ? $myitem['name'] : 'Unknown';
+
+        // 卸下装备前的当前血量百分比
+        $old_hp = (int) $pm['hp'];
+        $old_maxhp = api_calculate_pokemon_max_hp($pm);
+
+        if ($old_maxhp <= 0) {
+            $old_maxhp = $old_hp > 0 ? $old_hp : 1;
+        }
+
+        $hp_percent = $old_hp / $old_maxhp;
+
+        // 卸下装备
+        DB::query(pm_sql(
+            "UPDATE " . pm_table('pm_mypm') . "
+    SET $slot_field=0 WHERE id=%d AND uid=%d",
+            $pet_id, $uid
+        ));
+
+        // 重新获取宠物数据并计算完整属性
+        $pm = DB::fetch_first(pm_sql(
+            "SELECT * FROM " . pm_table('pm_mypm') . " WHERE id = %d AND uid = %d FOR UPDATE",
+            $pet_id,
+            $uid
+        ));
+
+        $pmno = (int) $pm['species_id'];
+        $pm_data = DB::fetch_first(pm_sql("SELECT * FROM " . pm_table('pm_data') . " WHERE id = %d", $pmno));
+        $full_stats = calculate_pokemon_full_stats($pm, $pm_data);
+
+        // 计算新的 HP（保持血量百分比）
+        $new_maxhp = $full_stats['total_hp'];
+        $new_hp = (int) round($new_maxhp * $hp_percent);
+        $new_hp = $old_hp <= 0 ? 0 : max(1, min($new_hp, $new_maxhp));
+
+        // 更新数据库中的 hp
+        DB::query(pm_sql(
+            "UPDATE " . pm_table('pm_mypm') . " SET hp = %d WHERE id = %d",
+            $new_hp,
+            $pet_id
+        ));
+        DB::query("COMMIT");
+    } catch (Throwable $error) {
+        DB::query("ROLLBACK");
+        throw $error;
     }
-
-    $slot_field = "equipmentid" . ($slot_index + 1);
-    $equipment_id = (int) $pm[$slot_field];
-
-    if ($equipment_id === 0) {
-        api_error('No equipment in this slot', 400);
-    }
-
-    // 获取装备信息
-    $myitem = DB::fetch_first(pm_sql(
-        "SELECT m.*, i.name FROM " . pm_table('pm_myitem') . " m
-LEFT JOIN " . pm_table('pm_itemdata') . " i ON m.itemid=i.id WHERE m.id=%d",
-        $equipment_id
-    ));
-
-    $item_name = $myitem ? $myitem['name'] : 'Unknown';
-
-    // 卸下装备前的当前血量百分比
-    $old_hp = (int) $pm['hp'];
-    $old_maxhp = api_calculate_pokemon_max_hp($pm);
-
-    if ($old_maxhp <= 0) {
-        $old_maxhp = $old_hp > 0 ? $old_hp : 1;
-    }
-
-    $hp_percent = $old_hp / $old_maxhp;
-
-    // 卸下装备
-    DB::query(pm_sql(
-        "UPDATE " . pm_table('pm_mypm') . "
-SET $slot_field=0 WHERE id=%d AND uid=%d",
-        $pet_id, $uid
-    ));
-
-    // 重新获取宠物数据并计算完整属性
-    $pm = DB::fetch_first(pm_sql(
-        "SELECT * FROM " . pm_table('pm_mypm') . " WHERE id = %d AND uid = %d",
-        $pet_id,
-        $uid
-    ));
-
-    $pmno = (int) $pm['species_id'];
-    $pm_data = DB::fetch_first(pm_sql("SELECT * FROM " . pm_table('pm_data') . " WHERE id = %d", $pmno));
-    $full_stats = calculate_pokemon_full_stats($pm, $pm_data);
-
-    // 计算新的 HP（保持血量百分比）
-    $new_maxhp = $full_stats['total_hp'];
-    $new_hp = (int) round($new_maxhp * $hp_percent);
-    $new_hp = $old_hp <= 0 ? 0 : max(1, min($new_hp, $new_maxhp));
-
-    // 更新数据库中的 hp
-    DB::query(pm_sql(
-        "UPDATE " . pm_table('pm_mypm') . " SET hp = %d WHERE id = %d",
-        $new_hp,
-        $pet_id
-    ));
 
     api_success([
         'message' => 'Equipment unequipped successfully',
@@ -1697,299 +1778,315 @@ function api_update_pokemon_state()
     $uid = validate_uid($_G['uid']);
     $timestamp = $_G['timestamp'];
 
-    // 获取首只宠物（site=1）
-    $pm = DB::fetch_first(pm_sql(
-        "SELECT * FROM " . pm_table('pm_mypm') . " WHERE uid = %d AND site = 1",
-        $uid
-    ));
-
-    if (!$pm) {
-        api_error('No active pokemon found', 404);
-    }
-
-    $pet_id = (int) $pm['id'];
-    $current_state = (int) $pm['state'];
-    $pmno = (int) $pm['species_id'];
-
-    // 可随机触发的基础状态列表
-    $base_states = [
-        1,
-        2,
-        5,
-        7,
-        8,
-        9,
-        11,
-        12,
-        15,
-        16,
-        18
-    ];
-
-    $new_state = $current_state;
-    $state_changed = false;
-    $exp_change = 0;
-
-    // 状态机逻辑（修复版：状态从阶段一开始，逐步恶化，每个阶段都有恢复机会）
-    switch ($current_state) {
-        case 2: // 生病阶段一
-            $roll = rand(1, 100);
-            if ($roll <= 50) {
-                $new_state = 2; // 50% 保持生病阶段一
-            } elseif ($roll <= 70) {
-                $new_state = 3; // 20% 恶化到阶段二
-            } else {
-                $new_state = 1; // 30% 恢复正常
-            }
-            $state_changed = true;
-            break;
-
-        case 3: // 生病阶段二
-            $roll = rand(1, 100);
-            if ($roll <= 40) {
-                $new_state = 3; // 40% 保持生病阶段二
-            } elseif ($roll <= 60) {
-                $new_state = 4; // 20% 恶化到阶段三
-                $exp_change = $pm['exp'] >= 50 ? -50 : 0;
-            } else {
-                $new_state = 2; // 40% 好转到阶段一
-            }
-            $state_changed = true;
-            break;
-
-        case 4: // 生病阶段三（濒危）
-            $roll = rand(1, 100);
-            if ($roll <= 30) {
-                $new_state = 4; // 30% 保持生病阶段三
-            } elseif ($roll <= 50) {
-                $new_state = 0; // 20% 晕倒（濒危状态，需要治疗）
-            } else {
-                $new_state = 3; // 50% 好转到阶段二
-            }
-            $state_changed = true;
-            break;
-
-        case 5: // 饥饿阶段一
-            $roll = rand(1, 100);
-            if ($roll <= 50) {
-                $new_state = 5; // 50% 保持饥饿阶段一
-            } elseif ($roll <= 70) {
-                $new_state = 6; // 20% 恶化到阶段二
-            } else {
-                $new_state = 1; // 30% 恢复正常
-            }
-            $state_changed = true;
-            break;
-
-        case 6: // 饥饿阶段二
-            $roll = rand(1, 100);
-            if ($roll <= 40) {
-                $new_state = 6; // 40% 保持饥饿阶段二
-            } elseif ($roll <= 50) {
-                $new_state = 2; // 10% 变成生病阶段一（饥饿导致生病）
-            } else {
-                $new_state = 5; // 50% 好转到阶段一
-            }
-            $state_changed = true;
-            break;
-
-        case 7: // 疲惫
-            $roll = rand(1, 100);
-            if ($roll <= 40) {
-                $new_state = 7; // 40% 保持疲惫
-            } elseif ($roll <= 50) {
-                $new_state = 2; // 10% 变成生病阶段一（过度疲劳）
-            } else {
-                $new_state = 1; // 50% 恢复正常
-            }
-            $state_changed = true;
-            break;
-
-        case 8: // 兴奋阶段一
-            $roll = rand(1, 100);
-            if ($roll <= 50) {
-                $new_state = 8; // 50% 保持兴奋阶段一
-            } elseif ($roll <= 70) {
-                $new_state = 9; // 20% 升级到阶段二
-            } else {
-                $new_state = 1; // 30% 恢复正常
-            }
-            $state_changed = true;
-            break;
-
-        case 9: // 兴奋阶段二
-            $roll = rand(1, 100);
-            if ($roll <= 40) {
-                $new_state = 9; // 40% 保持兴奋阶段二
-            } elseif ($roll <= 50) {
-                $new_state = 10; // 10% 升级到阶段三
-            } elseif ($roll <= 70) {
-                $new_state = 7; // 20% 变成疲惫（过度兴奋后疲劳）
-            } else {
-                $new_state = 8; // 30% 降级到阶段一
-            }
-            $state_changed = true;
-            break;
-
-        case 10: // 兴奋阶段三
-            $roll = rand(1, 100);
-            if ($roll <= 30) {
-                $new_state = 10; // 30% 保持兴奋阶段三
-            } elseif ($roll <= 50) {
-                $new_state = 7; // 20% 变成疲惫
-            } else {
-                $new_state = 9; // 50% 降级到阶段二
-            }
-            $state_changed = true;
-            break;
-
-        case 11: // 受伤
-            $roll = rand(1, 100);
-            if ($roll <= 50) {
-                $new_state = 11; // 50% 保持受伤
-            } else {
-                $new_state = 1; // 50% 恢复正常
-            }
-            $state_changed = true;
-            break;
-
-        case 12: // 快乐阶段一
-            $roll = rand(1, 100);
-            if ($roll <= 50) {
-                $new_state = 12; // 50% 保持快乐阶段一
-            } elseif ($roll <= 70) {
-                $new_state = 13; // 20% 升级到阶段二
-            } else {
-                $new_state = 1; // 30% 恢复正常
-            }
-            $state_changed = true;
-            break;
-
-        case 13: // 快乐阶段二
-            $roll = rand(1, 100);
-            if ($roll <= 40) {
-                $new_state = 13; // 40% 保持快乐阶段二
-            } elseif ($roll <= 50) {
-                $new_state = 14; // 10% 升级到阶段三
-            } else {
-                $new_state = 12; // 50% 降级到阶段一
-            }
-            $state_changed = true;
-            break;
-
-        case 14: // 快乐阶段三
-            $roll = rand(1, 100);
-            if ($roll <= 30) {
-                $new_state = 14; // 30% 保持快乐阶段三
-            } else {
-                $new_state = 13; // 70% 降级到阶段二
-            }
-            $state_changed = true;
-            break;
-
-        case 15: // 惊慌
-            $roll = rand(1, 100);
-            if ($roll <= 40) {
-                $new_state = 15; // 40% 保持惊慌
-            } else {
-                $new_state = 1; // 60% 恢复正常
-            }
-            $state_changed = true;
-            break;
-
-        case 16: // 自恋阶段一
-            $roll = rand(1, 100);
-            if ($roll <= 50) {
-                $new_state = 16; // 50% 保持自恋阶段一
-            } elseif ($roll <= 70) {
-                $new_state = 17; // 20% 升级到阶段二
-            } else {
-                $new_state = 1; // 30% 恢复正常
-            }
-            $state_changed = true;
-            break;
-
-        case 17: // 自恋阶段二
-            $roll = rand(1, 100);
-            if ($roll <= 30) {
-                $new_state = 17; // 30% 保持自恋阶段二
-            } else {
-                $new_state = 16; // 70% 降级到阶段一
-            }
-            $state_changed = true;
-            break;
-
-        case 18: // 愤怒阶段一
-            $roll = rand(1, 100);
-            if ($roll <= 50) {
-                $new_state = 18; // 50% 保持愤怒阶段一
-            } elseif ($roll <= 70) {
-                $new_state = 19; // 20% 升级到阶段二
-            } else {
-                $new_state = 1; // 30% 恢复正常
-            }
-            $state_changed = true;
-            break;
-
-        case 19: // 愤怒阶段二
-            $roll = rand(1, 100);
-            if ($roll <= 30) {
-                $new_state = 19; // 30% 保持愤怒阶段二
-            } elseif ($roll <= 50) {
-                $new_state = 7; // 20% 变成疲惫（愤怒后疲劳）
-            } else {
-                $new_state = 18; // 50% 降级到阶段一
-            }
-            $state_changed = true;
-            break;
-
-        case 0: // 濒危/晕倒状态，不自动变化，需要去宠物中心治疗
-            break;
-
-        default: // 正常或其他状态，随机触发新状态
-            if ($pmno == 0) {
-                // 蛋不触发状态变化
-                $new_state = 1;
-            } else {
-                // 随机触发状态（20% 概率，降低触发频率）
-                if (rand(1, 100) <= 20) {
-                    // 只触发阶段一的状态，不会直接给严重状态
-                    $first_stage_states = [1, 2, 5, 7, 8, 11, 12, 15, 16, 18];
-                    $new_state = $first_stage_states[array_rand($first_stage_states)];
-                    $state_changed = true;
-                }
-            }
-            break;
-    }
-
-    // 更新数据库
-    if ($state_changed) {
-        $update_parts = ["state = %d", "statetime = %d"];
-        $update_params = [$new_state, $timestamp];
-
-        if ($exp_change != 0) {
-            $update_parts[] = "exp = exp + %d";
-            $update_params[] = $exp_change;
-        }
-
-        // 如果变成死亡状态，HP 设为 1
-        if ($new_state == 0) {
-            $update_parts[] = "hp = 1";
-        }
-
-        $update_parts[] = "WHERE id = %d AND uid = %d";
-        $update_params[] = $pet_id;
-        $update_params[] = $uid;
-
-        $update_sql = "UPDATE " . pm_table('pm_mypm') . " SET " . implode(', ', $update_parts);
-        DB::query(pm_sql_v($update_sql, $update_params));
-
-        // 重新获取宠物数据
-        $pm = DB::fetch_first(pm_sql(
-            "SELECT * FROM " . pm_table('pm_mypm') . " WHERE id = %d AND uid = %d",
-            $pet_id,
+    // 与战斗、治疗和换宠共用用户锁，避免随机状态覆盖战斗中的宠物。
+    DB::query('START TRANSACTION');
+    try {
+        $user = DB::fetch_first(pm_sql(
+            "SELECT uid, npcid FROM " . pm_table('pm_usersdata') . " WHERE uid = %d FOR UPDATE",
             $uid
         ));
+        if (!$user) pm_abort_battle_transaction('用户数据不存在', 404);
+        if ((int)$user['npcid'] > 0) pm_abort_battle_transaction('正在战斗中，无法更新宠物状态', 400);
+
+        // 获取首只宠物（site=1）
+        $pm = DB::fetch_first(pm_sql(
+            "SELECT * FROM " . pm_table('pm_mypm') . " WHERE uid = %d AND site = 1 FOR UPDATE",
+            $uid
+        ));
+
+        if (!$pm) {
+            pm_abort_battle_transaction('No active pokemon found', 404);
+        }
+
+        $pet_id = (int) $pm['id'];
+        $current_state = (int) $pm['state'];
+        $pmno = (int) $pm['species_id'];
+
+        // 可随机触发的基础状态列表
+        $base_states = [
+            1,
+            2,
+            5,
+            7,
+            8,
+            9,
+            11,
+            12,
+            15,
+            16,
+            18
+        ];
+
+        $new_state = $current_state;
+        $state_changed = false;
+        $exp_change = 0;
+
+        // 状态机逻辑（修复版：状态从阶段一开始，逐步恶化，每个阶段都有恢复机会）
+        switch ($current_state) {
+            case 2: // 生病阶段一
+                $roll = rand(1, 100);
+                if ($roll <= 50) {
+                    $new_state = 2; // 50% 保持生病阶段一
+                } elseif ($roll <= 70) {
+                    $new_state = 3; // 20% 恶化到阶段二
+                } else {
+                    $new_state = 1; // 30% 恢复正常
+                }
+                $state_changed = true;
+                break;
+
+            case 3: // 生病阶段二
+                $roll = rand(1, 100);
+                if ($roll <= 40) {
+                    $new_state = 3; // 40% 保持生病阶段二
+                } elseif ($roll <= 60) {
+                    $new_state = 4; // 20% 恶化到阶段三
+                    $exp_change = $pm['exp'] >= 50 ? -50 : 0;
+                } else {
+                    $new_state = 2; // 40% 好转到阶段一
+                }
+                $state_changed = true;
+                break;
+
+            case 4: // 生病阶段三（濒危）
+                $roll = rand(1, 100);
+                if ($roll <= 30) {
+                    $new_state = 4; // 30% 保持生病阶段三
+                } elseif ($roll <= 50) {
+                    $new_state = 0; // 20% 晕倒（濒危状态，需要治疗）
+                } else {
+                    $new_state = 3; // 50% 好转到阶段二
+                }
+                $state_changed = true;
+                break;
+
+            case 5: // 饥饿阶段一
+                $roll = rand(1, 100);
+                if ($roll <= 50) {
+                    $new_state = 5; // 50% 保持饥饿阶段一
+                } elseif ($roll <= 70) {
+                    $new_state = 6; // 20% 恶化到阶段二
+                } else {
+                    $new_state = 1; // 30% 恢复正常
+                }
+                $state_changed = true;
+                break;
+
+            case 6: // 饥饿阶段二
+                $roll = rand(1, 100);
+                if ($roll <= 40) {
+                    $new_state = 6; // 40% 保持饥饿阶段二
+                } elseif ($roll <= 50) {
+                    $new_state = 2; // 10% 变成生病阶段一（饥饿导致生病）
+                } else {
+                    $new_state = 5; // 50% 好转到阶段一
+                }
+                $state_changed = true;
+                break;
+
+            case 7: // 疲惫
+                $roll = rand(1, 100);
+                if ($roll <= 40) {
+                    $new_state = 7; // 40% 保持疲惫
+                } elseif ($roll <= 50) {
+                    $new_state = 2; // 10% 变成生病阶段一（过度疲劳）
+                } else {
+                    $new_state = 1; // 50% 恢复正常
+                }
+                $state_changed = true;
+                break;
+
+            case 8: // 兴奋阶段一
+                $roll = rand(1, 100);
+                if ($roll <= 50) {
+                    $new_state = 8; // 50% 保持兴奋阶段一
+                } elseif ($roll <= 70) {
+                    $new_state = 9; // 20% 升级到阶段二
+                } else {
+                    $new_state = 1; // 30% 恢复正常
+                }
+                $state_changed = true;
+                break;
+
+            case 9: // 兴奋阶段二
+                $roll = rand(1, 100);
+                if ($roll <= 40) {
+                    $new_state = 9; // 40% 保持兴奋阶段二
+                } elseif ($roll <= 50) {
+                    $new_state = 10; // 10% 升级到阶段三
+                } elseif ($roll <= 70) {
+                    $new_state = 7; // 20% 变成疲惫（过度兴奋后疲劳）
+                } else {
+                    $new_state = 8; // 30% 降级到阶段一
+                }
+                $state_changed = true;
+                break;
+
+            case 10: // 兴奋阶段三
+                $roll = rand(1, 100);
+                if ($roll <= 30) {
+                    $new_state = 10; // 30% 保持兴奋阶段三
+                } elseif ($roll <= 50) {
+                    $new_state = 7; // 20% 变成疲惫
+                } else {
+                    $new_state = 9; // 50% 降级到阶段二
+                }
+                $state_changed = true;
+                break;
+
+            case 11: // 受伤
+                $roll = rand(1, 100);
+                if ($roll <= 50) {
+                    $new_state = 11; // 50% 保持受伤
+                } else {
+                    $new_state = 1; // 50% 恢复正常
+                }
+                $state_changed = true;
+                break;
+
+            case 12: // 快乐阶段一
+                $roll = rand(1, 100);
+                if ($roll <= 50) {
+                    $new_state = 12; // 50% 保持快乐阶段一
+                } elseif ($roll <= 70) {
+                    $new_state = 13; // 20% 升级到阶段二
+                } else {
+                    $new_state = 1; // 30% 恢复正常
+                }
+                $state_changed = true;
+                break;
+
+            case 13: // 快乐阶段二
+                $roll = rand(1, 100);
+                if ($roll <= 40) {
+                    $new_state = 13; // 40% 保持快乐阶段二
+                } elseif ($roll <= 50) {
+                    $new_state = 14; // 10% 升级到阶段三
+                } else {
+                    $new_state = 12; // 50% 降级到阶段一
+                }
+                $state_changed = true;
+                break;
+
+            case 14: // 快乐阶段三
+                $roll = rand(1, 100);
+                if ($roll <= 30) {
+                    $new_state = 14; // 30% 保持快乐阶段三
+                } else {
+                    $new_state = 13; // 70% 降级到阶段二
+                }
+                $state_changed = true;
+                break;
+
+            case 15: // 惊慌
+                $roll = rand(1, 100);
+                if ($roll <= 40) {
+                    $new_state = 15; // 40% 保持惊慌
+                } else {
+                    $new_state = 1; // 60% 恢复正常
+                }
+                $state_changed = true;
+                break;
+
+            case 16: // 自恋阶段一
+                $roll = rand(1, 100);
+                if ($roll <= 50) {
+                    $new_state = 16; // 50% 保持自恋阶段一
+                } elseif ($roll <= 70) {
+                    $new_state = 17; // 20% 升级到阶段二
+                } else {
+                    $new_state = 1; // 30% 恢复正常
+                }
+                $state_changed = true;
+                break;
+
+            case 17: // 自恋阶段二
+                $roll = rand(1, 100);
+                if ($roll <= 30) {
+                    $new_state = 17; // 30% 保持自恋阶段二
+                } else {
+                    $new_state = 16; // 70% 降级到阶段一
+                }
+                $state_changed = true;
+                break;
+
+            case 18: // 愤怒阶段一
+                $roll = rand(1, 100);
+                if ($roll <= 50) {
+                    $new_state = 18; // 50% 保持愤怒阶段一
+                } elseif ($roll <= 70) {
+                    $new_state = 19; // 20% 升级到阶段二
+                } else {
+                    $new_state = 1; // 30% 恢复正常
+                }
+                $state_changed = true;
+                break;
+
+            case 19: // 愤怒阶段二
+                $roll = rand(1, 100);
+                if ($roll <= 30) {
+                    $new_state = 19; // 30% 保持愤怒阶段二
+                } elseif ($roll <= 50) {
+                    $new_state = 7; // 20% 变成疲惫（愤怒后疲劳）
+                } else {
+                    $new_state = 18; // 50% 降级到阶段一
+                }
+                $state_changed = true;
+                break;
+
+            case 0: // 濒危/晕倒状态，不自动变化，需要去宠物中心治疗
+                break;
+
+            default: // 正常或其他状态，随机触发新状态
+                if ($pmno == 0) {
+                    // 蛋不触发状态变化
+                    $new_state = 1;
+                } else {
+                    // 随机触发状态（20% 概率，降低触发频率）
+                    if (rand(1, 100) <= 20) {
+                        // 只触发阶段一的状态，不会直接给严重状态
+                        $first_stage_states = [1, 2, 5, 7, 8, 11, 12, 15, 16, 18];
+                        $new_state = $first_stage_states[array_rand($first_stage_states)];
+                        $state_changed = true;
+                    }
+                }
+                break;
+        }
+
+        // 更新数据库
+        if ($state_changed) {
+            $update_parts = ["state = %d", "statetime = %d"];
+            $update_params = [$new_state, $timestamp];
+
+            if ($exp_change != 0) {
+                $update_parts[] = "exp = exp + %d";
+                $update_params[] = $exp_change;
+            }
+
+            // 如果变成死亡状态，HP 设为 1
+            if ($new_state == 0) {
+                $update_parts[] = "hp = 1";
+            }
+
+            $update_params[] = $pet_id;
+            $update_params[] = $uid;
+
+            $update_sql = "UPDATE " . pm_table('pm_mypm') . " SET " . implode(', ', $update_parts)
+                . " WHERE id = %d AND uid = %d";
+            DB::query(pm_sql_v($update_sql, $update_params));
+
+            // 重新获取宠物数据
+            $pm = DB::fetch_first(pm_sql(
+                "SELECT * FROM " . pm_table('pm_mypm') . " WHERE id = %d AND uid = %d",
+                $pet_id,
+                $uid
+            ));
+        }
+
+        DB::query('COMMIT');
+    } catch (Throwable $error) {
+        DB::query('ROLLBACK');
+        throw $error;
     }
 
     // 计算状态对属性的影响

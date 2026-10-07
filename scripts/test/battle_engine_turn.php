@@ -15,6 +15,7 @@ set_error_handler(function ($severity, $message, $file, $line) {
 
 define('IN_DISCUZ', 1);
 require __DIR__ . '/../../plugin/api/battle_actions.php';
+require __DIR__ . '/../../plugin/api/battle_storage.php';
 require __DIR__ . '/../../plugin/api/battle_core.php';
 // pre-load the real helper so capture's runtime require_once (with eval-context __DIR__) no-ops
 require __DIR__ . '/../../plugin/api/pokemon_utils.php';
@@ -160,6 +161,8 @@ class DB
     public static $next_id = 500;
     public static $on_user_lock = null;
     public static $on_expiry_mirror_clear = null;
+    public static $map_enabled = 1;
+    public static $wild_sex = 500;
 
     public static function reset()
     {
@@ -500,10 +503,11 @@ class DB
                 4 => ['id' => 4, 'name' => '小火龙', 'xs' => '火', 'xs2' => '', 'strength' => 1, 'sex' => 50,
                     'hp' => 39, 'atk' => 52, 'def' => 43, 'spatk' => 60, 'spdef' => 50, 'speed' => 65, 'drop_money' => '[5,20]'],
             ];
+            if ($id === 129) $data[$id]['sex'] = self::$wild_sex;
             return isset($data[$id]) ? $data[$id] : false;
         }
         if (preg_match('/FROM pm_map WHERE id = 3\b/', $sql)) {
-            return ['id' => 3, 'name' => 'Test map'];
+            return ['id' => 3, 'name' => 'Test map', 'is_enabled' => self::$map_enabled];
         }
         if (preg_match('/FROM pm_myskill\b/', $sql) && strpos($sql, 'WHERE skillid') !== false) {
             if (preg_match('/skillid = (\d+) AND uid = (\d+) AND petid = (\d+)/', $sql, $m)) {
@@ -1485,6 +1489,36 @@ foreach (['abandoned', 'victory'] as $prior_result) {
     check("$prior_result orphaned mirror is cleared without changing the outcome", DB::$usersdata['npcid'] === 0 && DB::$usersdata['hp'] === 0 && DB::$battles[$id]['result'] === $prior_result);
 }
 
+
+echo "=== encounter eligibility and attributes ===\n";
+DB::wipe_rows();
+seed_pet_and_party();
+DB::$usersdata['npcid'] = 0;
+DB::$map_enabled = 0;
+$GLOBALS['generated_wild_count'] = 0;
+$r = run_battle_endpoint('api_start_battle', ['map_id' => 3]);
+check('Disabled map rejects a direct start request', $r->getCode() === 403);
+check('Disabled map creates no encounter or battle state', $GLOBALS['generated_wild_count'] === 0 && DB::$battles === [] && DB::$usersdata['npcid'] === 0);
+DB::$map_enabled = 1;
+
+foreach ([0 => 1, 1000 => 0] as $sex_weight => $expected_gender) {
+    DB::wipe_rows();
+    seed_pet_and_party();
+    DB::$usersdata['npcid'] = 0;
+    DB::$wild_sex = $sex_weight;
+    $r = run_battle_endpoint('api_start_battle', ['map_id' => 3]);
+    check('Start preserves single-sex species weight ' . $sex_weight,
+        $r->getCode() === 200 && $r->data['wild_pokemon']['gender'] === $expected_gender);
+    $enemy_rows = array_values(array_filter(DB::$units, function ($unit) { return $unit['side'] === 'enemy'; }));
+    check('Engine and legacy mirror preserve single-sex species weight ' . $sex_weight,
+        (int)$enemy_rows[0]['gender'] === $expected_gender && ((DB::$usersdata['allure'] >> 1) & 1) === $expected_gender);
+    $legacy = DB::$usersdata;
+    $legacy['allure'] = '';
+    $response = build_battle_response($legacy, DB::$pet_row);
+    check('Legacy attribute generation preserves single-sex species weight ' . $sex_weight,
+        $response['wild_pokemon']['gender'] === $expected_gender);
+}
+DB::$wild_sex = 500;
 
 echo "\n";
 if ($failures > 0) {

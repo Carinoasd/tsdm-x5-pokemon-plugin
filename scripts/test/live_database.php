@@ -22,7 +22,7 @@ function begin_request($endpoint, $action, $input = null, $extra = [])
 {
     $root = realpath(__DIR__ . '/support/live_api.php');
     $base = tempnam(sys_get_temp_dir(), 'tsdm-api-');
-    $body = $input === null ? '' : json_encode($input, JSON_THROW_ON_ERROR);
+    $body = $input === null ? '' : (is_string($input) ? $input : json_encode($input, JSON_THROW_ON_ERROR));
     $env = array_merge(getenv(), [
         'REDIRECT_STATUS' => '200', 'GATEWAY_INTERFACE' => 'CGI/1.1',
         'REQUEST_METHOD' => $input === null ? 'GET' : 'POST',
@@ -32,6 +32,7 @@ function begin_request($endpoint, $action, $input = null, $extra = [])
         'HTTP_X_PM_FORMHASH' => 'test-formhash', 'TSDM_TEST_ENDPOINT' => $endpoint,
         'TSDM_TEST_READY' => $base . '.ready', 'TSDM_TEST_UID' => '7',
         'TSDM_TEST_FAIL_SQL' => '',
+        'TSDM_TEST_FAIL_TYPE' => '',
     ], $extra);
     $cgi = getenv('TSDM_PHP_CGI') ?: 'php-cgi';
     $command = [$cgi];
@@ -72,14 +73,16 @@ function request($endpoint, $action, $input = null, $extra = [])
 {
     return finish_request(begin_request($endpoint, $action, $input, $extra));
 }
-function race($endpoint, $action, $inputs)
+function race($endpoint, $action, $inputs, $extra = [])
 {
     $db = $GLOBALS['db'];
+    $uid = (int)($extra['TSDM_TEST_UID'] ?? 7);
+    $table = $endpoint === 'user' && $action === 'initialize' ? 'common_member' : 'pm_usersdata';
     $db->begin_transaction();
-    $db->query('SELECT uid FROM pm_usersdata WHERE uid = 7 FOR UPDATE');
+    $db->query("SELECT uid FROM $table WHERE uid = $uid FOR UPDATE");
     $requests = [];
     try {
-        foreach ($inputs as $input) $requests[] = begin_request($endpoint, $action, $input);
+        foreach ($inputs as $input) $requests[] = begin_request($endpoint, $action, $input, $extra);
         $deadline = microtime(true) + 10;
         foreach ($requests as $worker) {
             while (!is_file($worker['base'] . '.ready')) {
@@ -105,8 +108,8 @@ try {
     $schema = file_get_contents(__DIR__ . '/../../docker/init.d/02-pokemon-schema.sql');
     $db->multi_query($schema);
     do { if ($result = $db->store_result()) $result->free(); } while ($db->more_results() && $db->next_result());
-    $db->query('CREATE TABLE common_member (uid INT PRIMARY KEY, username VARCHAR(60) NOT NULL) ENGINE=InnoDB');
-    $db->query("INSERT INTO common_member VALUES (7, 'fixture-player-7'), (8, 'fixture-player-8')");
+    $db->query('CREATE TABLE common_member (uid INT PRIMARY KEY, username VARCHAR(60) NOT NULL, groupid INT NOT NULL DEFAULT 10) ENGINE=InnoDB');
+    $db->query("INSERT INTO common_member (uid, username) VALUES (7, 'fixture-player-7'), (8, 'fixture-player-8')");
     $db->query('INSERT INTO pm_usersdata (uid, money) VALUES (7, 100), (8, 100)');
     $db->query("INSERT INTO pm_data (id, name, hp, atk, def, spatk, spdef, speed, mapid, effort_values, drop_money, strength, met, capture) VALUES
         (1, 'Fixture ally', 100, 50, 100, 50, 100, 100, '', '{}', '1,1', 1, 100, 100),
@@ -206,6 +209,197 @@ try {
     $db->query("UPDATE pm_battle_action SET created_at = 1 WHERE uid = 7 AND request_id = 'fixture-start-0001'");
     $expired = request('battle', 'start', $start);
     check(!$expired['success'] && $expired['error_code'] === 'request_expired' && (int)scalar('SELECT COUNT(*) FROM pm_battle WHERE uid = 7') === 1, 'Expired start key cannot create a new battle');
+
+    // A failed inventory write must not grant a free out-of-battle heal.
+    $db->query("UPDATE pm_myitem SET nums = 1 WHERE uid = 7 AND itemid = '17'");
+    $db->query('UPDATE pm_mypm SET hp = 10 WHERE id = 501');
+    $failed_item = request('user', 'use_item', ['item_id' => 17, 'pokemon_id' => 501],
+        ['TSDM_TEST_FAIL_SQL' => 'DELETE FROM pm_myitem']);
+    check(!$failed_item['success'] && $failed_item['code'] === 500, 'Inventory write failure is reported to the player');
+    check((int)scalar('SELECT hp FROM pm_mypm WHERE id = 501') === 10
+        && (int)scalar("SELECT nums FROM pm_myitem WHERE uid = 7 AND itemid = '17'") === 1,
+        'Failed item consumption rolls back the out-of-battle heal');
+
+    $inventory_uses = race('user', 'use_item', array_fill(0, 2, ['item_id' => 17, 'pokemon_id' => 501]));
+    check(count(array_filter($inventory_uses, fn($r) => $r['success'])) === 1,
+        'Concurrent inventory uses cannot spend the last potion twice');
+    check((int)scalar('SELECT hp FROM pm_mypm WHERE id = 501') === 30
+        && (int)scalar("SELECT COUNT(*) FROM pm_myitem WHERE uid = 7 AND itemid = '17'") === 0,
+        'One potion produces exactly one out-of-battle heal');
+
+    $before_hp = scalar('SELECT hp FROM pm_mypm WHERE id = 502');
+    $bypass = request('user', 'use_item', ['item_id' => 17, 'pokemon_id' => 502], ['TSDM_TEST_UID' => '8']);
+    check(!$bypass['success'] && scalar('SELECT hp FROM pm_mypm WHERE id = 502') === $before_hp
+        && (int)scalar("SELECT nums FROM pm_myitem WHERE uid = 8 AND itemid = '17'") === 10,
+        'Inventory endpoint cannot bypass a battle turn to heal the active Pokemon');
+    $flee_args = ['TSDM_TEST_UID' => '8', 'TSDM_TEST_STRICT' => '1',
+        'QUERY_STRING' => 'action=heal_and_flee&pokemon_id=502'];
+    $failed_flee = request('user', 'heal_and_flee', [], array_merge($flee_args,
+        ['TSDM_TEST_FAIL_SQL' => 'UPDATE pm_myskill']));
+    check(!$failed_flee['success'] && scalar('SELECT hp FROM pm_mypm WHERE id = 502') === $before_hp
+        && (int)scalar('SELECT npcid FROM pm_usersdata WHERE uid = 8') > 0
+        && scalar('SELECT phase FROM pm_battle WHERE uid = 8') === 'active',
+        'Failed center treatment rolls back healing, battle termination and the legacy mirror');
+    $healed_flee = request('user', 'heal_and_flee', [], $flee_args);
+    check($healed_flee['success'] && (int)scalar('SELECT npcid FROM pm_usersdata WHERE uid = 8') === 0
+        && scalar('SELECT phase FROM pm_battle WHERE uid = 8') === 'ended'
+        && (int)scalar('SELECT revision FROM pm_battle WHERE uid = 8') === $second['data']['revision'] + 1,
+        'Center treatment ends the actual battle and advances its revision in strict SQL mode');
+    $recovered_flee = request('battle', 'recover', null, ['TSDM_TEST_UID' => '8']);
+    check(!$recovered_flee['success'] && $recovered_flee['code'] === 404,
+        'A battle abandoned at the center cannot reappear on reconnect');
+
+    $db->query("INSERT INTO common_member (uid, username) VALUES (9, 'fixture-new-player')");
+    $starters = race('user', 'initialize', [[], []], ['TSDM_TEST_UID' => '9']);
+    check(count(array_filter($starters, fn($r) => $r['success'])) === 1
+        && (int)scalar('SELECT COUNT(*) FROM pm_mypm WHERE uid = 9') === 1,
+        'Concurrent initialization grants one starter to a new account');
+    check((int)scalar('SELECT COUNT(*) FROM pm_usersdata WHERE uid = 9') === 1
+        && (int)scalar('SELECT COUNT(*) FROM pm_mypm WHERE uid = 9 AND site = 1') === 1,
+        'Starter and account are initialized together with one active Pokemon');
+    $db->query("INSERT INTO common_member (uid, username) VALUES (10, 'fixture-failed-starter')");
+    $failed_starter = request('user', 'initialize', [], ['TSDM_TEST_UID' => '10',
+        'TSDM_TEST_FAIL_SQL' => 'INSERT INTO pm_mypm']);
+    check(!$failed_starter['success'] && (int)scalar('SELECT COUNT(*) FROM pm_usersdata WHERE uid = 10') === 0
+        && (int)scalar('SELECT COUNT(*) FROM pm_mypm WHERE uid = 10') === 0,
+        'Failed starter creation leaves no incomplete account');
+
+    foreach (['true', 'null', '42', '"text"', '{invalid'] as $body) {
+        $invalid_json = request('shop', 'buy', $body);
+        check(!$invalid_json['success'] && $invalid_json['code'] === 400,
+            'Malformed or scalar JSON is rejected as bad input: ' . $body);
+    }
+    $type_error = request('user', 'inventory', null, ['TSDM_TEST_FAIL_SQL' => 'SELECT SQL_CALC_FOUND_ROWS',
+        'TSDM_TEST_FAIL_TYPE' => 'TypeError']);
+    check(!$type_error['success'] && $type_error['code'] === 500 && $type_error['error'] === 'Server Error',
+        'Unexpected engine errors do not expose internal messages or server paths');
+
+    $released_ids = $db->query('SELECT id FROM pm_mypm WHERE uid = 7 ORDER BY id')->fetch_all(MYSQLI_ASSOC);
+    $release_responses = race('pokemon', 'release', [['id' => (int)$released_ids[0]['id']], ['id' => (int)$released_ids[1]['id']]]);
+    check(count(array_filter($release_responses, fn($r) => $r['success'])) === 1
+        && (int)scalar('SELECT COUNT(*) FROM pm_mypm WHERE uid = 7') === 1,
+        'Concurrent releases cannot delete the last Pokemon');
+    check((int)scalar('SELECT COUNT(*) FROM pm_mypm WHERE uid = 7 AND site = 1') === 1,
+        'Concurrent releases preserve exactly one active Pokemon');
+
+    $rename = "O'Brien \\ path";
+    $remaining_id = (int)scalar('SELECT id FROM pm_mypm WHERE uid = 7');
+    $renamed = request('pokemon', 'rename', ['id' => $remaining_id, 'name' => $rename]);
+    check($renamed['success'] && scalar('SELECT nickname FROM pm_mypm WHERE uid = 7') === $rename,
+        'Pokemon names preserve apostrophes and backslashes exactly');
+    $unicode_name = '皮卡丘的冒險夥伴';
+    $unicode_renamed = request('pokemon', 'rename', ['id' => $remaining_id, 'name' => $unicode_name]);
+    check($unicode_renamed['success'] && scalar('SELECT nickname FROM pm_mypm WHERE uid = 7') === $unicode_name,
+        'Chinese nicknames are limited by characters rather than UTF-8 byte length');
+    foreach ([str_repeat('中', 21), '   ', '<b></b>', '<b> </b>'] as $invalid_name) {
+        $invalid_rename = request('pokemon', 'rename', ['id' => $remaining_id, 'name' => $invalid_name]);
+        check(!$invalid_rename['success'] && $invalid_rename['code'] === 400
+            && scalar('SELECT nickname FROM pm_mypm WHERE uid = 7') === $unicode_name,
+            'Rejected empty or overlong nickname preserves the previous name');
+    }
+
+    $db->query("INSERT INTO common_member (uid, username) VALUES (11, 'fixture-legacy-player')");
+    $db->query("INSERT INTO pm_mypm (uid, species_id, pmname, site) VALUES (11, 1, 'Legacy companion', 1)");
+    $legacy_profiles = race('user', 'profile', [null, null], ['TSDM_TEST_UID' => '11', 'TSDM_TEST_LEGACY_PROFILE' => '1']);
+    check($legacy_profiles[0]['success'] && $legacy_profiles[1]['success']
+        && (int)scalar('SELECT COUNT(*) FROM pm_usersdata WHERE uid = 11') === 1,
+        'Concurrent legacy profile loads repair one account without duplicate-key errors');
+
+    $db->query("INSERT INTO pm_itemdata (id, name, type, equipment, effects) VALUES (40, 'Fixture bracelet', 5, '{\"hp\":100}', '{}')");
+    $db->query("INSERT INTO pm_myitem (uid, itemid, nums) VALUES (7, '40', 1)");
+    $equipment_id = (int)$db->insert_id;
+    $equip_input = ['pokemon_id' => $remaining_id, 'myitem_id' => $equipment_id, 'slot_index' => 0];
+    $before_equipment_hp = scalar('SELECT hp FROM pm_mypm WHERE uid = 7');
+    $failed_equip = request('pokemon', 'equip_item', $equip_input, ['TSDM_TEST_FAIL_SQL' => 'UPDATE pm_mypm SET hp =']);
+    check(!$failed_equip['success'] && (int)scalar('SELECT equipmentid1 FROM pm_mypm WHERE uid = 7') === 0
+        && scalar('SELECT hp FROM pm_mypm WHERE uid = 7') === $before_equipment_hp,
+        'Failed equipment HP update rolls back the new slot assignment');
+    $equipped = request('pokemon', 'equip_item', $equip_input);
+    check($equipped['success'] && (int)scalar('SELECT equipmentid1 FROM pm_mypm WHERE uid = 7') === $equipment_id
+        && (int)scalar('SELECT hp FROM pm_mypm WHERE uid = 7') === $equipped['data']['new_hp'],
+        'Equipment and adjusted HP commit together');
+    $unequip_input = ['pokemon_id' => $remaining_id, 'slot_index' => 0];
+    $failed_unequip = request('pokemon', 'unequip_item', $unequip_input, ['TSDM_TEST_FAIL_SQL' => 'UPDATE pm_mypm SET hp =']);
+    check(!$failed_unequip['success'] && (int)scalar('SELECT equipmentid1 FROM pm_mypm WHERE uid = 7') === $equipment_id
+        && (int)scalar('SELECT hp FROM pm_mypm WHERE uid = 7') === $equipped['data']['new_hp'],
+        'Failed unequip HP update restores the original equipment and HP');
+    $unequipped = request('pokemon', 'unequip_item', $unequip_input);
+    check($unequipped['success'] && (int)scalar('SELECT equipmentid1 FROM pm_mypm WHERE uid = 7') === 0,
+        'Unequip succeeds after a rolled-back attempt');
+    $db->query("INSERT INTO pm_mypm (uid, species_id, pmname, site, level, hp, state) VALUES (7, 1, 'Equipment competitor', 3, 50, 50, 1)");
+    $equipment_competitor = (int)$db->insert_id;
+    $equip_race = race('pokemon', 'equip_item', [$equip_input,
+        array_merge($equip_input, ['pokemon_id' => $equipment_competitor])]);
+    check(count(array_filter($equip_race, fn($r) => $r['success'])) === 1
+        && (int)scalar('SELECT COUNT(*) FROM pm_mypm WHERE uid = 7 AND equipmentid1 = ' . $equipment_id) === 1,
+        'Concurrent equipment requests cannot assign one item to two Pokemon');
+
+    // Skill changes share the same account lock as battle actions and pet mutations.
+    $db->query("INSERT INTO common_member (uid, username) VALUES (12, 'fixture-skill-player')");
+    $db->query('INSERT INTO pm_usersdata (uid) VALUES (12)');
+    $db->query("INSERT INTO pm_mypm (id, uid, species_id, pmname, site, level, hp, state) VALUES (601, 12, 1, 'Skill learner', 1, 50, 50, 1)");
+    for ($skill_id = 301; $skill_id <= 305; $skill_id++) {
+        $db->query("INSERT INTO pm_skill (id, available_pokemons, name, description, max_uses, level_required) VALUES ($skill_id, '1', 'Skill $skill_id', '', 20, 1)");
+    }
+    $db->query('INSERT INTO pm_myskill (uid, petid, skillid, skillnum) VALUES (12, 601, 301, 20), (12, 601, 302, 20), (12, 601, 303, 20)');
+    $skill_owner = ['TSDM_TEST_UID' => '12'];
+    $learn_race = race('pokemon', 'learn_skill', [
+        ['pokemon_id' => 601, 'skill_id' => 304], ['pokemon_id' => 601, 'skill_id' => 305],
+    ], $skill_owner);
+    $learn_errors = array_values(array_filter($learn_race, fn($r) => !$r['success']));
+    check(count($learn_errors) === 1 && $learn_errors[0]['error_code'] === 'skill_slots_full'
+        && (int)scalar('SELECT COUNT(*) FROM pm_myskill WHERE uid = 12 AND petid = 601') === 4,
+        'Concurrent different learns cannot exceed four skill slots');
+    $db->query('DELETE FROM pm_myskill WHERE uid = 12');
+    $learn_input = ['pokemon_id' => 601, 'skill_id' => 301];
+    $duplicate_learn = race('pokemon', 'learn_skill', [$learn_input, $learn_input], $skill_owner);
+    $duplicate_errors = array_values(array_filter($duplicate_learn, fn($r) => !$r['success']));
+    check(count($duplicate_errors) === 1 && $duplicate_errors[0]['error_code'] === 'skill_already_learned'
+        && (int)scalar('SELECT COUNT(*) FROM pm_myskill WHERE uid = 12 AND petid = 601 AND skillid = 301') === 1,
+        'Concurrent duplicate learns store one learned skill');
+
+    foreach (['learn_skill' => 302, 'forget_skill' => 301] as $action => $skill_id) {
+        $db->begin_transaction();
+        $db->query('SELECT uid FROM pm_usersdata WHERE uid = 12 FOR UPDATE');
+        $worker = begin_request('pokemon', $action, ['pokemon_id' => 601, 'skill_id' => $skill_id], $skill_owner);
+        try {
+            $deadline = microtime(true) + 10;
+            while (!is_file($worker['base'] . '.ready')) {
+                if (microtime(true) > $deadline || !proc_get_status($worker['process'])['running']) {
+                    throw new RuntimeException('Skill request did not wait for the account lock');
+                }
+                clearstatcache(); usleep(10000);
+            }
+            // Represent a battle-start transaction committing while this request
+            // waits; its authoritative legacy projection now marks an encounter.
+            $db->query('UPDATE pm_usersdata SET npcid = 2 WHERE uid = 12');
+            $db->commit();
+        } catch (Throwable $error) {
+            $db->rollback(); throw $error;
+        }
+        $blocked = finish_request($worker);
+        check(!$blocked['success'] && $blocked['error_code'] === 'skill_battle_restricted'
+            && (int)scalar('SELECT COUNT(*) FROM pm_myskill WHERE uid = 12 AND skillid = 301') === 1
+            && (int)scalar('SELECT COUNT(*) FROM pm_myskill WHERE uid = 12 AND skillid = 302') === 0,
+            $action . ' observes a battle that committed before its account lock');
+        $db->query('UPDATE pm_usersdata SET npcid = 0 WHERE uid = 12');
+    }
+    $skill_write_failure = request('pokemon', 'learn_skill', ['pokemon_id' => 601, 'skill_id' => 302],
+        array_merge($skill_owner, ['TSDM_TEST_FAIL_SQL' => 'INSERT INTO pm_myskill']));
+    check(!$skill_write_failure['success'] && $skill_write_failure['code'] === 500
+        && (int)scalar('SELECT COUNT(*) FROM pm_myskill WHERE uid = 12') === 1,
+        'Failed skill learning leaves the original learned set intact');
+    $forget_failure = request('pokemon', 'forget_skill', $learn_input,
+        array_merge($skill_owner, ['TSDM_TEST_FAIL_SQL' => 'DELETE FROM pm_myskill']));
+    check(!$forget_failure['success'] && $forget_failure['code'] === 500
+        && (int)scalar('SELECT COUNT(*) FROM pm_myskill WHERE uid = 12') === 1,
+        'Failed skill forgetting preserves the learned skill');
+    $forgotten = request('pokemon', 'forget_skill', $learn_input, $skill_owner);
+    check($forgotten['success'] && (int)scalar('SELECT COUNT(*) FROM pm_myskill WHERE uid = 12') === 0,
+        'A valid forget commits after a rolled-back attempt');
+    $learned_again = request('pokemon', 'learn_skill', $learn_input, $skill_owner);
+    check($learned_again['success'] && (int)scalar('SELECT skillnum FROM pm_myskill WHERE uid = 12 AND skillid = 301') === 20,
+        'A valid learn commits full PP after competing and failed requests');
 
     if ($output = getenv('TSDM_API_CONTRACT_FIXTURES')) {
         file_put_contents($output, json_encode($contracts, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR));

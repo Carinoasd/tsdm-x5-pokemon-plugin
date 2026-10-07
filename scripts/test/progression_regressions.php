@@ -145,7 +145,7 @@ function fixture()
     $_GET = ['pet_id' => 3, 'petid' => 3, 'pokemon_id' => 3];
     $_POST = [];
     $GLOBALS['input'] = ['pet_id' => 3, 'pokemon_id' => 3, 'skill_id' => 9];
-    DB::$pet = ['id' => 3, 'uid' => 7, 'species_id' => 1, 'level' => 50, 'good' => 100, 'hp' => 100,
+    DB::$pet = ['id' => 3, 'uid' => 7, 'species_id' => 1, 'level' => 50, 'good' => 100, 'hp' => 100, 'site' => 1,
         'hpg' => 0, 'hpn' => 0, 'state' => 1, 'is_shiny' => 0, 'equipmentid1' => 0];
     DB::$base = ['id' => 2, 'name' => 'Evolved', 'hp' => 80];
     DB::$evolution = ['id' => 4, 'from_id' => 1, 'to_id' => 2, 'method' => 'item', 'condition_value' => '12'];

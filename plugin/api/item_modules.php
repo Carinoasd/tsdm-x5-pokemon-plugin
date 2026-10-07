@@ -507,6 +507,11 @@ function txq($petid, $itemname, $itemid = 0)
 {
     return _evolution_stone($petid, $itemname, $itemid);
 }
+// Legacy item catalogs use txk for the same communication item.
+function txk($petid, $itemname, $itemid = 0)
+{
+    return txq($petid, $itemname, $itemid);
+}
 function bhj($petid, $itemname, $itemid = 0)
 {
     return _evolution_stone($petid, $itemname, $itemid);
@@ -664,11 +669,16 @@ function lvupitem($petid, $itemname)
     }
 
     $new_level = min(100, $current_level + 1);
+    // Experience is cumulative; the table stores each level's upper boundary.
+    // Preserve earned progress while granting the threshold for the new level.
+    $exp_table = api_get_pet_exp_max_data($pet['species_id']);
+    $new_exp = max((int)$pet['exp'], 1, api_get_pet_exp_max($exp_table, $new_level - 1));
 
-    // 更新等级
+    // 等级与经验必须一起更新，由道具使用端的事务统一提交。
     DB::query(pm_sql(
-        "UPDATE " . pm_table('pm_mypm') . " SET level = %d WHERE id = %d",
+        "UPDATE " . pm_table('pm_mypm') . " SET level = %d, exp = %d WHERE id = %d",
         $new_level,
+        $new_exp,
         $petid
     ));
 

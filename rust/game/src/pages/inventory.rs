@@ -5,7 +5,10 @@ use crate::{
         common::Modal,
         layout::{Page, CURRENT_PAGE, IMG_PATH, INITIAL_INVENTORY_CATEGORY},
     },
-    state::{refresh_inventory_state, show_error, show_success, show_warning, use_battle_state},
+    state::{
+        refresh_inventory_state, refresh_pokemon_list, show_error, show_success, show_warning,
+        use_battle_state,
+    },
     utils::api_client::NewApiClient,
 };
 
@@ -41,12 +44,15 @@ pub fn Inventory() -> Element {
     let mut show_target_modal = use_signal(|| false);
     let mut pokemon_list_error_shown = use_signal(|| false);
 
-    let mut usable_pokemon_list = use_resource(move || async move {
-        if let Some((item_id, _, _)) = selected_item.read().as_ref() {
-            let api = NewApiClient::new();
-            Some(api.get_usable_pokemon(*item_id).await)
-        } else {
-            None
+    let mut usable_pokemon_list = use_resource(move || {
+        let selection = selected_item.read().clone();
+        async move {
+            if let Some((item_id, _, _)) = selection {
+                let api = NewApiClient::new();
+                Some(api.get_usable_pokemon(item_id).await)
+            } else {
+                None
+            }
         }
     });
 
@@ -110,6 +116,9 @@ pub fn Inventory() -> Element {
     });
 
     let mut use_item = move |item_id: u64, item_type_id: u64, item_name: String| {
+        if using_item.read().is_some() {
+            return;
+        }
         let target_type = get_item_target_type(item_type_id);
 
         // 装备道具特殊处理：跳转到个人中心装备页面
@@ -153,6 +162,9 @@ pub fn Inventory() -> Element {
     };
 
     let mut confirm_use_on_pokemon = move |pokemon_id: u64| {
+        if using_item.read().is_some() {
+            return;
+        }
         if let Some((item_id, _item_name, _)) = selected_item.read().as_ref() {
             let target_item_id = *item_id;
             using_item.set(Some(target_item_id));
@@ -163,8 +175,9 @@ pub fn Inventory() -> Element {
                 match api.use_item(target_item_id, Some(pokemon_id)).await {
                     Ok(result) => {
                         show_success(result.message);
+                        selected_item.set(None);
                         inventory_data.restart();
-                        usable_pokemon_list.restart();
+                        refresh_pokemon_list();
                         refresh_inventory_state();
                     }
                     Err(e) => {
@@ -384,6 +397,7 @@ pub fn Inventory() -> Element {
                 is_open: *show_target_modal.read(),
                 on_close: move |_| {
                     show_target_modal.set(false);
+                    selected_item.set(None);
                     pokemon_list_error_shown.set(false);
                 },
                 title: {

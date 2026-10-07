@@ -84,8 +84,17 @@ pub fn Layout() -> Element {
         div { class: "app-layout",
             if !is_logged_in {
                 div { class: "loading-container",
-                    div { class: "loading-spinner" }
-                    p { "加载中..." }
+                    if let Some(error) = USER_STATE.read().profile_error.clone() {
+                        p { role: "alert", "账户载入失败：{error}" }
+                        button {
+                            class: "btn btn-primary",
+                            onclick: move |_| crate::state::refresh_user_profile_state(),
+                            "重新载入"
+                        }
+                    } else {
+                        div { class: "loading-spinner" }
+                        p { "加载中..." }
+                    }
                 }
             } else if needs_welcome {
                 Welcome {}

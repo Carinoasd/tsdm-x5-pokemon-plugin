@@ -25,6 +25,7 @@ require_once __DIR__ . '/index.php';
 
 // 加载常量定义
 require_once __DIR__ . '/constants.php';
+require_once __DIR__ . '/battle_storage.php';
 
 global $_G;
 
@@ -133,120 +134,6 @@ function pm_data($id)
  * 都读旧列，镜像保证它们行为不变。后续阶段逐端点迁移后再废弃旧列。
  * ==================================================================== */
 
-/**
- * 惰性建表（老站点升级路径，幂等）。
- * DDL 与 docker/init.d/02-pokemon-schema.sql、plugin/install.php 保持一致。
- */
-function battle_ensure_tables()
-{
-    static $done = false;
-    if ($done) {
-        return;
-    }
-    $done = true;
-    DB::query("CREATE TABLE IF NOT EXISTS " . pm_table('pm_battle') . " (
-        `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
-        `uid` mediumint(8) unsigned NOT NULL,
-        `kind` varchar(10) NOT NULL DEFAULT 'wild',
-        `map_id` int(10) unsigned NOT NULL DEFAULT 0,
-        `turn` int(10) unsigned NOT NULL DEFAULT 0,
-        `revision` int(10) unsigned NOT NULL DEFAULT 0,
-        `phase` varchar(20) NOT NULL DEFAULT 'active',
-        `result` varchar(10) NOT NULL DEFAULT '',
-        `rng_seed` bigint(20) NOT NULL DEFAULT 0,
-        `rng_counter` int(10) unsigned NOT NULL DEFAULT 0,
-        `event_seq` int(10) unsigned NOT NULL DEFAULT 0,
-        `rules_version` int(10) unsigned NOT NULL DEFAULT 1,
-        `state_version` int(10) unsigned NOT NULL DEFAULT 2,
-        `field_json` text NOT NULL,
-        `created_at` int(10) unsigned NOT NULL DEFAULT 0,
-        `updated_at` int(10) unsigned NOT NULL DEFAULT 0,
-        PRIMARY KEY (`id`),
-        KEY `idx_uid` (`uid`),
-        KEY `idx_uid_phase` (`uid`, `phase`)
-    ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci");
-    // Old installations need the same revision column before any transaction.
-    $revision_column = DB::fetch_first("SHOW COLUMNS FROM " . pm_table('pm_battle') . " LIKE 'revision'");
-    if (!$revision_column) {
-        DB::query("ALTER TABLE " . pm_table('pm_battle') . " ADD COLUMN revision int(10) unsigned NOT NULL DEFAULT 0", 'SILENT');
-        if (!DB::fetch_first("SHOW COLUMNS FROM " . pm_table('pm_battle') . " LIKE 'revision'")) {
-            throw new RuntimeException('Battle revision migration failed');
-        }
-    }
-    DB::query("CREATE TABLE IF NOT EXISTS " . pm_table('pm_battle_action') . " (
-        `uid` mediumint(8) unsigned NOT NULL,
-        `request_id` varchar(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
-        `action` varchar(24) NOT NULL,
-        `payload_hash` char(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
-        `battle_id` bigint(20) unsigned NOT NULL DEFAULT 0,
-        `response_json` mediumtext DEFAULT NULL,
-        `created_at` int(10) unsigned NOT NULL DEFAULT 0,
-        PRIMARY KEY (`uid`, `request_id`),
-        KEY `idx_uid_created` (`uid`, `created_at`)
-    ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci");
-    DB::query("CREATE TABLE IF NOT EXISTS " . pm_table('pm_battle_unit') . " (
-        `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
-        `battle_id` bigint(20) unsigned NOT NULL,
-        `side` varchar(5) NOT NULL DEFAULT 'ally',
-        `slot` tinyint(3) unsigned NOT NULL DEFAULT 0,
-        `instance_id` int(10) unsigned NOT NULL DEFAULT 0,
-        `species_id` mediumint(8) unsigned NOT NULL DEFAULT 0,
-        `name` varchar(60) NOT NULL DEFAULT '',
-        `species_name` varchar(60) NOT NULL DEFAULT '',
-        `level` smallint(5) unsigned NOT NULL DEFAULT 1,
-        `stats_json` text NOT NULL,
-        `types_json` text NOT NULL,
-        `hp` int(10) NOT NULL DEFAULT 0,
-        `stages_json` text NOT NULL,
-        `status_json` text NOT NULL,
-        `volatile_json` text NOT NULL,
-        `buffs_json` text NOT NULL,
-        `effects_json` text NOT NULL,
-        `fainted` tinyint(1) NOT NULL DEFAULT 0,
-        `gender` tinyint(1) NOT NULL DEFAULT 0,
-        `is_shiny` tinyint(1) NOT NULL DEFAULT 0,
-        `capture_rate` smallint(5) unsigned NOT NULL DEFAULT 0,
-        `boss_multiplier` float NOT NULL DEFAULT 1,
-        PRIMARY KEY (`id`),
-        KEY `idx_battle` (`battle_id`)
-    ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci");
-    DB::query("CREATE TABLE IF NOT EXISTS " . pm_table('pm_effect') . " (
-        `id` int(10) unsigned NOT NULL AUTO_INCREMENT,
-        `code` varchar(40) NOT NULL,
-        `kind` varchar(10) NOT NULL DEFAULT 'move',
-        `hooks_json` text NOT NULL,
-        `params_json` text NOT NULL,
-        `description` varchar(255) NOT NULL DEFAULT '',
-        `version` int(10) unsigned NOT NULL DEFAULT 1,
-        PRIMARY KEY (`id`),
-        UNIQUE KEY `uk_code` (`code`)
-    ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci");
-    // 旧库 pm_skill 无 effect_id 列时惰性补列（幂等）
-    $skill_col = DB::fetch_first("SHOW COLUMNS FROM " . pm_table('pm_skill') . " LIKE 'effect_id'");
-    if (!$skill_col) {
-        DB::query("ALTER TABLE " . pm_table('pm_skill') . " ADD COLUMN effect_id int(10) unsigned NOT NULL DEFAULT 0 AFTER element");
-    }
-    DB::query("CREATE TABLE IF NOT EXISTS " . pm_table('pm_status') . " (
-        `code` varchar(20) NOT NULL,
-        `name` varchar(30) NOT NULL DEFAULT '',
-        `behavior_json` text NOT NULL,
-        `overlap` varchar(10) NOT NULL DEFAULT 'replace',
-        `version` int(10) unsigned NOT NULL DEFAULT 1,
-        PRIMARY KEY (`code`)
-    ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci");
-    DB::query("CREATE TABLE IF NOT EXISTS " . pm_table('pm_battle_event') . " (
-        `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
-        `battle_id` bigint(20) unsigned NOT NULL,
-        `turn` int(10) unsigned NOT NULL DEFAULT 0,
-        `seq` int(10) unsigned NOT NULL DEFAULT 0,
-        `type` varchar(30) NOT NULL DEFAULT '',
-        `payload_json` text NOT NULL,
-        `schema_version` smallint(5) unsigned NOT NULL DEFAULT 1,
-        `created_at` int(10) unsigned NOT NULL DEFAULT 0,
-        PRIMARY KEY (`id`),
-        KEY `idx_battle_turn` (`battle_id`, `turn`)
-    ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci");
-}
 
 /**
  * 载入用户进行中的战斗（新表优先）。
@@ -906,6 +793,9 @@ function api_start_battle()
     if (!$map) {
         api_error('Map not found', 404);
     }
+    if (empty($map['is_enabled'])) {
+        api_error('此地图暂未开放', 403);
+    }
 
     // 检查宠物HP
     if ($mypokemon['hp'] <= 0) {
@@ -941,7 +831,7 @@ function api_start_battle()
     // 生成野怪的性别和闪光状态（只生成一次，战斗过程中保持不变）
     $gender = 0;
     $sexrand = rand(1, 1000);
-    if ($npc['sex'] > 0) {
+    if ($npc['sex'] >= 0) {
         $gender = ($sexrand <= $npc['sex']) ? 0 : 1;
     }
     $is_shiny = (rand(1, 4096) === 1);
@@ -1557,9 +1447,9 @@ function generate_wild_pokemon_legacy($map, $strength, $force_boss_type_id = nul
     for ($i = 0; $i < 100; $i++) {
         $pet = DB::fetch_first(pm_sql(
             "SELECT * FROM " . pm_table('pm_data') . "
-            WHERE mapid LIKE %s OR mapid = '999'
+            WHERE FIND_IN_SET(%d, REPLACE(mapid, ' ', '')) > 0 OR mapid = '999'
             ORDER BY rand() LIMIT 1",
-            '%' . $map_id . '%'
+            $map_id
         ));
 
         if (!$pet) {
@@ -1716,7 +1606,7 @@ function apply_rewards($uid, $mypokemon, $rewards)
     $old_level = intval($mypokemon['level']);
     $pmno = intval($mypokemon['species_id']);
 
-    $new_level = api_get_pet_exp_level($pmno, $new_exp);
+    $new_level = max($old_level, api_get_pet_exp_level($pmno, $new_exp));
     $level_up = false;
 
     if ($new_level > $old_level) {
@@ -1763,35 +1653,6 @@ function apply_rewards($uid, $mypokemon, $rewards)
     ];
 }
 
-/**
- * 清理战斗状态
- */
-function clear_battle_state($uid)
-{
-    // 同步结束新引擎的进行中战斗（capture/use_item/switch 等路径收尾时联动）。
-    // 已有 result 的战斗（fled/victory 已由新引擎路径写入）不覆盖 result；
-    // 无 result 的（旧路径清状态）记为 abandoned。
-    // 两条拆分而非 IF(result='')：Discuz querysafe 拒绝含空串字面量的表达式。
-    battle_ensure_tables();
-    DB::query(pm_sql(
-        "UPDATE " . pm_table('pm_battle') . "
-        SET phase = 'ended', updated_at = %d
-        WHERE uid = %d AND phase IN ('active', 'awaiting_switch') AND CHAR_LENGTH(result) > 0",
-        time(), $uid
-    ));
-    DB::query(pm_sql(
-        "UPDATE " . pm_table('pm_battle') . "
-        SET phase = 'ended', result = 'abandoned', updated_at = %d
-        WHERE uid = %d AND phase IN ('active', 'awaiting_switch') AND CHAR_LENGTH(result) = 0",
-        time(), $uid
-    ));
-    // 这些列均为整数类型：写入 '' 在 MariaDB 严格模式(STRICT_TRANS_TABLES)下会直接报错，
-    // 导致战斗状态无法清除（用户卡在战斗中），必须写 0
-    DB::query(pm_sql("UPDATE " . pm_table('pm_usersdata') . "
-        SET npcid = 0, level = 0, hp = 0, hpg = 0, atkg = 0, defg = 0,
-            spatkg = 0, spdefg = 0, sdg = 0, allure = 0, capture = 0
-        WHERE uid = %d", $uid));
-}
 
 /**
  * 我方宠物倒下时的统一判定。
@@ -1916,7 +1777,7 @@ function build_battle_response($myusersdata, $mypokemon, $map = null, $is_boss =
         } else {
             // 生成新的随机属性
             $sexrand = rand(1, 1000);
-            if ($npc['sex'] > 0) {
+            if ($npc['sex'] >= 0) {
                 $gender = ($sexrand <= $npc['sex']) ? 0 : 1;
             }
             $is_shiny = (rand(1, 4096) === 1);

@@ -76,6 +76,12 @@ impl NewApiClient {
         }
     }
 
+    async fn player_mutation<T>(&self, operation: impl Future<Output = Result<T>>) -> Result<T> {
+        battle_timeout(operation)
+            .await
+            .map_err(|_| anyhow!("请求超时，操作结果尚未确认。请先检查最新资料，避免重复操作。"))?
+    }
+
     // ============== 请求核心 ==============
 
     fn url(&self, endpoint: &str, action: &str, query: &str) -> String {
@@ -247,7 +253,7 @@ impl NewApiClient {
 
     /// 重命名宠物
     pub async fn rename_pokemon(&self, id: u64, name: &str) -> Result<()> {
-        self.post_unit(
+        self.player_mutation(self.post_unit(
             "pokemon",
             "rename",
             "",
@@ -255,7 +261,7 @@ impl NewApiClient {
                 id,
                 name: name.to_string(),
             },
-        )
+        ))
         .await
     }
 
@@ -627,13 +633,12 @@ impl NewApiClient {
         let type_param = item_type
             .map(|t| format!("&type={}", t))
             .unwrap_or_default();
-        self.get("shop", "list", &format!("&page={}{}", page, type_param))
-            .await
+        battle_timeout(self.get("shop", "list", &format!("&page={}{}", page, type_param))).await?
     }
 
     /// 购买物品
     pub async fn buy_item(&self, item_id: u64, quantity: u32) -> Result<BuyItemResponse> {
-        self.post(
+        self.player_mutation(self.post(
             "shop",
             "buy",
             "",
@@ -641,16 +646,16 @@ impl NewApiClient {
                 item_id,
                 quantity: quantity as u64,
             },
-        )
+        ))
         .await
     }
 
     pub async fn get_shop_pets(&self, page: u32) -> Result<ShopPetListResponse> {
-        self.get("shop", "pets", &format!("&page={}", page)).await
+        battle_timeout(self.get("shop", "pets", &format!("&page={}", page))).await?
     }
 
     pub async fn buy_pet(&self, pokemon_type_id: u64) -> Result<BuyPetResponse> {
-        self.post("shop", "buy_pet", "", &BuyPetRequest { pokemon_type_id })
+        self.player_mutation(self.post("shop", "buy_pet", "", &BuyPetRequest { pokemon_type_id }))
             .await
     }
 
@@ -677,7 +682,7 @@ impl NewApiClient {
 
     /// 获取用户资料
     pub async fn get_user_profile(&self) -> Result<UserProfileResponse> {
-        self.get("user", "profile", "").await
+        battle_timeout(self.get("user", "profile", "")).await?
     }
 
     /// 获取用户游戏统计
@@ -736,17 +741,21 @@ impl NewApiClient {
 
     /// 治疗宝可梦
     pub async fn heal_pokemon(&self, pokemon_id: u64) -> Result<HealResponse> {
-        self.post_empty("user", "heal", &format!("&pokemon_id={}", pokemon_id))
-            .await
+        self.player_mutation(self.post_empty(
+            "user",
+            "heal",
+            &format!("&pokemon_id={}", pokemon_id),
+        ))
+        .await
     }
 
     /// 脱战并治疗宝可梦（宠物中心绿色通道）
     pub async fn heal_and_flee(&self, pokemon_id: u64) -> Result<HealResponse> {
-        self.post_empty(
+        self.player_mutation(self.post_empty(
             "user",
             "heal_and_flee",
             &format!("&pokemon_id={}", pokemon_id),
-        )
+        ))
         .await
     }
 
@@ -757,7 +766,8 @@ impl NewApiClient {
 
     /// 初始化新玩家
     pub async fn initialize_player(&self) -> Result<InitializePlayerResponse> {
-        self.post_empty("user", "initialize", "").await
+        self.player_mutation(self.post_empty("user", "initialize", ""))
+            .await
     }
 
     /// 刷新（hide=false，重新同步宠物数据并显示）或隐藏（hide=true）帖子宠物徽章

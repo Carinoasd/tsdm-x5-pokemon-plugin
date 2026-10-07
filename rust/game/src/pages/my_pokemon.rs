@@ -203,6 +203,7 @@ pub fn MyPokemon() -> Element {
                                     match *MY_POKEMON_TAB.read() {
                                         MyPokemonTab::Stats => rsx! {
                                             StatsTabContent {
+                                                key: "stats-{pm.id}",
                                                 pokemon_id: pm.id,
                                                 pm_name: pm.name.clone(),
                                                 pm_type_id: pm.type_id,
@@ -232,10 +233,10 @@ pub fn MyPokemon() -> Element {
                                             }
                                         },
                                         MyPokemonTab::Equipment => rsx! {
-                                            EquipmentTabContent { pokemon_id: pm.id, refresh_trigger }
+                                            EquipmentTabContent { key: "equipment-{pm.id}", pokemon_id: pm.id, refresh_trigger }
                                         },
                                         MyPokemonTab::Skills => rsx! {
-                                            SkillsTabContent { pokemon_id: pm.id, pokemon_level: pm.level as u32, refresh_trigger }
+                                            SkillsTabContent { key: "skills-{pm.id}", pokemon_id: pm.id, pokemon_level: pm.level as u32, refresh_trigger }
                                         },
                                     }
                                 }
@@ -342,6 +343,9 @@ fn StatsTabContent(
     let mut save_success = use_signal(|| false);
 
     let handle_key_down = move |e: KeyboardEvent| {
+        if *is_saving.read() {
+            return;
+        }
         if e.key() == Key::Enter {
             let new_name = edit_value.read().clone();
             if new_name.is_empty() || new_name.trim().is_empty() {
@@ -364,6 +368,7 @@ fn StatsTabContent(
                 let api = NewApiClient::new();
                 match api.rename_pokemon(pokemon_id, &new_name).await {
                     Ok(_) => {
+                        is_saving.set(false);
                         save_success.set(true);
                         is_editing.set(false);
                         refresh_trigger += 1;
@@ -412,6 +417,7 @@ fn StatsTabContent(
                     div { class: "pokemon-name-edit-wrapper",
                         input {
                             class: "pokemon-name-input",
+                            "aria-label": "宠物昵称",
                             value: "{edit_value}",
                             oninput: move |e| {
                                 let value = e.value();
@@ -427,7 +433,9 @@ fn StatsTabContent(
                         div { class: "edit-actions-inline",
                             button {
                                 class: "edit-action-btn save",
+                                disabled: *is_saving.read(),
                                 onclick: move |_event| {
+                                    if *is_saving.read() { return; }
                                     let new_name = edit_value.read().clone();
                                     if new_name.is_empty() || new_name.trim().is_empty() {
                                         save_error.set(Some("昵称不能为空".to_string()));
@@ -449,6 +457,7 @@ fn StatsTabContent(
                                         let api = NewApiClient::new();
                                         match api.rename_pokemon(pokemon_id, &new_name).await {
                                             Ok(_) => {
+                                                is_saving.set(false);
                                                 save_success.set(true);
                                                 is_editing.set(false);
                                                 refresh_trigger += 1;
@@ -466,7 +475,9 @@ fn StatsTabContent(
                             }
                             button {
                                 class: "edit-action-btn cancel",
+                                disabled: *is_saving.read(),
                                 onclick: move |_| {
+                                    if *is_saving.read() { return; }
                                     is_editing.set(false);
                                     save_error.set(None);
                                     save_success.set(false);
@@ -475,6 +486,9 @@ fn StatsTabContent(
                                 title: "取消",
                                 "✕"
                             }
+                        }
+                        if let Some(error) = save_error.read().as_ref() {
+                            p { class: "error-message", role: "alert", "{error}" }
                         }
                     }
                 } else {
@@ -492,6 +506,7 @@ fn StatsTabContent(
                     }
                     button {
                         class: "edit-icon-btn",
+                        "aria-label": "修改昵称",
                         onclick: move |_event| {
                             edit_value.set(display_name.clone());
                             is_editing.set(true);

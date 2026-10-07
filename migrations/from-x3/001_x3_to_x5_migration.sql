@@ -51,7 +51,7 @@ BEGIN
           FROM information_schema.COLUMNS
          WHERE TABLE_SCHEMA = DATABASE()
            AND TABLE_NAME = 'pm_data'
-           AND COLUMN_NAME IN ('txt','sd','god','hpn','minmoney');
+           AND COLUMN_NAME IN ('txt','sd','god','hpn','atkn','defn','spatkn','spdefn','sdn','minmoney','maxmoney');
 
         -- Always ensure new columns exist (idempotent)
         ALTER TABLE `pm_data`
@@ -62,6 +62,20 @@ BEGIN
           ADD COLUMN IF NOT EXISTS `drop_money`    varchar(60)  NOT NULL DEFAULT '' AFTER `is_legendary`;
 
         IF has_old > 0 THEN
+            -- Missing legacy sources stay NULL so partially migrated values survive.
+            ALTER TABLE `pm_data`
+              ADD COLUMN IF NOT EXISTS `txt` text NULL DEFAULT NULL,
+              ADD COLUMN IF NOT EXISTS `sd` int NULL DEFAULT NULL,
+              ADD COLUMN IF NOT EXISTS `god` int NULL DEFAULT NULL,
+              ADD COLUMN IF NOT EXISTS `hpn` int NULL DEFAULT NULL,
+              ADD COLUMN IF NOT EXISTS `atkn` int NULL DEFAULT NULL,
+              ADD COLUMN IF NOT EXISTS `defn` int NULL DEFAULT NULL,
+              ADD COLUMN IF NOT EXISTS `spatkn` int NULL DEFAULT NULL,
+              ADD COLUMN IF NOT EXISTS `spdefn` int NULL DEFAULT NULL,
+              ADD COLUMN IF NOT EXISTS `sdn` int NULL DEFAULT NULL,
+              ADD COLUMN IF NOT EXISTS `minmoney` int NULL DEFAULT NULL,
+              ADD COLUMN IF NOT EXISTS `maxmoney` int NULL DEFAULT NULL;
+
             UPDATE `pm_data` SET
               `description`   = IFNULL(`txt`,  `description`),
               `speed`         = IFNULL(`sd`,   `speed`),
@@ -77,8 +91,7 @@ BEGIN
               `drop_money`    = IF(`drop_money` = '' OR `drop_money` IS NULL,
                   CONCAT('[', IFNULL(`minmoney`,0), ',', IFNULL(`maxmoney`,0), ']'),
                   `drop_money`)
-            WHERE `txt` IS NOT NULL OR `sd` IS NOT NULL OR `god` IS NOT NULL
-               OR `hpn` IS NOT NULL OR `minmoney` IS NOT NULL;
+            WHERE `txt` IS NOT NULL OR `sd` IS NOT NULL OR `god` IS NOT NULL OR `hpn` IS NOT NULL OR `atkn` IS NOT NULL OR `defn` IS NOT NULL OR `spatkn` IS NOT NULL OR `spdefn` IS NOT NULL OR `sdn` IS NOT NULL OR `minmoney` IS NOT NULL OR `maxmoney` IS NOT NULL;
 
             ALTER TABLE `pm_data`
               DROP COLUMN IF EXISTS `txt`,
@@ -129,6 +142,12 @@ BEGIN
           ADD COLUMN IF NOT EXISTS `created_at` int(10) unsigned NOT NULL DEFAULT 0;
 
         IF has_old > 0 THEN
+            -- Missing legacy sources stay NULL so partially migrated values survive.
+            ALTER TABLE `pm_mypm`
+              ADD COLUMN IF NOT EXISTS `nowname` varchar(30) NULL DEFAULT NULL,
+              ADD COLUMN IF NOT EXISTS `pmno` int NULL DEFAULT NULL,
+              ADD COLUMN IF NOT EXISTS `sg` int NULL DEFAULT NULL;
+
             UPDATE `pm_mypm` SET
               `nickname`   = IFNULL(`nowname`, `nickname`),
               `species_id` = IFNULL(`pmno`,    `species_id`),
@@ -175,6 +194,15 @@ BEGIN
           ADD COLUMN IF NOT EXISTS `element`            varchar(6) NOT NULL DEFAULT '' AFTER `type`;
 
         IF has_old > 0 THEN
+            -- Missing legacy sources stay NULL so partially migrated values survive.
+            ALTER TABLE `pm_skill`
+              ADD COLUMN IF NOT EXISTS `pmid` mediumtext NULL DEFAULT NULL,
+              ADD COLUMN IF NOT EXISTS `txt` mediumtext NULL DEFAULT NULL,
+              ADD COLUMN IF NOT EXISTS `lv` int NULL DEFAULT NULL,
+              ADD COLUMN IF NOT EXISTS `powr` int NULL DEFAULT NULL,
+              ADD COLUMN IF NOT EXISTS `num` int NULL DEFAULT NULL,
+              ADD COLUMN IF NOT EXISTS `tn` varchar(6) NULL DEFAULT NULL;
+
             UPDATE `pm_skill` SET
               `available_pokemons` = IFNULL(`pmid`, `available_pokemons`),
               `description`        = IFNULL(`txt`,  `description`),
@@ -182,7 +210,7 @@ BEGIN
               `power`              = IFNULL(`powr`, `power`),
               `max_uses`           = IFNULL(`num`,  `max_uses`),
               `element`            = IFNULL(`tn`,   `element`)
-            WHERE `pmid` IS NOT NULL OR `txt` IS NOT NULL OR `lv` IS NOT NULL;
+            WHERE `pmid` IS NOT NULL OR `txt` IS NOT NULL OR `lv` IS NOT NULL OR `powr` IS NOT NULL OR `num` IS NOT NULL OR `tn` IS NOT NULL;
 
             ALTER TABLE `pm_skill`
               DROP COLUMN IF EXISTS `pmid`,
@@ -225,6 +253,14 @@ BEGIN
           ADD COLUMN IF NOT EXISTS `boss_config` text NOT NULL AFTER `site`;
 
         IF has_old > 0 THEN
+            -- Missing legacy sources stay NULL so partially migrated values survive.
+            ALTER TABLE `pm_map`
+              ADD COLUMN IF NOT EXISTS `kg` int NULL DEFAULT NULL,
+              ADD COLUMN IF NOT EXISTS `minlevel` int NULL DEFAULT NULL,
+              ADD COLUMN IF NOT EXISTS `maxlevel` int NULL DEFAULT NULL,
+              ADD COLUMN IF NOT EXISTS `exp` int NULL DEFAULT NULL,
+              ADD COLUMN IF NOT EXISTS `expn` text NULL DEFAULT NULL;
+
             UPDATE `pm_map` SET
               `is_enabled`  = IFNULL(`kg`,       `is_enabled`),
               `min_level`   = IFNULL(`minlevel`, `min_level`),
@@ -232,7 +268,7 @@ BEGIN
               `experience`  = IFNULL(`exp`,      `experience`),
               `boss_config` = IF((`boss_config` = '' OR `boss_config` IS NULL) AND `expn` IS NOT NULL,
                                  `expn`, `boss_config`)
-            WHERE `kg` IS NOT NULL OR `minlevel` IS NOT NULL OR `exp` IS NOT NULL OR `expn` IS NOT NULL;
+            WHERE `kg` IS NOT NULL OR `minlevel` IS NOT NULL OR `maxlevel` IS NOT NULL OR `exp` IS NOT NULL OR `expn` IS NOT NULL;
 
             ALTER TABLE `pm_map`
               DROP COLUMN IF EXISTS `kg`,
@@ -264,7 +300,7 @@ BEGIN
           FROM information_schema.COLUMNS
          WHERE TABLE_SCHEMA = DATABASE()
            AND TABLE_NAME = 'pm_itemdata'
-           AND COLUMN_NAME IN ('txt','addhp','equipment_hp');
+           AND COLUMN_NAME IN ('txt','addhp','addexp','addlv','addgood','equipment_hp','equipment_atk','equipment_def','equipment_spatk','equipment_spdef','equipment_sd');
 
         ALTER TABLE `pm_itemdata`
           ADD COLUMN IF NOT EXISTS `description` varchar(255) NOT NULL DEFAULT '' AFTER `tpname`,
@@ -273,6 +309,20 @@ BEGIN
           ADD COLUMN IF NOT EXISTS `equipment`   text NOT NULL AFTER `zbtype`;
 
         IF has_old > 0 THEN
+            -- Missing legacy sources stay NULL so partially migrated values survive.
+            ALTER TABLE `pm_itemdata`
+              ADD COLUMN IF NOT EXISTS `txt` text NULL DEFAULT NULL,
+              ADD COLUMN IF NOT EXISTS `addhp` int NULL DEFAULT NULL,
+              ADD COLUMN IF NOT EXISTS `addexp` int NULL DEFAULT NULL,
+              ADD COLUMN IF NOT EXISTS `addlv` int NULL DEFAULT NULL,
+              ADD COLUMN IF NOT EXISTS `addgood` int NULL DEFAULT NULL,
+              ADD COLUMN IF NOT EXISTS `equipment_hp` int NULL DEFAULT NULL,
+              ADD COLUMN IF NOT EXISTS `equipment_atk` int NULL DEFAULT NULL,
+              ADD COLUMN IF NOT EXISTS `equipment_def` int NULL DEFAULT NULL,
+              ADD COLUMN IF NOT EXISTS `equipment_spatk` int NULL DEFAULT NULL,
+              ADD COLUMN IF NOT EXISTS `equipment_spdef` int NULL DEFAULT NULL,
+              ADD COLUMN IF NOT EXISTS `equipment_sd` int NULL DEFAULT NULL;
+
             UPDATE `pm_itemdata` SET
               `description` = IFNULL(`txt`, `description`),
               -- 旧库模块名存于 sitemname（强化/PP类）或 tpname（其余），回填到 module 列
@@ -294,7 +344,7 @@ BEGIN
                               'spdef',IFNULL(`equipment_spdef`,0),
                               'spd',  IFNULL(`equipment_sd`,0)),
                   `equipment`)
-            WHERE `txt` IS NOT NULL OR `addhp` IS NOT NULL OR `equipment_hp` IS NOT NULL;
+            WHERE `txt` IS NOT NULL OR `addhp` IS NOT NULL OR `addexp` IS NOT NULL OR `addlv` IS NOT NULL OR `addgood` IS NOT NULL OR `equipment_hp` IS NOT NULL OR `equipment_atk` IS NOT NULL OR `equipment_def` IS NOT NULL OR `equipment_spatk` IS NOT NULL OR `equipment_spdef` IS NOT NULL OR `equipment_sd` IS NOT NULL;
 
             ALTER TABLE `pm_itemdata`
               DROP COLUMN IF EXISTS `txt`,

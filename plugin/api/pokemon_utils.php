@@ -249,10 +249,10 @@ function create_new_pokemon_data($pokemon_data, $level, $uid, $nickname = null)
     $ivs = $stats['ivs'];
     $evs = $stats['evs'];
 
-    // 随机性别
-    $sex_rand = rand(1, 100);
+    // pm_data.sex is the male weight per thousand; -1 alone is genderless.
+    $sex_rand = rand(1, 1000);
     $pokemon_sex = intval($pokemon_data['sex']);
-    if ($pokemon_sex > 0) {
+    if ($pokemon_sex >= 0) {
         $sex = ($sex_rand <= $pokemon_sex) ? 1 : 2;
     } else {
         $sex = 0;

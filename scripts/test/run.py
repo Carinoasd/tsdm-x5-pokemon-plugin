@@ -425,6 +425,11 @@ def main():
     test_php_regression("Battle turn endpoint regression", "battle_engine_turn.php")
     test_php_regression("Battle action replay regression", "battle_actions.php")
     test_php_regression("Inventory search regression", "inventory_search.php")
+    test_php_regression("Pokemon mutation integrity regression", "pokemon_mutation_integrity.php")
+    test_php_regression("Battle encounter selection regression", "battle_encounters.php")
+    test_php_regression("Skill mutation integrity regression", "skill_mutation_integrity.php")
+    test_php_regression("Battle reward progression regression", "battle_reward_progression.php")
+    test_php_regression("Evolution battle guard regression", "evolution_battle_guard.php")
 
     print("\n" + "=" * 60)
     print(f"Results: {PASS} passed, {FAIL} failed, {WARN} warnings")

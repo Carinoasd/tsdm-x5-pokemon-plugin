@@ -19,7 +19,8 @@ $wanted = ['battle_reload_action_context', 'battle_consume_owned_item', 'api_use
     'battle_pick_enemy_move',
     'battle_ensure_tables', 'battle_load_active', 'battle_inject_ally_fresh_state',
     'battle_persist_state', 'battle_mirror_legacy'];
-$tokens = token_get_all(file_get_contents(__DIR__ . '/../../plugin/api/battle.php'));
+$tokens = token_get_all(file_get_contents(__DIR__ . '/../../plugin/api/battle.php')
+    . substr(file_get_contents(__DIR__ . '/../../plugin/api/battle_storage.php'), 5));
 for ($i = 0; $i < count($tokens); $i++) {
     if (!is_array($tokens[$i]) || $tokens[$i][0] !== T_FUNCTION) continue;
     $start = $i;

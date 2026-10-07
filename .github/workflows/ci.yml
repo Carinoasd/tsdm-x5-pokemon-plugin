@@ -113,6 +113,7 @@ jobs:
       TSDM_DB_HOST: 127.0.0.1
       TSDM_DB_USER: root
       TSDM_DB_PASSWORD: test-password
+      TSDM_PHP_CGI: php-cgi8.3
       TSDM_API_CONTRACT_FIXTURES: ${{ github.workspace }}/target/api-contract-fixtures.json
     steps:
       - uses: actions/checkout@v7
@@ -132,12 +133,32 @@ jobs:
             ~/.cargo/git
             target/
           key: ${{ runner.os }}-cargo-contracts-${{ hashFiles('**/Cargo.lock') }}
+      - name: Verify complete seeds and upgrade paths
+        run: php scripts/test/seed_upgrade_database.php
+      - name: Verify Pokemon state transitions against MariaDB
+        run: php scripts/test/pokemon_state_database.php
       - name: Exercise real PHP routes against MariaDB
-        env:
-          TSDM_PHP_CGI: php-cgi8.3
         run: mkdir -p target && php scripts/test/live_database.php
       - name: Decode generated PHP responses with Rust models
         run: cargo test -p _utils --test php_api_contract --locked -- --ignored
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: scripts/browser/package-lock.json
+      - name: Install browser integration dependencies
+        working-directory: scripts/browser
+        run: npm ci && npx playwright install --with-deps chromium
+      - name: Exercise game WASM against PHP and MariaDB
+        working-directory: scripts/browser
+        run: node live-player.cjs
+      - name: Save live browser diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v6
+        with:
+          name: game-live-browser-failure
+          path: scripts/browser/artifacts/live-player/
+          retention-days: 7
 
   game-browser:
     name: Game browser regressions

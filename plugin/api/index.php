@@ -32,7 +32,7 @@ function api_exception_handler($exception)
 
     // 根据异常类型返回适当的错误码
     $code = 500;
-    $message = sprintf("%s: %s", get_class($exception), $exception->getMessage());
+    $message = 'Server Error';
 
     // 根据异常类型设置HTTP状态码
     if ($exception instanceof InvalidArgumentException) {
@@ -161,7 +161,12 @@ function get_param($key, $default = null)
 function get_json_input()
 {
     $input = file_get_contents('php://input');
-    return json_decode($input, true) ?: [];
+    if (trim($input) === '') return [];
+    $decoded = json_decode($input, true);
+    if (json_last_error() !== JSON_ERROR_NONE || !is_array($decoded)) {
+        api_error('Invalid JSON request body', 400);
+    }
+    return $decoded;
 }
 
 /**
@@ -276,8 +281,13 @@ function validate_string($str, $name = 'string', $max_length = 255)
     // 去除前后空格
     $str = trim($str);
 
-    // 检查长度
-    if (strlen($str) > $max_length) {
+    // 界面与数据库按字符计数，UTF-8 中文不应被当作三个字符。
+    // PCRE is available even when the host does not install mbstring.
+    $length = preg_match_all('/./us', $str);
+    if ($length === false) {
+        api_error("Invalid {$name}: must be valid UTF-8", 400);
+    }
+    if ($length > $max_length) {
         api_error("Invalid {$name}: too long (max {$max_length} chars)", 400);
     }
 

@@ -1,6 +1,6 @@
 -- 管理员（uid=1）初始游戏档案：pm_usersdata / pm_mypm / pm_myitem / pm_myskill。
 -- 自可运行 dev 库导出，已按 02-pokemon-schema.sql 的规范列集过滤
---（剔除 X3 遗留死列与全 NULL 列，由规范默认值补齐）。
+-- （剔除 X3 遗留死列与全 NULL 列，由规范默认值补齐）。
 
 -- ---- pm_usersdata (uid=1) ----
 

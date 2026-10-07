@@ -3,8 +3,8 @@ use crate::prelude::*;
 use crate::{
     components::layout::IMG_PATH,
     state::{
-        refresh_pokemon_list, refresh_user_profile_state, show_error, show_success, show_warning,
-        use_pokemon_state, POKEMON_STATE, USER_STATE,
+        clear_battle_scene, refresh_pokemon_list, refresh_user_profile_state, show_error,
+        show_success, show_warning, use_pokemon_state, POKEMON_STATE, USER_STATE,
     },
     utils::{
         api_client::NewApiClient,
@@ -62,6 +62,9 @@ pub fn PokemonCenter() -> Element {
     let loading_for_heal_all = loading;
     let is_in_battle_for_heal_all = is_in_battle_state;
     let heal_all = move |_| {
+        if *loading_for_heal_all.read() {
+            return;
+        }
         let pokemons: Vec<(u64, String, u8)> = POKEMON_STATE
             .read()
             .list
@@ -84,8 +87,8 @@ pub fn PokemonCenter() -> Element {
 
         let api = NewApiClient::new();
         let mut loading_clone = loading_for_heal_all;
+        loading_clone.set(true);
         spawn(async move {
-            loading_clone.set(true);
             let mut total_cost = 0i64;
             let mut healed_count = 0u32;
             let mut last_error = None::<String>;
@@ -106,6 +109,7 @@ pub fn PokemonCenter() -> Element {
                     healed_count, total_cost
                 ));
                 refresh_pokemon_list();
+                refresh_user_profile_state();
             } else if let Some(err) = last_error {
                 show_error(format!("治疗失败: {}", err));
             }
@@ -188,16 +192,18 @@ pub fn PokemonCenter() -> Element {
 
                                         let loading_clone = loading;
                                         let onclick_handler = move |_| {
+                                            if *loading_clone.read() { return; }
                                             let name = pokemon_name_for_handler.clone();
                                             let api = NewApiClient::new();
                                             let mut loading_ref = loading_clone;
                                             let in_battle = is_in_battle;
+                                            loading_ref.set(true);
                                             spawn(async move {
-                                                loading_ref.set(true);
 
                                                 if in_battle {
                                                     match api.heal_and_flee(pokemon_id).await {
                                                         Ok(_) => {
+                                                            clear_battle_scene();
                                                             show_success(format!("{}已脱战并治疗", name));
                                                             refresh_pokemon_list();
                                                             refresh_user_profile_state();
@@ -213,6 +219,7 @@ pub fn PokemonCenter() -> Element {
                                                                 format!("{}已治疗，花费 {} 金币", name, result.cost),
                                                             );
                                                             refresh_pokemon_list();
+                                                            refresh_user_profile_state();
                                                         }
                                                         Err(e) => {
                                                             show_error(format!("治疗失败: {}", e));
