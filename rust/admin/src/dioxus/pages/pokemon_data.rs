@@ -202,10 +202,13 @@ pub fn PokemonDataPage() -> Element {
                     save_text: if data.id > 0 { "保存修改" } else { "创建记录" },
                     disabled: is_busy,
                     on_save: move |payload: PokemonType| {
-                        editor_data.set(None);
-                        save_pokemon_payload(payload);
+                        save_pokemon_payload(payload, editor_data);
                     },
-                    on_close: move |_| editor_data.set(None),
+                    on_close: move |_| {
+                        if !*ADMIN_BUSY.read() {
+                            editor_data.set(None);
+                        }
+                    },
                 }
             }
 
@@ -412,12 +415,15 @@ fn reset_pokemon_filters() {
     reload_pokemons();
 }
 
-fn save_pokemon_payload(payload: PokemonType) {
+fn save_pokemon_payload(payload: PokemonType, mut editor_data: Signal<Option<PokemonType>>) {
+    if *ADMIN_BUSY.read() {
+        return;
+    }
     let is_new = payload.id == 0;
 
     set_busy(true);
 
-    spawn(async move {
+    dioxus_core::spawn_forever(async move {
         let result = if is_new {
             insert_pokemon_type(payload).await
         } else {
@@ -426,6 +432,9 @@ fn save_pokemon_payload(payload: PokemonType) {
 
         match result {
             Ok(saved) => {
+                if let Ok(mut editor) = editor_data.try_write() {
+                    *editor = None;
+                }
                 if is_new {
                     set_notice(
                         AdminNoticeLevel::Success,

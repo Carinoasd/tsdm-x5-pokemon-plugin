@@ -13,6 +13,8 @@
 | Admin inventory | Grants and edits preserve valid owners, item types, quantity limits and equipped references. Concurrent grants serialize, and failed writes roll back. | PHP integrity checks and MariaDB transactions |
 | Admin catalog identities | New records use database-generated IDs, including after deleting the highest record and during concurrent inserts. Existing references cannot silently attach to unrelated replacement records. | Actual catalog handlers against MariaDB in both SQL modes |
 | Configuration capacity | Long announcement lists and quoted skill text survive storage. Old configuration columns expand before any settings are written; explicit upgrades can run again. | MariaDB strict and non-strict SQL modes, upgrade failure checks and legacy announcement reads |
+| Configuration concurrency | Concurrent first reads preserve defaults and newer administrator values. Explicit saves still apply if another reader creates the key first. Only lock conflicts retry, with a fixed attempt limit. | MariaDB barriers and native Discuz error-contract regressions |
+| Admin saves and user selection | A pending save submits once, failed saves retain the draft, and completed saves release the loading state. Related Pokemon and inventory responses remain bound to the selected user. | Actual admin WASM with delayed requests and rejected saves |
 | Maintenance | Either closed switch blocks player operations; named staff, authorized administration and public announcements retain access. | Actual router regressions and PHP CGI requests against MariaDB |
 | Legacy announcements | The first config, admin or topics read migrates legacy notices. An explicitly cleared list stays empty; concurrent readers cannot overwrite a new administrator notice. | Admin input round trips and MariaDB barriers before migration inserts |
 | Forum topics | The preview checks native forum permissions, passwords, paid access and group membership before reading thread metadata. Public announcements remain visible. | Actual topics handler, isolated forum tables and optional native Discuz permission helpers |
@@ -66,6 +68,7 @@ php scripts/test/admin_filter_database.php
 php scripts/test/admin_item_database.php
 php scripts/test/admin_catalog_database.php
 php scripts/test/admin_identity_database.php
+php scripts/test/config_concurrency_database.php
 TSDM_TOPICS_REAL_DB=1 php scripts/test/topics_permissions.php
 cargo test -p _utils --test php_api_contract --locked -- --ignored
 ```
@@ -134,8 +137,8 @@ see [Seed data repairs](../migrations/seed-fixes/README.md).
 
 ## Browser checks
 
-See [Game browser regressions](../scripts/browser/README.md). These tests load the
-actual compiled game WASM with an isolated HTTP fixture server. The optional
+See [Game and admin browser regressions](../scripts/browser/README.md). These tests
+load the actual compiled game and admin WASM with an isolated HTTP fixture server. The optional
 live suite connects that WASM to the real PHP routes and MariaDB, then checks
 purchases, item use, battle turns, reconnect and reports against stored values.
 Both suites supply the Discuz login boundary and use no production player data.

@@ -141,6 +141,8 @@ jobs:
         run: php scripts/test/admin_filter_database.php && php scripts/test/admin_item_database.php
       - name: Verify admin catalog identities and configuration storage
         run: php scripts/test/admin_catalog_database.php && php scripts/test/admin_identity_database.php
+      - name: Verify concurrent configuration defaults and saves
+        run: php scripts/test/config_concurrency_database.php
       - name: Verify forum topic visibility against MariaDB
         run: TSDM_TOPICS_REAL_DB=1 php scripts/test/topics_permissions.php
       - name: Exercise real PHP routes against MariaDB
@@ -167,7 +169,7 @@ jobs:
           retention-days: 7
 
   game-browser:
-    name: Game browser regressions
+    name: Game and admin browser regressions
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -182,7 +184,7 @@ jobs:
       - name: Install browser test dependencies
         working-directory: scripts/browser
         run: npm ci && npx playwright install --with-deps chromium
-      - name: Test the shipped game bundle
+      - name: Test the shipped frontend bundles
         working-directory: scripts/browser
         run: npm test
       - name: Save browser diagnostics

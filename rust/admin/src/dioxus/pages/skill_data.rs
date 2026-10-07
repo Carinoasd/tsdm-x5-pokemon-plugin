@@ -194,10 +194,13 @@ pub fn SkillDataPage() -> Element {
                     save_text: if data.id > 0 { "保存修改" } else { "创建记录" },
                     disabled: is_busy,
                     on_save: move |payload: SkillType| {
-                        editor_data.set(None);
-                        save_skill_payload(payload);
+                        save_skill_payload(payload, editor_data);
                     },
-                    on_close: move |_| editor_data.set(None),
+                    on_close: move |_| {
+                        if !*ADMIN_BUSY.read() {
+                            editor_data.set(None);
+                        }
+                    },
                 }
             }
 
@@ -351,11 +354,14 @@ fn reset_skill_filters() {
     reload_skills();
 }
 
-fn save_skill_payload(payload: SkillType) {
+fn save_skill_payload(payload: SkillType, mut editor_data: Signal<Option<SkillType>>) {
+    if *ADMIN_BUSY.read() {
+        return;
+    }
     let is_new = payload.id == 0;
 
     set_busy(true);
-    spawn(async move {
+    dioxus_core::spawn_forever(async move {
         let result = if is_new {
             insert_skill_type(payload).await
         } else {
@@ -364,6 +370,9 @@ fn save_skill_payload(payload: SkillType) {
 
         match result {
             Ok(saved) => {
+                if let Ok(mut editor) = editor_data.try_write() {
+                    *editor = None;
+                }
                 if is_new {
                     set_notice(
                         AdminNoticeLevel::Success,
@@ -386,8 +395,8 @@ fn save_skill_payload(payload: SkillType) {
             }
             Err(error) => {
                 set_notice(AdminNoticeLevel::Error, format!("保存技能失败: {}", error));
-                set_busy(false);
             }
         }
+        set_busy(false);
     });
 }

@@ -68,7 +68,7 @@ class DB
             self::$tables[$match[1]][$id][$match[2]] = self::value($match[3]);
             return true;
         }
-        if (preg_match('/^INSERT(?: IGNORE)? INTO (\w+)\s*\((.*?)\)\s*VALUES\s*\((.*?)\)( ON DUPLICATE KEY UPDATE `key` = `key`)?$/is', trim($sql), $match)) {
+        if (preg_match('/^INSERT(?: IGNORE)? INTO (\w+)\s*\((.*?)\)\s*VALUES\s*\((.*?)\)( ON DUPLICATE KEY UPDATE (?:`key` = `key`|`value` = VALUES\(`value`\), `data_type` = VALUES\(`data_type`\)))?$/is', trim($sql), $match)) {
             $columns = array_map(function ($value) { return trim($value, " \t\r\n`"); }, explode(',', $match[2]));
             $literal = "(?:'(?:\\\\.|[^'\\\\])*'|-?\d+)";
             if (!preg_match('/^' . $literal . '(?:\s*,\s*' . $literal . ')*$/s', trim($match[3]))) {
@@ -77,7 +77,7 @@ class DB
             preg_match_all("/'(?:\\\\.|[^'\\\\])*'|-?\d+/s", $match[3], $values);
             if (count($columns) !== count($values[0])) throw new RuntimeException('Malformed INSERT columns');
             $row = array_combine($columns, array_map([self::class, 'value'], $values[0]));
-            if (!empty($match[4]) && isset(self::$tables[$match[1]][$row['key']])) return true;
+            if (($match[4] ?? '') === ' ON DUPLICATE KEY UPDATE `key` = `key`' && isset(self::$tables[$match[1]][$row['key']])) return true;
             if ($match[1] !== 'pm_config') {
                 $table = $match[1];
                 if (!isset(self::$next_ids[$table])) {
@@ -319,7 +319,7 @@ check_input('Failed announcement inserts cannot return an empty successful list'
     try {
         input_request(['endpoint' => 'config', 'fail_news_insert' => true]);
     } catch (RuntimeException $error) {
-        expect_input($error->getMessage(), 'Announcement migration failed');
+        expect_input($error->getMessage(), 'Configuration write failed');
         return;
     }
     throw new RuntimeException('A failed insert must reject the read migration');

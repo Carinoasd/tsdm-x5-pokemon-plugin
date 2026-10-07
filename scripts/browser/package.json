@@ -2,10 +2,11 @@
   "name": "pokemon-admin-browser-tests",
   "private": true,
   "scripts": {
-    "test": "node battle-actions.cjs && node storage-inventory.cjs && node player-actions.cjs",
+    "test": "node battle-actions.cjs && node storage-inventory.cjs && node player-actions.cjs && node admin-actions.cjs",
     "test:battle": "node battle-actions.cjs",
     "test:inventory": "node storage-inventory.cjs",
-    "test:player": "node player-actions.cjs"
+    "test:player": "node player-actions.cjs",
+    "test:admin": "node admin-actions.cjs"
   },
   "devDependencies": {
     "@playwright/test": "1.62.1"

@@ -96,6 +96,139 @@ impl ItemTab {
     }
 }
 
+#[derive(Clone, Copy)]
+struct RelatedContext {
+    selected_user: Signal<Option<u64>>,
+    generation: Signal<u64>,
+    owns_busy: Signal<bool>,
+    pokemon_infos: Signal<Vec<PokemonInfo>>,
+    item_infos: Signal<Vec<ItemInfo>>,
+}
+
+#[derive(Clone, Copy)]
+struct RelatedRequest {
+    context: RelatedContext,
+    uid: u64,
+    generation: u64,
+}
+
+#[derive(Clone, Copy)]
+enum RelatedLoad {
+    All,
+    Pokemon,
+    Items,
+}
+
+impl RelatedContext {
+    fn matches(self, uid: u64, generation: u64) -> bool {
+        self.selected_user
+            .try_read()
+            .is_ok_and(|value| *value == Some(uid))
+            && self
+                .generation
+                .try_read()
+                .is_ok_and(|value| *value == generation)
+    }
+
+    fn begin(mut self, uid: u64) -> Option<RelatedRequest> {
+        if *ADMIN_BUSY.read() || *self.selected_user.read() != Some(uid) {
+            return None;
+        }
+        let generation = *self.generation.read() + 1;
+        self.generation.set(generation);
+        self.owns_busy.set(true);
+        set_busy(true);
+        Some(RelatedRequest {
+            context: self,
+            uid,
+            generation,
+        })
+    }
+
+    fn cancel(mut self) {
+        self.generation += 1;
+        if *self.owns_busy.read() {
+            self.owns_busy.set(false);
+            set_busy(false);
+        }
+    }
+}
+
+impl RelatedRequest {
+    fn is_current(self) -> bool {
+        self.context.matches(self.uid, self.generation)
+    }
+
+    fn finish(mut self) {
+        if self.is_current() {
+            self.context.owns_busy.set(false);
+            set_busy(false);
+        }
+    }
+
+    async fn load(mut self, kind: RelatedLoad) {
+        let pokemon_result = if matches!(kind, RelatedLoad::All | RelatedLoad::Pokemon) {
+            Some(
+                list_pokemon_info(
+                    self.uid,
+                    0,
+                    if matches!(kind, RelatedLoad::All) {
+                        200
+                    } else {
+                        1000
+                    },
+                )
+                .await,
+            )
+        } else {
+            None
+        };
+        let item_result = if matches!(kind, RelatedLoad::All | RelatedLoad::Items) {
+            Some(
+                list_item_info(
+                    self.uid,
+                    0,
+                    if matches!(kind, RelatedLoad::All) {
+                        200
+                    } else {
+                        1000
+                    },
+                )
+                .await,
+            )
+        } else {
+            None
+        };
+        if !self.is_current() {
+            return;
+        }
+        if let Some(Err(error)) = &pokemon_result {
+            set_notice(
+                AdminNoticeLevel::Error,
+                format!("加载 PokemonInfo 失败: {}", error),
+            );
+            return;
+        }
+        if let Some(Err(error)) = &item_result {
+            set_notice(
+                AdminNoticeLevel::Error,
+                format!("加载 ItemInfo 失败: {}", error),
+            );
+            return;
+        }
+        if let Some(Ok(items)) = pokemon_result {
+            self.context.pokemon_infos.set(items);
+        }
+        if let Some(Ok(items)) = item_result {
+            self.context.item_infos.set(items);
+        }
+        set_notice(
+            AdminNoticeLevel::Info,
+            format!("用户 #{} 的附属数据已加载", self.uid),
+        );
+    }
+}
+
 #[component]
 pub fn UserDataPage() -> Element {
     let state = ADMIN_USER_DATA.read().clone();
@@ -108,6 +241,15 @@ pub fn UserDataPage() -> Element {
     let mut user_editor_data = use_signal(|| None::<UserInfo>);
     let mut pokemon_infos = use_signal(Vec::<PokemonInfo>::new);
     let mut item_infos = use_signal(Vec::<ItemInfo>::new);
+    let related = RelatedContext {
+        selected_user,
+        generation: use_signal(|| 0),
+        owns_busy: use_signal(|| false),
+        pokemon_infos,
+        item_infos,
+    };
+    dioxus_core::use_drop(move || related.cancel());
+    let related_generation = *related.generation.read();
 
     // 编辑现有宠物/物品的表单数据
     let mut pokemon_editor_data = use_signal(|| None::<PokemonInfo>);
@@ -292,6 +434,7 @@ pub fn UserDataPage() -> Element {
                                     key: "user-{item.id}",
                                     item,
                                     on_manage_related: move |uid| {
+                                        if *ADMIN_BUSY.read() { return; }
                                         selected_user.set(Some(uid));
                                         let user_info = ADMIN_USER_DATA
                                             .read()
@@ -300,7 +443,7 @@ pub fn UserDataPage() -> Element {
                                             .find(|u| u.id == uid)
                                             .cloned();
                                         user_editor_data.set(user_info);
-                                        load_user_related(uid, pokemon_infos, item_infos);
+                                        load_user_related(uid, related, RelatedLoad::All);
                                     },
                                 }
                             }
@@ -332,12 +475,18 @@ pub fn UserDataPage() -> Element {
                     title: format!("用户 #{} 的附属数据", uid),
                     wide: true,
                     on_close: move |_| {
+                        if *ADMIN_BUSY.read() && !*related.owns_busy.read() { return; }
+                        related.cancel();
                         selected_user.set(None);
                         user_editor_data.set(None);
                         pokemon_infos.set(Vec::new());
                         item_infos.set(Vec::new());
                         pokemon_editor_data.set(None);
                         item_editor_data.set(None);
+                        release_pokemon_data.set(None);
+                        delete_item_data.set(None);
+                        show_grant_pokemon.set(false);
+                        show_grant_item.set(false);
                     },
                     div { class: "admin-modal-tables-grid",
                         // 用户元数据编辑区域
@@ -347,7 +496,7 @@ pub fn UserDataPage() -> Element {
                                 initial_data: initial,
                                 disabled: is_busy,
                                 on_save: move |updated: UserInfo| {
-                                    save_user_meta(uid, updated);
+                                    save_user_meta(uid, updated, related);
                                 },
                             }
                         }
@@ -372,14 +521,7 @@ pub fn UserDataPage() -> Element {
                                         disabled: is_busy,
                                         size: Some(ButtonSize::ExtraSmall),
                                         onclick: move |_| {
-                                            set_busy(true);
-                                            spawn(async move {
-                                                if let Ok(items) = list_pokemon_info(uid, 0, 1000).await {
-                                                    pokemon_infos.set(items);
-                                                    set_notice(AdminNoticeLevel::Info, "宠物列表已刷新");
-                                                }
-                                                set_busy(false);
-                                            });
+                                            load_user_related(uid, related, RelatedLoad::Pokemon);
                                         },
                                         class: None,
                                     }
@@ -449,14 +591,7 @@ pub fn UserDataPage() -> Element {
                                         disabled: is_busy,
                                         size: Some(ButtonSize::ExtraSmall),
                                         onclick: move |_| {
-                                            set_busy(true);
-                                            spawn(async move {
-                                                if let Ok(items) = list_item_info(uid, 0, 1000).await {
-                                                    item_infos.set(items);
-                                                    set_notice(AdminNoticeLevel::Info, "物品列表已刷新");
-                                                }
-                                                set_busy(false);
-                                            });
+                                            load_user_related(uid, related, RelatedLoad::Items);
                                         },
                                         class: None,
                                     }
@@ -517,8 +652,7 @@ pub fn UserDataPage() -> Element {
                         initial_data: info,
                         disabled: is_busy,
                         on_save: move |updated: PokemonInfo| {
-                            save_user_pokemon_info(uid, updated, pokemon_infos, item_infos);
-                            pokemon_editor_data.set(None);
+                            save_user_pokemon_info(uid, updated, related, pokemon_editor_data);
                         },
                         on_release: move |data: PokemonInfo| {
                             pokemon_editor_data.set(None);
@@ -535,8 +669,7 @@ pub fn UserDataPage() -> Element {
                         initial_data: info,
                         disabled: is_busy,
                         on_save: move |updated: ItemInfo| {
-                            save_user_item_info(uid, updated, pokemon_infos, item_infos);
-                            item_editor_data.set(None);
+                            save_user_item_info(uid, updated, related, item_editor_data);
                         },
                         on_delete: move |data: ItemInfo| {
                             item_editor_data.set(None);
@@ -556,8 +689,9 @@ pub fn UserDataPage() -> Element {
                         pokemon_info: info.clone(),
                         disabled: is_busy,
                         on_confirm: move |_| {
-                            release_user_pokemon(uid, info.clone(), pokemon_infos, item_infos);
-                            release_pokemon_data.set(None);
+                            if release_user_pokemon(uid, info.clone(), related) {
+                                release_pokemon_data.set(None);
+                            }
                         },
                         on_close: move |_| {
                             release_pokemon_data.set(None);
@@ -573,8 +707,9 @@ pub fn UserDataPage() -> Element {
                         item_info: info,
                         disabled: is_busy,
                         on_confirm: move |count: u64| {
-                            delete_user_item(uid, info.clone(), count, pokemon_infos, item_infos);
-                            delete_item_data.set(None);
+                            if delete_user_item(uid, info, count, related) {
+                                delete_item_data.set(None);
+                            }
                         },
                         on_close: move |_| {
                             delete_item_data.set(None);
@@ -588,10 +723,11 @@ pub fn UserDataPage() -> Element {
                 if *show_grant_pokemon.read() {
                     GrantPokemonModal {
                         owner_uid: uid,
-                        on_close: move |_| show_grant_pokemon.set(false),
+                        on_close: move |_| { if !*ADMIN_BUSY.read() { show_grant_pokemon.set(false); } },
                         on_success: move |_saved: PokemonInfo| {
+                            if !related.matches(uid, related_generation) { return; }
                             show_grant_pokemon.set(false);
-                            load_user_related(uid, pokemon_infos, item_infos);
+                            load_user_related(uid, related, RelatedLoad::All);
                         },
                     }
                 }
@@ -602,10 +738,11 @@ pub fn UserDataPage() -> Element {
                 if *show_grant_item.read() {
                     GrantItemModal {
                         owner_uid: uid,
-                        on_close: move |_| show_grant_item.set(false),
+                        on_close: move |_| { if !*ADMIN_BUSY.read() { show_grant_item.set(false); } },
                         on_success: move |_saved: ItemInfo| {
+                            if !related.matches(uid, related_generation) { return; }
                             show_grant_item.set(false);
-                            load_user_related(uid, pokemon_infos, item_infos);
+                            load_user_related(uid, related, RelatedLoad::All);
                         },
                     }
                 }
@@ -829,199 +966,195 @@ fn reset_user_filters() {
     reload_users();
 }
 
-fn load_user_related(
-    uid: u64,
-    mut pokemon_infos: Signal<Vec<PokemonInfo>>,
-    mut item_infos: Signal<Vec<ItemInfo>>,
-) {
-    set_busy(true);
-
-    spawn(async move {
-        let pokemon_result = list_pokemon_info(uid, 0, 200).await;
-        let item_result = list_item_info(uid, 0, 200).await;
-
-        match (pokemon_result, item_result) {
-            (Ok(pokemons), Ok(items)) => {
-                pokemon_infos.set(pokemons);
-                item_infos.set(items);
-                set_notice(
-                    AdminNoticeLevel::Info,
-                    format!("用户 #{} 的附属数据已加载", uid),
-                );
-            }
-            (Err(error), _) => {
-                set_notice(
-                    AdminNoticeLevel::Error,
-                    format!("加载 PokemonInfo 失败: {}", error),
-                );
-            }
-            (_, Err(error)) => {
-                set_notice(
-                    AdminNoticeLevel::Error,
-                    format!("加载 ItemInfo 失败: {}", error),
-                );
-            }
-        }
-
-        set_busy(false);
+fn load_user_related(uid: u64, context: RelatedContext, kind: RelatedLoad) {
+    let Some(request) = context.begin(uid) else {
+        return;
+    };
+    dioxus_core::spawn_forever(async move {
+        request.load(kind).await;
+        request.finish();
     });
 }
 
-fn save_user_meta(uid: u64, mut data: UserInfo) {
-    data.id = uid;
+fn valid_related_owner(uid: u64, owner: u64) -> bool {
+    if owner != uid {
+        set_notice(
+            AdminNoticeLevel::Error,
+            "数据不属于当前用户，请关闭后重新加载",
+        );
+        return false;
+    }
+    true
+}
 
-    set_busy(true);
-
-    spawn(async move {
+fn save_user_meta(uid: u64, data: UserInfo, context: RelatedContext) {
+    if !valid_related_owner(uid, data.id) {
+        return;
+    }
+    let Some(request) = context.begin(uid) else {
+        return;
+    };
+    dioxus_core::spawn_forever(async move {
         match set_user_info(data).await {
             Ok(saved) => {
-                set_notice(
-                    AdminNoticeLevel::Success,
-                    format!("用户 #{} 信息已更新", saved.id),
-                );
-                reload_users();
+                if request.is_current() {
+                    if let Some(row) = ADMIN_USER_DATA
+                        .write()
+                        .items
+                        .iter_mut()
+                        .find(|row| row.id == saved.id)
+                    {
+                        *row = saved.clone();
+                    }
+                    set_notice(
+                        AdminNoticeLevel::Success,
+                        format!("用户 #{} 信息已更新", saved.id),
+                    );
+                }
             }
             Err(error) => {
-                set_notice(
-                    AdminNoticeLevel::Error,
-                    format!("保存用户信息失败: {}", error),
-                );
+                if request.is_current() {
+                    set_notice(
+                        AdminNoticeLevel::Error,
+                        format!("保存用户信息失败: {}", error),
+                    );
+                }
             }
         }
-
-        set_busy(false);
+        request.finish();
     });
 }
 
 fn save_user_pokemon_info(
     uid: u64,
-    mut data: PokemonInfo,
-    pokemon_infos: Signal<Vec<PokemonInfo>>,
-    item_infos: Signal<Vec<ItemInfo>>,
+    data: PokemonInfo,
+    context: RelatedContext,
+    mut editor: Signal<Option<PokemonInfo>>,
 ) {
-    data.owner = uid;
-
-    set_busy(true);
-
-    spawn(async move {
-        match set_pokemon_info(data).await {
+    if !valid_related_owner(uid, data.owner) {
+        return;
+    }
+    let Some(request) = context.begin(uid) else {
+        return;
+    };
+    dioxus_core::spawn_forever(async move {
+        let result = set_pokemon_info(data).await;
+        if !request.is_current() {
+            return;
+        }
+        match result {
             Ok(saved) => {
+                if let Ok(mut current) = editor.try_write() {
+                    *current = None;
+                }
                 set_notice(
                     AdminNoticeLevel::Success,
                     format!("宠物 #{} 已更新", saved.id),
                 );
-                load_user_related(uid, pokemon_infos, item_infos);
+                request.load(RelatedLoad::All).await;
             }
-            Err(error) => {
-                set_notice(AdminNoticeLevel::Error, format!("保存宠物失败: {}", error));
-            }
+            Err(error) => set_notice(AdminNoticeLevel::Error, format!("保存宠物失败: {}", error)),
         }
-
-        set_busy(false);
+        request.finish();
     });
 }
 
 fn save_user_item_info(
     uid: u64,
-    mut data: ItemInfo,
-    pokemon_infos: Signal<Vec<PokemonInfo>>,
-    item_infos: Signal<Vec<ItemInfo>>,
+    data: ItemInfo,
+    context: RelatedContext,
+    mut editor: Signal<Option<ItemInfo>>,
 ) {
-    data.owner = uid;
-
-    set_busy(true);
-
-    spawn(async move {
-        match set_item_info(data).await {
+    if !valid_related_owner(uid, data.owner) {
+        return;
+    }
+    let Some(request) = context.begin(uid) else {
+        return;
+    };
+    dioxus_core::spawn_forever(async move {
+        let result = set_item_info(data).await;
+        if !request.is_current() {
+            return;
+        }
+        match result {
             Ok(saved) => {
+                if let Ok(mut current) = editor.try_write() {
+                    *current = None;
+                }
                 set_notice(
                     AdminNoticeLevel::Success,
                     format!("物品 #{} 已更新", saved.id),
                 );
-                load_user_related(uid, pokemon_infos, item_infos);
+                request.load(RelatedLoad::All).await;
             }
-            Err(error) => {
-                set_notice(AdminNoticeLevel::Error, format!("保存物品失败: {}", error));
-            }
+            Err(error) => set_notice(AdminNoticeLevel::Error, format!("保存物品失败: {}", error)),
         }
-
-        set_busy(false);
+        request.finish();
     });
 }
 
-fn release_user_pokemon(
-    uid: u64,
-    data: PokemonInfo,
-    pokemon_infos: Signal<Vec<PokemonInfo>>,
-    item_infos: Signal<Vec<ItemInfo>>,
-) {
-    set_busy(true);
-
-    spawn(async move {
-        match delete_pokemon_info(data.id).await {
+fn release_user_pokemon(uid: u64, data: PokemonInfo, context: RelatedContext) -> bool {
+    if !valid_related_owner(uid, data.owner) {
+        return false;
+    }
+    let Some(request) = context.begin(uid) else {
+        return false;
+    };
+    dioxus_core::spawn_forever(async move {
+        let result = delete_pokemon_info(data.id).await;
+        if !request.is_current() {
+            return;
+        }
+        match result {
             Ok(()) => {
                 set_notice(
                     AdminNoticeLevel::Success,
                     format!("宠物 #{} 已放生", data.id),
                 );
-                load_user_related(uid, pokemon_infos, item_infos);
+                request.load(RelatedLoad::All).await;
             }
-            Err(error) => {
-                set_notice(AdminNoticeLevel::Error, format!("放生宠物失败: {}", error));
-            }
+            Err(error) => set_notice(AdminNoticeLevel::Error, format!("放生宠物失败: {}", error)),
         }
-
-        set_busy(false);
+        request.finish();
     });
+    true
 }
 
-fn delete_user_item(
-    uid: u64,
-    data: ItemInfo,
-    delete_count: u64,
-    pokemon_infos: Signal<Vec<PokemonInfo>>,
-    item_infos: Signal<Vec<ItemInfo>>,
-) {
-    set_busy(true);
-
-    spawn(async move {
-        if delete_count >= data.count {
-            // 删除整个条目
-            match delete_item_info(data.id).await {
-                Ok(()) => {
-                    set_notice(
-                        AdminNoticeLevel::Success,
-                        format!("物品 #{} 已完全删除", data.id),
-                    );
-                    load_user_related(uid, pokemon_infos, item_infos);
-                }
-                Err(error) => {
-                    set_notice(AdminNoticeLevel::Error, format!("删除物品失败: {}", error));
-                }
-            }
+fn delete_user_item(uid: u64, data: ItemInfo, delete_count: u64, context: RelatedContext) -> bool {
+    if !valid_related_owner(uid, data.owner) {
+        return false;
+    }
+    let Some(request) = context.begin(uid) else {
+        return false;
+    };
+    dioxus_core::spawn_forever(async move {
+        let result = if delete_count >= data.count {
+            delete_item_info(data.id)
+                .await
+                .map(|()| format!("物品 #{} 已完全删除", data.id))
         } else {
-            // 减少数量
-            let mut updated = data.clone();
-            updated.count = data.count - delete_count;
-            match set_item_info(updated).await {
-                Ok(saved) => {
-                    set_notice(
-                        AdminNoticeLevel::Success,
-                        format!(
-                            "物品 #{} 数量已减少 {}，剩余 {}",
-                            saved.id, delete_count, saved.count
-                        ),
-                    );
-                    load_user_related(uid, pokemon_infos, item_infos);
-                }
-                Err(error) => {
-                    set_notice(AdminNoticeLevel::Error, format!("更新物品失败: {}", error));
-                }
-            }
+            let mut updated = data;
+            updated.count -= delete_count;
+            set_item_info(updated).await.map(|saved| {
+                format!(
+                    "物品 #{} 数量已减少 {}，剩余 {}",
+                    saved.id, delete_count, saved.count
+                )
+            })
+        };
+        if !request.is_current() {
+            return;
         }
-
-        set_busy(false);
+        match result {
+            Ok(message) => {
+                set_notice(AdminNoticeLevel::Success, message);
+                request.load(RelatedLoad::All).await;
+            }
+            Err(error) => set_notice(AdminNoticeLevel::Error, format!("删除物品失败: {}", error)),
+        }
+        request.finish();
     });
+    true
 }
 
 // ============ 可视化表单模态框组件 ============

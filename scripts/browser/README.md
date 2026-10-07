@@ -1,10 +1,10 @@
-# Game browser regressions
+# Game and admin browser regressions
 
-These tests load the compiled game WASM in Chromium. An isolated local HTTP server
+These tests load the compiled game and admin WASM in Chromium. An isolated local HTTP server
 provides API fixtures; no forum account or production data is used. PHP and real
 database behavior are also covered by the optional live integration below.
 
-Build the game WASM and CSS before running:
+Build both WASM frontends and their CSS before running:
 
 ```sh
 cd scripts/browser
@@ -13,7 +13,8 @@ npx playwright install chromium
 npm test
 ```
 
-Use `npm run test:battle`, `npm run test:inventory`, or `npm run test:player` to run one suite.
+Use `npm run test:battle`, `npm run test:inventory`, `npm run test:player`, or
+`npm run test:admin` to run one suite.
 
 The battle suite covers touch and keyboard item details, PP selection, pending
 request guards, lost-response retries with the same request ID, revision
@@ -32,10 +33,18 @@ skill mutations, and pet-list updates that outlive navigation or arrive out of o
 It checks keyboard navigation, badge visibility during delayed reads, notification
 expiration after navigation, and completing equipment changes after leaving the page.
 Equipment stacks already in use remain visible and cannot displace another item.
+The admin suite checks saving maps, skills, and evolution rules, duplicate-create
+guards, retaining rejected drafts for retry, and delayed user-data responses.
+It verifies that changing users cannot show or save another user's items, that
+closing a user clears pending confirmation dialogs, and that older metadata
+responses cannot overwrite newer saved values.
+Granting items also keeps the selected item and quantity after a rejected request,
+blocks duplicate submissions, and waits for the updated inventory before unlocking.
 
 Screenshots and Playwright traces are written to the ignored `artifacts/`
 directory. Set `PLAYWRIGHT_BROWSERS_PATH` if Chromium is installed in a custom
-location, or `GAME_WASM_DIRECTORY` to test a different game bundle.
+location, `GAME_WASM_DIRECTORY` to test a different game bundle, or
+`ADMIN_WASM_DIRECTORY` to test a different admin bundle.
 
 ## Live PHP and MariaDB integration
 

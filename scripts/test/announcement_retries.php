@@ -60,7 +60,7 @@ foreach ([[1213, 1205, 1213], [1142], [1064]] as $errors) {
     DB::reset($errors);
     try { pm_get_news_announcements(); $message = ''; }
     catch (RuntimeException $error) { $message = $error->getMessage(); }
-    expect_news($message === (count($errors) === 3 ? 'Announcement migration lock conflict' : 'Announcement migration failed')
+    expect_news($message === (count($errors) === 3 ? 'Configuration write lock conflict' : 'Configuration write failed')
         && DB::$attempts === count($errors) && !isset(DB::$rows['news_announcements']),
         'Retries are bounded and non-lock write errors fail immediately');
 }

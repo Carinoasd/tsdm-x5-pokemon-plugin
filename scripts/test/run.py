@@ -437,6 +437,7 @@ def main():
     test_php_regression("Avatar route compatibility regression", "avatar_routes.php")
     test_php_regression("Forum topic permission regression", "topics_permissions.php")
     test_php_regression("Announcement lock retry regression", "announcement_retries.php")
+    test_php_regression("Configuration upsert retry regression", "config_upsert_retries.php")
 
     print("\n" + "=" * 60)
     print(f"Results: {PASS} passed, {FAIL} failed, {WARN} warnings")
