@@ -216,14 +216,14 @@ function check_and_update_critical_state($pm)
         $state_changed = true;
         DB::query("UPDATE " . pm_table('pm_mypm') . " 
             SET state = 0, statetime = $timestamp 
-            WHERE id = $pet_id AND uid = $uid");
+            WHERE id = $pet_id AND uid = $uid AND hp = $current_hp AND state = $current_state");
     } elseif ($current_hp > 0 && $current_state === 0) {
         // HP > 0 且当前是濒危，自动解除濒危，转为虚弱状态
         $new_state = 20;
         $state_changed = true;
         DB::query("UPDATE " . pm_table('pm_mypm') . " 
             SET state = 20, statetime = $timestamp 
-            WHERE id = $pet_id AND uid = $uid");
+            WHERE id = $pet_id AND uid = $uid AND hp = $current_hp AND state = $current_state");
     }
 
     return [

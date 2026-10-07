@@ -430,6 +430,9 @@ def main():
     test_php_regression("Skill mutation integrity regression", "skill_mutation_integrity.php")
     test_php_regression("Battle reward progression regression", "battle_reward_progression.php")
     test_php_regression("Evolution battle guard regression", "evolution_battle_guard.php")
+    test_php_regression("Pet read repair concurrency regression", "pet_read_repairs.php")
+    test_php_regression("Admin inventory integrity regression", "admin_item_integrity.php")
+    test_php_regression("Game maintenance route regression", "game_maintenance.php")
 
     print("\n" + "=" * 60)
     print(f"Results: {PASS} passed, {FAIL} failed, {WARN} warnings")

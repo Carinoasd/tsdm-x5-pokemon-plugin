@@ -215,9 +215,10 @@ function filter_map_info($list)
 {
   $ret = [];
 
+  $query_sql = "SELECT * from pm_map where ";
+  $query_sql_list = [];
   foreach ($list as $item) {
-    $query_sql = "SELECT * from pm_map where ";
-    $query_sql_list = [];
+    $condition_count = count($query_sql_list);
     $operator = $item["operator"];
     $value = addslashes($item["value"]);
 
@@ -226,31 +227,13 @@ function filter_map_info($list)
         array_push($query_sql_list, generate_filter_sql('id', $operator, $value, 'id'));
         break;
       case '名称':
-        // 智能判断：如果是纯数字，优先按 ID 精确查询
-        if (ctype_digit($value) && $value !== '') {
-          // 先尝试 ID 精确查询
-          $id_query_sql = "SELECT * from pm_map where id = " . intval($value);
-          $found_id_results = DB::fetch_all($id_query_sql);
-          if (!empty($found_id_results)) {
-              foreach ($found_id_results as $query) {
-                $item = new_map_info(
-                  intval($query['id']),
-                  $query['name'],
-                  $query['site'],
-                  intval($query['is_enabled']) == 1,
-                  intval($query['min_level']),
-                  intval($query['max_level']),
-                  intval($query['experience']),
-                  $query['boss_config']
-                );
-
-                array_push($ret, $item);
-              }
-              return $ret;
-            }
-          }
-        // ID 查询无结果或非数字输入，使用名称模糊搜索
-        array_push($query_sql_list, generate_filter_sql('name', $operator, $value, 'text'));
+        // A numeric name may select an ID, but must still obey every filter.
+        if (in_array($operator, ['equal', 'not_equal'], true) && ctype_digit($value) && $value !== ''
+            && DB::fetch_first("SELECT id FROM pm_map WHERE id=" . intval($value))) {
+          $query_sql_list[] = generate_filter_sql('id', $operator, intval($value), 'id');
+        } else {
+          $query_sql_list[] = generate_filter_sql('name', $operator, $value, 'text');
+        }
         break;
       case '地形类型':
         array_push(
@@ -270,7 +253,9 @@ function filter_map_info($list)
         array_push($query_sql_list, generate_filter_sql('max_level', $operator, $value, 'number'));
         break;
       default:
+        return [];
     }
+    if (count($query_sql_list) === $condition_count || end($query_sql_list) === '') return [];
   }
 
   if (count($query_sql_list) <= 0) {

@@ -16,6 +16,8 @@ function pet(id,name,site,hp=50) {
 async function fixture(options={}) {
   const state={requests:[],unexpected:[],gates:new Map(),money:1000,battle:!!options.battle,profileFailures:options.profileFailure?1:0,renameFailure:false,buys:0,initializations:0,newPlayer:!!options.newPlayer,pets:[pet(25,'皮卡丘',1,20),pet(1,'妙蛙种子',2,40)]};
   state.items=options.medicine ? [17,18].map(id=>({id:1000+id,type_id:id,item_type:1,name:`药水${id}`,description:'回复20点HP',image:'hp20',quantity:2,type_name:'回复药',can_use:true})) : [];
+  state.equipment={25:[{myitem_id:125,type_id:50,name:'A的装备',image:'equip',quantity:1,available_count:0,is_equipped:true},null,null,null],1:[{myitem_id:101,type_id:51,name:'B的装备',image:'equip',quantity:1,available_count:0,is_equipped:true},null,null,null]};
+  state.equipmentFailures=options.readFailures?1:0;state.skillFailures=options.readFailures?1:0;
   const scene=()=>({battle_id:'battle_37',engine_battle_id:37,revision:2,phase:'active',events:[],map_id:1,map_name:'Test',turn:2,my_pokemon:{id:25,instance_id:25,name:'皮卡丘',level:5,hp:20,max_hp:50,skills:[]},wild_pokemon:{id:19,name:'小拉达',level:5,hp:30,max_hp:30},status:'active',battle_over:false,can_continue_switch:false,message:''});
   const pendingReleases=new Set();
   const hold=(key,once=false)=>{let release;const promise=new Promise(resolve=>{release=resolve});const done=()=>{state.gates.delete(key);pendingReleases.delete(done);release()};pendingReleases.add(done);state.gates.set(key,{promise,once});return done};
@@ -23,6 +25,8 @@ async function fixture(options={}) {
     const key=`${url.searchParams.get('endpoint')}/${url.searchParams.get('action')}`;
     state.requests.push({key,body,query:Object.fromEntries(url.searchParams)});
     const profileMoney=state.money;
+    // Each delayed list response represents the snapshot captured by that read.
+    const pokemonSnapshot=structuredClone(state.pets);
     const gate=state.gates.get(key);if(gate){if(gate.once)state.gates.delete(key);await gate.promise;}
     let data;
     switch(key) {
@@ -34,8 +38,23 @@ async function fixture(options={}) {
       case 'user/online_players':data={total:0,players:[],max_display:20};break;
       case 'topics/list':data={topics:[],news_announcements:[],total:0};break;
       case 'config/global':data={is_open:true,is_enable_catch:true};break;
-      case 'pokemon/list':data={pokemons:state.newPlayer?[]:state.pets,total:state.newPlayer?0:state.pets.length};break;
+      case 'pokemon/list':data={pokemons:state.newPlayer?[]:pokemonSnapshot,total:state.newPlayer?0:pokemonSnapshot.length};break;
       case 'pokemon/detail':{const p=state.pets.find(p=>p.id===Number(url.searchParams.get('pokemon_id')));assert(p);data={...p,stats:{hp:50,attack:p.id*10,defense:10,sp_attack:10,sp_defense:10,speed:10}};break;}
+      case 'pokemon/equipment': {
+        if(state.equipmentFailures-- > 0)return {success:false,error:'模拟装备服务不可用',code:503};
+        const pid=Number(url.searchParams.get('pokemon_id'));data={pokemon_id:pid,equipment_slots:state.equipment[pid].map((item,slot_index)=>({slot_index,equipment_id:item?.myitem_id||0,item})),owned_items:[],shop_items:[],user_money:state.money};break;
+      }
+      case 'pokemon/unequip_item':state.equipment[body.pokemon_id][body.slot_index]=null;data={message:'已卸下',pokemon_id:body.pokemon_id,slot_index:body.slot_index,item_name:'装备',new_hp:20,new_maxhp:50};break;
+      case 'pokemon/learnable_skills':
+        if(state.skillFailures-- > 0)return {success:false,error:'模拟技能服务不可用',code:503};
+        data={pokemon_id:25,pokemon_level:5,available_skills:[{id:12,name:'电光',description:'测试技能',type:'电',category:'特殊',power:40,max_pp:10,required_level:1,is_available:true}],unlocked_skills:[]};break;
+      case 'pokemon/learn_skill': {
+        const pokemon=state.pets.find(p=>p.id===body.pokemon_id);assert(pokemon);
+        assert(!pokemon.skills.some(s=>s.type_id===body.skill_id),'Duplicate learning reached the fixture');
+        const skill={type_id:body.skill_id,name:'电光',pp:10,max_pp:10,can_forget:true,skill_type:'电',category:'特殊',level:1,power:40};pokemon.skills.push(skill);
+        data={message:'学习成功',pokemon_id:pokemon.id,skill};break;
+      }
+      case 'pokemon/forget_skill': {const pokemon=state.pets.find(p=>p.id===body.pokemon_id);assert(pokemon);pokemon.skills=pokemon.skills.filter(s=>s.type_id!==body.skill_id);data=null;break;}
       case 'pokemon/rename':
         if(state.renameFailure) {state.renameFailure=false;return {success:false,error:'昵称暂时无法保存',code:400};}
         state.pets.find(p=>p.id===body.id).nickname=body.name;data=null;break;
@@ -80,6 +99,97 @@ async function runCase(browser,name,options,test) {
 async function run() {
   await fs.mkdir(artifacts,{recursive:true});const browser=await chromium.launch({headless:true});
   try {
+    await runCase(browser,'equipment-selection-stays-with-its-pokemon',{},async(page,app)=>{
+      await page.getByText('个人中心',{exact:true}).click();
+      await page.getByRole('button',{name:'装备',exact:true}).click();
+      await expect(page.locator('.equip-icon')).toHaveAttribute('alt','A的装备');
+      await page.locator('.equip-slot').first().click();
+      await expect(page.locator('.equip-slot-overlay.selected')).toHaveCount(1);
+      await page.getByRole('button',{name:/昵称1 Lv/}).click();
+      await expect(page.locator('.equip-icon')).toHaveAttribute('alt','B的装备');
+      await expect(page.locator('.equip-slot-overlay.selected')).toHaveCount(0);
+      await page.locator('.equipment-inventory-section').click();
+      assert.equal(app.state.requests.filter(r=>r.key==='pokemon/unequip_item').length,0);
+      await page.locator('.equip-slot').first().click();
+      await page.locator('.equipment-inventory-section').click();
+      await expect.poll(()=>app.state.requests.filter(r=>r.key==='pokemon/unequip_item').length).toBe(1);
+      assert.equal(app.state.equipment[1][0],null);assert.equal(app.state.equipment[25][0].myitem_id,125);
+    });
+    await runCase(browser,'equipment-and-skill-read-errors-can-retry',{readFailures:true},async(page)=>{
+      await page.getByText('个人中心',{exact:true}).click();
+      await page.getByRole('button',{name:'装备',exact:true}).click();
+      await expect(page.getByRole('alert')).toContainText('模拟装备服务不可用');
+      await expect(page.locator('.equip-slot')).toHaveCount(0);
+      await page.getByRole('button',{name:'重新加载装备',exact:true}).click();
+      await expect(page.locator('.equip-icon')).toHaveAttribute('alt','A的装备');
+      await page.getByRole('button',{name:'技能',exact:true}).click();
+      await page.locator('.skill-slot-empty').first().click();
+      await expect(page.getByRole('alert')).toContainText('模拟技能服务不可用');
+      await expect(page.locator('.skill-learn-empty')).toHaveCount(0);
+      await page.getByRole('button',{name:'重新加载技能',exact:true}).click();
+      await expect(page.locator('.skill-learn-item')).toHaveText(/电光/);
+      await expect(page.locator('.skill-learn-item')).toBeEnabled();
+      await page.screenshot({path:path.join(artifacts,'skills-retry-keyboard.png'),fullPage:true});
+      await page.locator('.skill-learn-item').focus();await page.keyboard.press('Enter');
+      await expect(page.locator('.skill-card-v2')).toHaveCount(1);
+    });
+    await runCase(browser,'skill-mutations-submit-once-and-survive-navigation',{},async(page,app)=>{
+      await page.getByText('个人中心',{exact:true}).click();
+      await page.getByRole('button',{name:'技能',exact:true}).click();
+      await page.locator('.skill-slot-empty').first().click();
+      const releaseLearn=app.hold('pokemon/learn_skill');
+      await page.locator('.skill-learn-item').evaluate(node=>{node.click();node.click();node.click()});
+      await expect.poll(()=>app.state.requests.filter(r=>r.key==='pokemon/learn_skill').length).toBe(1);
+      await expect(page.locator('.skill-learn-item')).toBeDisabled();releaseLearn();
+      await expect(page.locator('.skill-card-v2')).toHaveCount(1);
+      await page.locator('.skill-card-v2').click();
+      const releaseForget=app.hold('pokemon/forget_skill');
+      await page.getByRole('button',{name:'遗忘此技能',exact:true}).evaluate(node=>{node.click();node.click();node.click()});
+      await expect.poll(()=>app.state.requests.filter(r=>r.key==='pokemon/forget_skill').length).toBe(1);
+      await expect(page.locator('.skill-slot-empty').first()).toBeDisabled();
+      const beforeRefresh=app.state.requests.filter(r=>r.key==='pokemon/list').length;
+      await page.getByText('商店',{exact:true}).click();releaseForget();
+      await expect.poll(()=>app.state.requests.filter(r=>r.key==='pokemon/list').length).toBe(beforeRefresh+1);
+      assert.equal(app.state.pets[0].skills.length,0);
+      await page.getByText('个人中心',{exact:true}).click();
+      await expect(page.locator('.skill-slot-empty')).toHaveCount(4);
+      await expect(page.locator('.global-loading-overlay')).toHaveCount(0);
+      assert.equal(app.state.requests.filter(r=>r.key==='pokemon/learn_skill').length,1);
+      assert.equal(app.state.requests.filter(r=>r.key==='pokemon/forget_skill').length,1);
+    });
+    await runCase(browser,'pokemon-refresh-survives-navigation',{},async(page,app)=>{
+      await page.getByText('商店',{exact:true}).click();
+      await expect(page.getByRole('button',{name:/昵称25 Lv/})).toBeVisible();
+      app.state.pets[0].nickname='异步新昵称';const release=app.hold('pokemon/list',true);
+      const count=app.state.requests.filter(r=>r.key==='pokemon/list').length;
+      await page.getByText('个人中心',{exact:true}).click();
+      await expect.poll(()=>app.state.requests.filter(r=>r.key==='pokemon/list').length).toBe(count+1);
+      await page.getByText('商店',{exact:true}).click();release();
+      await expect(page.getByRole('button',{name:/异步新昵称 Lv/})).toBeVisible();
+    });
+    await runCase(browser,'late-pokemon-response-keeps-current-list',{},async(page,app)=>{
+      await page.getByText('商店',{exact:true}).click();
+      await expect(page.getByRole('button',{name:/昵称25 Lv/})).toBeVisible();
+      const release=app.hold('pokemon/list',true);
+      const count=app.state.requests.filter(r=>r.key==='pokemon/list').length;
+      await page.getByText('个人中心',{exact:true}).click();
+      await expect.poll(()=>app.state.requests.filter(r=>r.key==='pokemon/list').length).toBe(count+1);
+      app.state.pets[0].nickname='最新昵称';
+      await page.getByText('宠物中心',{exact:true}).click();
+      await expect(page.getByRole('button',{name:/最新昵称 Lv/})).toBeVisible();
+      const response=page.waitForResponse(r=>r.url().includes('endpoint=pokemon&action=list'));
+      release();await response;await page.waitForTimeout(150);
+      await expect(page.getByRole('button',{name:/最新昵称 Lv/})).toBeVisible();
+    });
+    await runCase(browser,'skill-list-timeout-can-retry',{},async(page,app)=>{
+      await page.getByText('个人中心',{exact:true}).click();
+      await page.getByRole('button',{name:'技能',exact:true}).click();
+      const release=app.hold('pokemon/learnable_skills',true);
+      await page.locator('.skill-slot-empty').first().click();
+      await expect(page.getByRole('alert')).toContainText('连接超时',{timeout:22000});
+      await page.getByRole('button',{name:'重新加载技能',exact:true}).click();
+      await expect(page.locator('.skill-learn-item')).toBeEnabled();release();
+    });
     await runCase(browser,'inventory-picker-can-change-during-loading',{medicine:true},async(page,app)=>{
       await page.getByText('商店',{exact:true}).click();
       await page.getByTitle('查看背包',{exact:true}).click();

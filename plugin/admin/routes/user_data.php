@@ -192,9 +192,10 @@ function filter_user_info($list)
 {
   $ret = [];
 
+  $query_sql = "SELECT * from pm_usersdata where ";
+  $query_sql_list = [];
   foreach ($list as $item) {
-    $query_sql = "SELECT * from pm_usersdata where ";
-    $query_sql_list = [];
+    $condition_count = count($query_sql_list);
     $operator = $item["operator"];
     $value = addslashes($item["value"]);
 
@@ -203,61 +204,7 @@ function filter_user_info($list)
         array_push($query_sql_list, generate_filter_sql('uid', $operator, $value, 'id'));
         break;
       case '昵称':
-        // 智能判断：如果是纯数字，优先按 UID 精确查询
-        if (ctype_digit($value) && $value !== '') {
-          // 先尝试 UID 精确查询
-          $id_query_sql = "SELECT * from pm_usersdata where uid = " . intval($value);
-          $found_id_results = DB::fetch_all($id_query_sql);
-          if (!empty($found_id_results)) {
-              foreach ($found_id_results as $query_user) {
-                $uid = intval($query_user['uid']);
-
-                $pokemon_list = list_pokemon_info($uid, 0, 100);
-                $item_list = list_item_info($uid, 0, 100);
-
-                $pokemon_id_list = [];
-                foreach ($pokemon_list as $item) {
-                  array_push($pokemon_id_list, intval($item["id"]));
-                }
-                $item_id_list = [];
-                foreach ($item_list as $item) {
-                  array_push($item_id_list, intval($item["id"]));
-                }
-
-                $extra = [
-                  'dataall' => intval($query_user['dataall']),
-                  'strength' => intval($query_user['strength']),
-                  'str' => intval($query_user['str']),
-                  'boxnum' => intval($query_user['boxnum']),
-                  'allure' => intval($query_user['allure']),
-                  'capture' => intval($query_user['capture']),
-                ];
-
-                $item = new_user_info(
-                  $uid,
-                  DB::fetch_first("SELECT * from " . DB::table('common_member') . " where `uid`='$uid'")['username'],
-                  intval($query_user['datawin']),
-                  intval($query_user['datalost']),
-                  intval($query_user['money']),
-                  intval($query_user['fullexp']),
-                  $pokemon_id_list,
-                  $item_id_list,
-                  $extra
-                );
-
-                $item["_TYPE"] = "user_info";
-                array_push($ret, $item);
-              }
-              return $ret;
-            }
-          }
-        // UID 查询无结果或非数字输入，使用昵称模糊搜索
-        if ($name_rows = DB::fetch_all("SELECT * FROM " . DB::table('common_member') . " WHERE username LIKE '%" . addslashes($value) . "%'")) {
-          foreach ($name_rows as $query) {
-            $uid = intval($query['uid']);
-            array_push($query_sql_list, generate_filter_sql('uid', $operator, $uid, 'id'));
-          }
-        }
+        $query_sql_list[] = generate_reference_filter_sql('uid', DB::table('common_member'), 'uid', 'username', $operator, $value);
         break;
       case '胜场':
         array_push($query_sql_list, generate_filter_sql('datawin', $operator, $value, 'number'));
@@ -272,7 +219,9 @@ function filter_user_info($list)
         array_push($query_sql_list, generate_filter_sql('fullexp', $operator, $value, 'number'));
         break;
       default:
+        return [];
     }
+    if (count($query_sql_list) === $condition_count || end($query_sql_list) === '') return [];
   }
 
   if (count($query_sql_list) <= 0) {

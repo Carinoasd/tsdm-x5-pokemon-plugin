@@ -137,6 +137,8 @@ jobs:
         run: php scripts/test/seed_upgrade_database.php
       - name: Verify Pokemon state transitions against MariaDB
         run: php scripts/test/pokemon_state_database.php
+      - name: Verify admin filters and inventory transactions
+        run: php scripts/test/admin_filter_database.php && php scripts/test/admin_item_database.php
       - name: Exercise real PHP routes against MariaDB
         run: mkdir -p target && php scripts/test/live_database.php
       - name: Decode generated PHP responses with Rust models

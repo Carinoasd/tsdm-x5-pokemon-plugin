@@ -15,6 +15,7 @@ function generate_filter_sql($key, $operator, $value, $type = 'text')
     case 'text':
       switch ($operator) {
         case 'equal':
+        case 'contains':
           return "`$key` like '%$value%'";
         case "not_equal":
           return "`$key` not like '%$value%'";
@@ -41,6 +42,24 @@ function generate_filter_sql($key, $operator, $value, $type = 'text')
     default:
   }
   return "";
+}
+
+// Filter foreign IDs by their display names. Identifiers are internal constants;
+// the caller supplies the same already-escaped value used by generate_filter_sql.
+function generate_reference_filter_sql($key, $table, $id_column, $name_column, $operator, $value)
+{
+  if (!in_array($operator, ['equal', 'not_equal', 'contains'], true)) return '';
+  if ($operator !== 'contains' && ctype_digit($value) && $value !== '') {
+    $id = intval($value);
+    if (DB::fetch_first("SELECT `$id_column` FROM $table WHERE `$id_column`=$id")) {
+      return generate_filter_sql($key, $operator, $id, 'id');
+    }
+  }
+  $matches = DB::fetch_all("SELECT `$id_column` FROM $table WHERE `$name_column` LIKE '%$value%'");
+  $ids = [];
+  foreach ($matches as $match) $ids[] = intval($match[$id_column]);
+  if (empty($ids)) return $operator === 'not_equal' ? '1=1' : '1=0';
+  return "`$key` " . ($operator === 'not_equal' ? 'NOT IN' : 'IN') . ' (' . implode(',', $ids) . ')';
 }
 
 include_once __DIR__ . "/types.php";

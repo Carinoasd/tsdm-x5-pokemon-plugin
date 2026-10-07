@@ -5,10 +5,12 @@ if (!preg_match('/^tsdm_test_[a-z0-9_]+$/D', getenv('TSDM_TEST_DB') ?: '')) {
 }
 define('IN_DISCUZ', true);
 define('DISCUZ_ROOT', __DIR__ . '/../../../');
-define('API_ROUTED', true);
 $endpoint = getenv('TSDM_TEST_ENDPOINT');
 if (!in_array($endpoint, ['battle', 'shop', 'user', 'pokemon', 'config', 'topics', 'avatar'], true)) exit('Invalid test endpoint');
-define('API_ENDPOINT', $endpoint);
+if (getenv('TSDM_TEST_ROUTE_PLUGIN') !== '1') {
+    define('API_ROUTED', true);
+    define('API_ENDPOINT', $endpoint);
+}
 function formhash() { return 'test-formhash'; }
 
 class DB
@@ -36,7 +38,21 @@ class DB
         return self::$connection->query($sql);
     }
     public static function fetch_first($sql) { return self::query($sql)->fetch_assoc(); }
-    public static function fetch_all($sql) { return self::query($sql)->fetch_all(MYSQLI_ASSOC); }
+    public static function fetch_all($sql)
+    {
+        $rows = self::query($sql)->fetch_all(MYSQLI_ASSOC);
+        if (getenv('TSDM_TEST_PAUSE_PET_LIST') === '1' && str_contains($sql, 'ORDER BY site ASC, id ASC')) {
+            $ready = getenv('TSDM_TEST_READY');
+            file_put_contents($ready, 'snapshot');
+            $deadline = microtime(true) + 15;
+            while (!is_file($ready . '.resume')) {
+                if (microtime(true) > $deadline) throw new RuntimeException('Pet snapshot barrier timed out');
+                usleep(10000);
+                clearstatcache();
+            }
+        }
+        return $rows;
+    }
     public static function result_first($sql) { $row = self::query($sql)->fetch_row(); return $row ? $row[0] : null; }
     public static function result($result, $row = 0) { $result->data_seek($row); return $result->fetch_row()[0]; }
     public static function insert_id() { return self::$connection->insert_id; }
@@ -53,4 +69,13 @@ DB::$connection->query(getenv('TSDM_TEST_STRICT') === '1'
 DB::$connection->query('SET SESSION innodb_lock_wait_timeout = 15');
 $uid = (int)(getenv('TSDM_TEST_UID') ?: 7);
 $_G = ['uid' => $uid, 'username' => 'fixture-player-' . $uid, 'cache' => ['plugin' => ['pokemon' => []]]];
-require __DIR__ . '/../../../plugin/api/' . $endpoint . '.php';
+if (getenv('TSDM_TEST_ROUTE_PLUGIN') === '1') {
+    function loadcache($key) {}
+    function lang($kind, $key) { return $key; }
+    $_G['cache']['plugin']['pokemon'] = ['is_open' => getenv('TSDM_TEST_LEGACY_OPEN'),
+        'poke_smgly' => getenv('TSDM_TEST_STAFF') === '1' ? $_G['username'] : ''];
+    $_GET['endpoint'] = $endpoint;
+    require __DIR__ . '/../../../plugin/pokemon.inc.php';
+} else {
+    require __DIR__ . '/../../../plugin/api/' . $endpoint . '.php';
+}

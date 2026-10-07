@@ -12,7 +12,7 @@ for ($i = 0; $i < count($tokens); $i++) {
     if (!is_array($tokens[$i]) || $tokens[$i][0] !== T_FUNCTION) continue;
     $start = $i;
     while (++$i < count($tokens) && (!is_array($tokens[$i]) || $tokens[$i][0] !== T_STRING)) {}
-    if ($tokens[$i][1] !== 'apply_rewards') continue;
+    if (!in_array($tokens[$i][1], ['apply_rewards', 'calculate_rewards'], true)) continue;
     $body = '';
     $depth = 0;
     $opened = false;
@@ -23,7 +23,7 @@ for ($i = 0; $i < count($tokens); $i++) {
         elseif ($token === '}' && --$depth === 0 && $opened) break;
     }
     eval($body);
-    break;
+    $i = $j;
 }
 function pm_table($name) { return $name; }
 function pm_sql($sql, ...$args) { return vsprintf($sql, $args); }
@@ -106,6 +106,20 @@ $result = reward(50, 1, 20);
 check(!$result['level_up'] && $result['new_level'] === 50 && DB::$pet['level'] === 50,
     'Legacy pets with low experience report their preserved level');
 check(DB::$pet['exp'] === 21 && DB::$pet['hp'] === 40, 'Legacy experience mismatch still awards experience without healing');
+
+$petbasisexp = [];
+$settings = [];
+foreach ([0, 1, 3, 42] as $seed) {
+    srand($seed);
+    $reward = calculate_rewards([], ['npcid' => 1, 'strength' => 1], ['drop_money' => '[0,0]'], 10, []);
+    check($reward['money'] === 0, "An explicit zero reward stays zero with seed $seed");
+    srand($seed);
+    $reward = calculate_rewards([], ['npcid' => 1, 'strength' => 1], ['drop_money' => '[0,5]'], 10, []);
+    check($reward['money'] >= 0 && $reward['money'] <= 5, "A zero minimum honors the configured reward range with seed $seed");
+}
+srand(3);
+$reward = calculate_rewards([], ['npcid' => 1, 'strength' => 1], ['drop_money' => '[]'], 10, []);
+check($reward['money'] >= 10 && $reward['money'] <= 50, 'Absent reward bounds keep the default range');
 
 echo "Battle reward progression: $checks checks, $failures failures.\n";
 exit($failures ? 1 : 0);

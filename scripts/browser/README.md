@@ -23,7 +23,9 @@ The inventory suite covers item search and warehouse filtering, sorting, and
 selection across larger collections.
 The player suite covers duplicate purchases and initialization, pet selection,
 rename failures, healing state, account load retries, delayed balance updates,
-and changing item targets during loading without duplicate item use.
+and changing item targets during loading without duplicate item use. It also checks
+equipment selection across Pokemon, retrying equipment and skill reads, duplicate
+skill mutations, and pet-list updates that outlive navigation or arrive out of order.
 
 Screenshots and Playwright traces are written to the ignored `artifacts/`
 directory. Set `PLAYWRIGHT_BROWSERS_PATH` if Chromium is installed in a custom

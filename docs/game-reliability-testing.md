@@ -7,8 +7,12 @@
 | Battle reconnect | An interrupted action retains its request ID; recovery reads the current battle; retry replays a committed result without repeating it. | PHP replay tests, MariaDB concurrency, Chromium lost-response scenarios |
 | Database transactions | Money, inventory, HP, PP, events and action receipts commit or roll back together. | Independent PHP CGI processes against MariaDB |
 | Player mutations | Concurrent starter claims, item uses, releases and equipment changes preserve account and inventory limits. Failed writes roll back all effects. | MariaDB request races and injected database failures |
+| Read repairs | A stale list or detail request cannot replace newer healing, battle damage, state or equipment-dependent HP values. Uncontested reads still repair invalid legacy values. | PHP snapshot regressions and MariaDB barriers around real CGI reads |
+| Admin filters | All conditions combine regardless of order. Names resolve to matching IDs, exclusions retain their meaning, and Chinese sale flags match the selected value. | Actual admin dispatch and SQL against MariaDB |
+| Admin inventory | Grants and edits preserve valid owners, item types, quantity limits and equipped references. Concurrent grants serialize, and failed writes roll back. | PHP integrity checks and MariaDB transactions |
+| Maintenance | Either closed switch blocks player operations; named staff, authorized administration and public announcements retain access. | Actual router regressions and PHP CGI requests against MariaDB |
 | Skills and evolution | Concurrent learning preserves four unique skills. Learning and forgetting respect battles that start while waiting for a lock; the active Pokemon cannot evolve during battle. | MariaDB races and PHP mutation regressions |
-| Experience rewards | Experience beyond the last threshold remains capped at level 100. Large rewards can reach the cap; responses match the level stored for legacy pets. | Real experience helper and reward handler regression |
+| Experience rewards | Experience beyond the last threshold remains capped at level 100. Large rewards can reach the cap; responses match the level stored for legacy pets. Explicit zero gold remains zero. | Real experience helper and reward handler regression |
 | Random Pokemon state | State, experience, HP and timestamps update together with valid SQL. Updates reject active battles and roll back failed writes. | Deterministic state transitions against MariaDB |
 | Center treatment | Healing and abandoning a battle commit together; reconnect cannot restore the abandoned battle. | MariaDB strict SQL mode and Chromium success/failure scenarios |
 | Names and input | Unicode names use character limits, quotes round-trip unchanged, malformed JSON returns 400, and unexpected errors hide server details. | Real PHP requests and persisted MariaDB values |
@@ -16,7 +20,7 @@
 | Battle reports | Players can open persisted turns and copy the existing BBCode report. | PHP event grouping and Chromium report/retry/clipboard scenarios |
 | Inventory and storage | Item search runs before pagination; storage filters and ordering apply to the whole collection; hidden selections cannot be released. | PHP search tests, Rust filter tests, Chromium collections over 60 entries |
 | Touch and keyboard items | Opening an item displays its details; only explicit confirmation consumes it; pending actions prevent double submission. | Chromium touch, Enter/Space and pending-request checks |
-| Player navigation | Pending purchases and starter claims cannot be submitted repeatedly; switching pets loads matching details; profile errors can retry and old responses cannot replace fresh data. | Chromium player action scenarios |
+| Player navigation | Pending purchases, starter claims and skill changes cannot be submitted repeatedly. Switching pets resets equipment selection; equipment and skill load errors can retry. Profile and pet refreshes survive navigation, and old responses cannot replace fresh data. | Chromium player action scenarios |
 | Encounter and damage rules | Encounters use exact map membership and reject disabled maps. Current rules respect type immunities and resistance; legacy rules retain their original behavior. | PHP encounter, endpoint and deterministic battle-core regression tests |
 
 The server protocol, compatibility behavior and retention rules are described in
@@ -50,6 +54,8 @@ mkdir -p target
 export TSDM_API_CONTRACT_FIXTURES="$PWD/target/api-contract-fixtures.json"
 php scripts/test/live_database.php
 php scripts/test/pokemon_state_database.php
+php scripts/test/admin_filter_database.php
+php scripts/test/admin_item_database.php
 cargo test -p _utils --test php_api_contract --locked -- --ignored
 ```
 
@@ -70,6 +76,12 @@ in the ordinary Rust suite because it requires those generated responses.
 The random-state suite uses its own `tsdm_test_state_<random>` database and the
 actual state handler with fixed random seeds. It checks persisted state changes,
 battle restrictions, owner isolation and rollback after an injected write failure.
+
+The admin suites use independent `tsdm_test_filters_<random>` and
+`tsdm_test_admin_item_<random>` databases. They exercise the actual dispatcher,
+filter queries, inventory transactions, equipped references and injected failure
+rollback. The filter fixtures include combined conditions in both orders, names
+shared by multiple rows, unmatched names and invalid operators.
 
 ## Seed and upgrade checks
 

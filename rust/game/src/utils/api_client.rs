@@ -283,17 +283,17 @@ impl NewApiClient {
 
     /// 获取宠物可学习的技能列表
     pub async fn get_learnable_skills(&self, pokemon_id: u64) -> Result<LearnableSkillsResponse> {
-        self.get(
+        battle_timeout(self.get(
             "pokemon",
             "learnable_skills",
             &format!("&pokemon_id={}", pokemon_id),
-        )
-        .await
+        ))
+        .await?
     }
 
     /// 遗忘宠物技能
     pub async fn forget_skill(&self, pokemon_id: u64, skill_id: u64) -> Result<()> {
-        self.post_unit(
+        self.player_mutation(self.post_unit(
             "pokemon",
             "forget_skill",
             "",
@@ -301,14 +301,14 @@ impl NewApiClient {
                 "pokemon_id": pokemon_id,
                 "skill_id": skill_id
             }),
-        )
+        ))
         .await
     }
 
     /// 学习新技能（pm_myskill 无槽位列，技能按插入顺序生效；
     /// 替换技能需先调用遗忘接口）
     pub async fn learn_skill(&self, pokemon_id: u64, skill_id: u64) -> Result<LearnSkillResponse> {
-        self.post(
+        self.player_mutation(self.post(
             "pokemon",
             "learn_skill",
             "",
@@ -316,18 +316,18 @@ impl NewApiClient {
                 pokemon_id,
                 skill_id,
             },
-        )
+        ))
         .await
     }
 
     /// 获取宝可梦装备信息
     pub async fn get_equipment(&self, pokemon_id: u64) -> Result<EquipmentResponse> {
-        self.get(
+        battle_timeout(self.get(
             "pokemon",
             "equipment",
             &format!("&pokemon_id={}", pokemon_id),
-        )
-        .await
+        ))
+        .await?
     }
 
     /// 装备物品

@@ -104,6 +104,27 @@ function action_input($scene, $key, $fields = [])
         'expected_revision' => $scene['revision']], $fields);
 }
 
+function pause_pet_list($uid)
+{
+    $worker = begin_request('pokemon', 'list', null, ['TSDM_TEST_UID' => (string)$uid,
+        'TSDM_TEST_PAUSE_PET_LIST' => '1']);
+    $deadline = microtime(true) + 10;
+    while (!is_file($worker['base'] . '.ready')) {
+        if (microtime(true) > $deadline || !proc_get_status($worker['process'])['running']) {
+            throw new RuntimeException('Pet list did not reach its snapshot barrier');
+        }
+        clearstatcache();
+        usleep(10000);
+    }
+    return $worker;
+}
+
+function resume_pet_list($worker)
+{
+    file_put_contents($worker['base'] . '.ready.resume', 'continue');
+    return finish_request($worker);
+}
+
 try {
     $schema = file_get_contents(__DIR__ . '/../../docker/init.d/02-pokemon-schema.sql');
     $db->multi_query($schema);
@@ -401,6 +422,75 @@ try {
     check($learned_again['success'] && (int)scalar('SELECT skillnum FROM pm_myskill WHERE uid = 12 AND skillid = 301') === 20,
         'A valid learn commits full PP after competing and failed requests');
 
+    // Read-time repairs must not overwrite a mutation that committed after SELECT.
+    $db->query("INSERT INTO common_member (uid, username) VALUES (13, 'fixture-player-13')");
+    $db->query('INSERT INTO pm_usersdata (uid, money) VALUES (13, 100)');
+    $db->query("INSERT INTO pm_mypm (id, uid, species_id, pmname, site, level, hp, state) VALUES (701, 13, 1, 'Read repair', 1, 50, 0, 1)");
+    $reader = ['TSDM_TEST_UID' => '13'];
+    $stale_list = pause_pet_list(13);
+    $healed = request('user', 'heal', [], array_merge($reader, ['QUERY_STRING' => 'action=heal&pokemon_id=701']));
+    $list_result = resume_pet_list($stale_list);
+    check($healed['success'] && $list_result['success']
+        && (int)scalar('SELECT hp FROM pm_mypm WHERE id = 701') === 160
+        && (int)scalar('SELECT state FROM pm_mypm WHERE id = 701') === 1,
+        'Stale fainted-pet list cannot undo a committed heal');
+
+    $db->query('UPDATE pm_data SET speed = 200, atk = 100 WHERE id = 2');
+    $db->query("INSERT INTO pm_myskill (uid, petid, skillid, skillnum) VALUES (13, 701, 12, 20)");
+    $repair_start = request('battle', 'start', ['map_id' => 1], $reader);
+    check($repair_start['success'], 'Read repair fixture starts a real battle');
+    $db->query('UPDATE pm_mypm SET hp = 1000 WHERE id = 701');
+    $stale_list = pause_pet_list(13);
+    // First turn repairs legacy over-healing; the next turn applies fresh damage.
+    $repair_turn = request('battle', 'turn', ['skill_id' => 12], $reader);
+    $repair_turn = request('battle', 'turn', ['skill_id' => 12], $reader);
+    $damaged_hp = (int)scalar('SELECT hp FROM pm_mypm WHERE id = 701');
+    $list_result = resume_pet_list($stale_list);
+    check($repair_turn['success'] && $damaged_hp < 160 && $list_result['success']
+        && (int)scalar('SELECT hp FROM pm_mypm WHERE id = 701') === $damaged_hp,
+        'Stale over-healed list cannot restore HP consumed by a real battle turn');
+
+    foreach (['level = 100', 'equipmentid1 = ' . $equipment_id] as $changed_maximum) {
+        $db->query('UPDATE pm_mypm SET hp = 200, level = 50, state = 1, equipmentid1 = 0 WHERE id = 701');
+        $stale_list = pause_pet_list(13);
+        $db->query('UPDATE pm_mypm SET ' . $changed_maximum . ' WHERE id = 701');
+        $list_result = resume_pet_list($stale_list);
+        check($list_result['success'] && (int)scalar('SELECT hp FROM pm_mypm WHERE id = 701') === 200,
+            'Read repair ignores an obsolete HP maximum after ' . $changed_maximum);
+    }
+    $db->query('UPDATE pm_mypm SET hp = 200, level = 50, state = 1, equipmentid1 = 0 WHERE id = 701');
+    $repaired_list = request('pokemon', 'list', null, $reader);
+    check($repaired_list['success'] && (int)scalar('SELECT hp FROM pm_mypm WHERE id = 701') === 160,
+        'Uncontested list still repairs legacy HP above its current maximum');
+    $db->query('UPDATE pm_mypm SET hp = 0, state = 1 WHERE id = 701');
+    $repaired_list = request('pokemon', 'list', null, $reader);
+    check($repaired_list['success'] && (int)scalar('SELECT state FROM pm_mypm WHERE id = 701') === 0,
+        'Uncontested list still marks a zero-HP Pokemon fainted');
+
+    // Pass through the real plugin router, including both independent switches.
+    foreach ([0, 1] as $legacy_open) foreach ([0, 1] as $global_open) {
+        $db->query("REPLACE INTO pm_config (`key`, value, data_type) VALUES ('is_open', '$global_open', 'boolean')");
+        $route = ['TSDM_TEST_ROUTE_PLUGIN' => '1', 'TSDM_TEST_LEGACY_OPEN' => (string)$legacy_open];
+        $maps = request('battle', 'maps', null, $route);
+        $open = $legacy_open && $global_open;
+        check($open ? $maps['success'] : (!$maps['success'] && $maps['error_code'] === 'game_closed'),
+            "Router honors both maintenance switches: legacy=$legacy_open global=$global_open");
+        if (!$open) {
+            $battle_count = scalar('SELECT COUNT(*) FROM pm_battle');
+            $closed_start = request('battle', 'start', ['map_id' => 1], $route);
+            check(!$closed_start['success'] && $closed_start['error_code'] === 'game_closed'
+                && scalar('SELECT COUNT(*) FROM pm_battle') === $battle_count,
+                'A valid formhash cannot start battles through a closed plugin');
+        }
+    }
+    $db->query("UPDATE pm_config SET value = '0' WHERE `key` = 'is_open'");
+    $closed_route = ['TSDM_TEST_ROUTE_PLUGIN' => '1', 'TSDM_TEST_LEGACY_OPEN' => '0'];
+    $closed_config = request('config', 'global_config', null, $closed_route);
+    check($closed_config['success'] && $closed_config['data']['is_open'] === false
+        && isset($closed_config['data']['news_announcements']), 'Closed router still exposes announcement configuration');
+    $staff_maps = request('battle', 'maps', null, $closed_route + ['TSDM_TEST_STAFF' => '1']);
+    check($staff_maps['success'], 'Named game staff retains routed API access with both switches closed');
+
     if ($output = getenv('TSDM_API_CONTRACT_FIXTURES')) {
         file_put_contents($output, json_encode($contracts, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR));
     }
@@ -408,7 +498,7 @@ try {
 } finally {
     foreach ($workers as $worker) {
         if (is_resource($worker['process'])) { proc_terminate($worker['process']); proc_close($worker['process']); }
-        foreach (['', '.err', '.ready'] as $suffix) if (is_file($worker['base'] . $suffix)) unlink($worker['base'] . $suffix);
+        foreach (['', '.err', '.ready', '.ready.resume'] as $suffix) if (is_file($worker['base'] . $suffix)) unlink($worker['base'] . $suffix);
     }
     // This name is generated here, never accepted from a caller or site config.
     $db->query('DROP DATABASE `' . $database . '`');

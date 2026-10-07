@@ -439,9 +439,10 @@ function filter_pokemon_type($list)
 {
   $ret = [];
 
+  $query_sql = "SELECT * from pm_data where ";
+  $query_sql_list = [];
   foreach ($list as $item) {
-    $query_sql = "SELECT * from pm_data where ";
-    $query_sql_list = [];
+    $condition_count = count($query_sql_list);
     $operator = $item["operator"];
     $value = addslashes($item["value"]);
 
@@ -450,81 +451,18 @@ function filter_pokemon_type($list)
         array_push($query_sql_list, generate_filter_sql('id', $operator, $value, 'id'));
         break;
       case '名称':
-        // 智能判断：如果是纯数字，优先按 ID 精确查询
-        if (ctype_digit($value) && $value !== '') {
-          // 先尝试 ID 精确查询
-          $id_query_sql = "SELECT * from pm_data where id = " . intval($value);
-          $found_id_results = DB::fetch_all($id_query_sql);
-          if (!empty($found_id_results)) {
-              foreach ($found_id_results as $query) {
-                $map_ids = explode(',', $query['mapid']);
-                $map_ids = array_filter($map_ids, function ($map_id) {
-                  return trim($map_id) != '' ? intval($map_id) > 0 : false;
-                });
-                $map_ids = array_map(function ($map_id) {
-                  return intval($map_id);
-                }, $map_ids);
-
-                $pm_id = intval($query['id']);
-                $evolution_info_ids = [];
-      $evolution_rows = DB::fetch_all("SELECT * from pm_evolution where `from_id`='$pm_id'");
-      foreach ($evolution_rows as $query_evolution_info) {
-                  array_push($evolution_info_ids, intval($query_evolution_info['id']));
-                }
-
-                $effort = json_decode($query['effort_values'], true);
-      $item = new_pokemon_type(
-                  intval($query['id']),
-                  $query['name'],
-                  $query['description'],
-
-                  intval($query['money']),
-                  intval($query['shop']) != 0,
-
-                  intval(
-                    $query['sex']
-                  ) >= 0 ? floatval($query['sex']) / 1000 : null,
-                  new_pokemon_attributes(
-                    intval($query['hp']),
-                    intval($query['atk']),
-                    intval($query['def']),
-                    intval($query['spatk']),
-                    intval($query['spdef']),
-                    intval($query['speed'])
-                  ),
-                  new_pokemon_attributes(
-                    intval($effort['hp'] ?? 0),
-                    intval($effort['atk'] ?? 0),
-                    intval($effort['def'] ?? 0),
-                    intval($effort['spatk'] ?? 0),
-                    intval($effort['spdef'] ?? 0),
-                    intval($effort['spd'] ?? 0)
-                  ),
-                  [translate_chinese_kind_to_kind_id($query['xs']), translate_chinese_kind_to_kind_id($query['xs2'])],
-                  intval($query['is_legendary']) != 0,
-
-                  $map_ids,
-                  $evolution_info_ids,
-
-                  intval($query['capture']),
-                  intval($query['met']),
-                  intval($query['birth']),
-                  intval($query['strength']),
-                  json_decode($query['drop_money'], true)
-                );
-
-                $item["_TYPE"] = "pokemon_type";
-                array_push($ret, $item);
-              }
-              return $ret;
-            }
-          }
-        // ID 查询无结果或非数字输入，使用名称模糊搜索
-        array_push($query_sql_list, generate_filter_sql('name', $operator, $value, 'text'));
+        // A numeric name may select an ID, but must still obey every filter.
+        if (in_array($operator, ['equal', 'not_equal'], true) && ctype_digit($value) && $value !== ''
+            && DB::fetch_first("SELECT id FROM pm_data WHERE id=" . intval($value))) {
+          $query_sql_list[] = generate_filter_sql('id', $operator, intval($value), 'id');
+        } else {
+          $query_sql_list[] = generate_filter_sql('name', $operator, $value, 'text');
+        }
         break;
       case '宠物类型':
         switch ($operator) {
           case 'equal':
+          case 'contains':
             array_push($query_sql_list, "(`xs` like '%$value%' or `xs2` like '%$value%')");
             break;
           case 'not_equal':
@@ -537,7 +475,9 @@ function filter_pokemon_type($list)
         array_push($query_sql_list, generate_filter_sql('description', $operator, $value, 'text'));
         break;
       default:
+        return [];
     }
+    if (count($query_sql_list) === $condition_count || end($query_sql_list) === '') return [];
   }
 
   if (count($query_sql_list) <= 0) {

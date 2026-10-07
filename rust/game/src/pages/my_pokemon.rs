@@ -6,10 +6,9 @@ use crate::{
         layout::{IMG_PATH, IMG_PATH_REMOTE},
     },
     state::{
-        refresh_pokemon_list, show_error, show_success, show_warning, start_global_loading,
-        stop_global_loading, update_pokemon_hp, use_battle_state, use_pokemon_state, MyPokemonTab,
-        SelectedItem, EQUIPMENT_BONUSES, MY_POKEMON_TAB, POKEMON_STATE, SELECTED_ITEM,
-        SELECTED_POKEMON_INDEX,
+        refresh_pokemon_list, show_error, show_success, show_warning, update_pokemon_hp,
+        use_battle_state, use_pokemon_state, MyPokemonTab, SelectedItem, EQUIPMENT_BONUSES,
+        MY_POKEMON_TAB, POKEMON_STATE, SELECTED_POKEMON_INDEX,
     },
     utils::{
         api_client::NewApiClient,
@@ -722,14 +721,29 @@ fn RadarChart(
 #[component]
 fn EquipmentTabContent(pokemon_id: u64, refresh_trigger: Signal<u64>) -> Element {
     let mut action_loading = use_signal(|| false);
+    // 此组件按宠物 ID 重建，选择不能流入另一只宠物或下一次打开的装备页。
+    let mut selected_item = use_signal(|| None::<SelectedItem>);
 
-    let equipment_resource = use_resource(move || async move {
+    let mut equipment_resource = use_resource(move || async move {
         let api = NewApiClient::new();
         let result = api.get_equipment(pokemon_id).await;
         result
     });
 
     let equipment_data = equipment_resource.read();
+    if equipment_data.is_none() {
+        return rsx! { div { class: "loading", "正在加载装备..." } };
+    }
+    if let Some(Err(error)) = equipment_data.as_ref() {
+        return rsx! {
+            div { role: "alert", class: "error-message", "装备加载失败：{error}" }
+            button {
+                class: "btn btn-primary",
+                onclick: move |_| equipment_resource.restart(),
+                "重新加载装备"
+            }
+        };
+    }
 
     let slots = equipment_data
         .as_ref()
@@ -791,12 +805,13 @@ fn EquipmentTabContent(pokemon_id: u64, refresh_trigger: Signal<u64>) -> Element
                         slot_index: idx as u32,
                         action_loading,
                         refresh_trigger,
+                        selected_item,
                     }
                 }
             }
 
             {
-                let has_equipment_selected = SELECTED_ITEM
+                let has_equipment_selected = selected_item
                     .read()
                     .as_ref()
                     .map(|item| item.source_type == "equipment")
@@ -812,7 +827,8 @@ fn EquipmentTabContent(pokemon_id: u64, refresh_trigger: Signal<u64>) -> Element
                     div {
                         class: section_class,
                         onclick: move |_| {
-                            let selected = SELECTED_ITEM.read().clone();
+                            if *action_loading.read() { return; }
+                            let selected = selected_item.read().clone();
                             if let Some(ref item) = selected {
                                 if item.source_type == "equipment" {
                                     if let Some(from_slot) = item.slot_index {
@@ -839,14 +855,14 @@ fn EquipmentTabContent(pokemon_id: u64, refresh_trigger: Signal<u64>) -> Element
                                             }
                                             action_loading.set(false);
                                         });
-                                        *SELECTED_ITEM.write() = None;
+                                        *selected_item.write() = None;
                                     }
                                 }
                             }
                         },
                         div { class: "inventory-header",
                             span { class: "inventory-title", "物品栏" }
-                            if SELECTED_ITEM.read().as_ref().map(|s| s.source_type == "inventory").unwrap_or(false) {
+                            if selected_item.read().as_ref().map(|s| s.source_type == "inventory").unwrap_or(false) {
                                 span { class: "equip-hint", "点击装备槽以装载" }
                             }
                         }
@@ -856,6 +872,7 @@ fn EquipmentTabContent(pokemon_id: u64, refresh_trigger: Signal<u64>) -> Element
                                 owned_items: owned_items.clone(),
                                 action_loading,
                                 refresh_trigger,
+                                selected_item,
                             }
                         }
                     }
@@ -871,8 +888,8 @@ fn InventoryGridContent(
     action_loading: Signal<bool>,
     pokemon_id: u64,
     refresh_trigger: Signal<u64>,
+    selected_item: Signal<Option<SelectedItem>>,
 ) -> Element {
-    let _action_loading = action_loading;
     let _pokemon_id = pokemon_id;
     let _refresh_trigger = refresh_trigger;
 
@@ -889,7 +906,7 @@ fn InventoryGridContent(
 
     rsx! {
         for item in available_items {
-            InventoryItemCard { item }
+            InventoryItemCard { item, selected_item, action_loading }
         }
     }
 }
@@ -901,17 +918,18 @@ fn EquipmentSlotDraggable(
     action_loading: Signal<bool>,
     pokemon_id: u64,
     refresh_trigger: Signal<u64>,
+    selected_item: Signal<Option<SelectedItem>>,
 ) -> Element {
     let has_equipment = slot.item.is_some();
     let slot_item = slot.item.clone();
 
-    let is_selected = SELECTED_ITEM
+    let is_selected = selected_item
         .read()
         .as_ref()
         .map(|item| item.source_type == "equipment" && item.slot_index == Some(slot_index))
         .unwrap_or(false);
 
-    let has_inventory_selected = SELECTED_ITEM
+    let has_inventory_selected = selected_item
         .read()
         .as_ref()
         .map(|item| item.source_type == "inventory")
@@ -921,7 +939,10 @@ fn EquipmentSlotDraggable(
     let mut tooltip_position = use_signal(|| (0.0f64, 0.0f64, 0.0f64));
 
     let handle_click = move |_| {
-        let selected = SELECTED_ITEM.read().clone();
+        if *action_loading.read() {
+            return;
+        }
+        let selected = selected_item.read().clone();
 
         if let Some(ref item) = selected {
             if item.source_type == "inventory" {
@@ -956,7 +977,7 @@ fn EquipmentSlotDraggable(
                     }
                     action_loading.set(false);
                 });
-                *SELECTED_ITEM.write() = None;
+                *selected_item.write() = None;
             } else if item.source_type == "equipment" {
                 if let Some(from_slot) = item.slot_index {
                     if from_slot != slot_index {
@@ -1002,11 +1023,11 @@ fn EquipmentSlotDraggable(
                         });
                     }
                 }
-                *SELECTED_ITEM.write() = None;
+                *selected_item.write() = None;
             }
         } else if has_equipment {
             if let Some(ref item) = slot_item {
-                *SELECTED_ITEM.write() = Some(SelectedItem {
+                *selected_item.write() = Some(SelectedItem {
                     source_type: "equipment".to_string(),
                     myitem_id: item.myitem_id,
                     name: item.name.clone(),
@@ -1075,7 +1096,11 @@ fn EquipmentSlotDraggable(
 }
 
 #[component]
-fn InventoryItemCard(item: EquipmentItem) -> Element {
+fn InventoryItemCard(
+    item: EquipmentItem,
+    selected_item: Signal<Option<SelectedItem>>,
+    action_loading: Signal<bool>,
+) -> Element {
     let is_equipped = item.is_equipped;
     let available_count = item.available_count;
 
@@ -1087,8 +1112,11 @@ fn InventoryItemCard(item: EquipmentItem) -> Element {
     let mut tooltip_position = use_signal(|| (0.0f64, 0.0f64, 0.0f64));
 
     let handle_click = move |_| {
+        if *action_loading.read() {
+            return;
+        }
         if !is_equipped {
-            *SELECTED_ITEM.write() = Some(SelectedItem {
+            *selected_item.write() = Some(SelectedItem {
                 source_type: "inventory".to_string(),
                 myitem_id: item_for_click.myitem_id,
                 name: item_for_click.name.clone(),
@@ -1538,6 +1566,7 @@ pub fn SkillsTabContent(
     refresh_trigger: Signal<u64>,
 ) -> Element {
     let mut show_learn_modal = use_signal(|| false);
+    let mut action_loading = use_signal(|| false);
     let popup = use_popup();
 
     let _ = *refresh_trigger.read();
@@ -1558,38 +1587,46 @@ pub fn SkillsTabContent(
     let empty_slots_count = 4 - valid_skills.len();
 
     let handle_learn_click = move |_: MouseEvent| {
-        show_learn_modal.set(true);
+        if !*action_loading.read() {
+            show_learn_modal.set(true);
+        }
     };
 
     let handle_learn_skill = move |skill: LearnableSkill| {
-        if !skill.is_available {
+        if !skill.is_available || *action_loading.read() {
             return;
         }
+        action_loading.set(true);
 
         let pokemon_id = pokemon_id;
         let skill_id = skill.id;
-        let mut refresh_trigger = refresh_trigger;
 
-        spawn(async move {
-            start_global_loading("学习技能中...");
+        dioxus_core::spawn_forever(async move {
             let api = NewApiClient::new();
             match api.learn_skill(pokemon_id, skill_id).await {
                 Ok(_) => {
                     show_success("技能学习成功");
-                    refresh_trigger += 1;
+                    refresh_pokemon_list();
+                    if let Ok(mut visible) = show_learn_modal.try_write() {
+                        *visible = false;
+                    }
                 }
                 Err(e) => {
                     // 服务端已统一返回中文错误信息，直接展示
                     show_error(format!("学习技能失败：{}", e));
                 }
             }
-            stop_global_loading();
-            show_learn_modal.set(false);
+            if let Ok(mut loading) = action_loading.try_write() {
+                *loading = false;
+            }
         });
     };
 
     rsx! {
         div { class: "skills-grid-container",
+            if *action_loading.read() {
+                div { role: "status", "正在更新技能..." }
+            }
             // 战斗中的遮罩层
             if use_battle_state() {
                 div { class: "battle-disabled-overlay",
@@ -1606,7 +1643,6 @@ pub fn SkillsTabContent(
                 {
                     let skill_clone = skill.clone();
                     let pokemon_id_for_forget = pokemon_id;
-                    let mut refresh_trigger_for_forget = refresh_trigger;
                     let mut popup_for_close = popup;
 
                     rsx! {
@@ -1619,7 +1655,9 @@ pub fn SkillsTabContent(
                                     PopupMenu {
                                         PopupMenuItem {
                                             danger: true,
+                                            disabled: *action_loading.read(),
                                             onclick: move |_| {
+                                                if *action_loading.read() { return; }
                                                 popup_for_close.close();
                                                 if skill_for_menu.type_id > 0 {
                                                     // 遗忘要求PP为满：can_forget=false 时提前提示，
@@ -1633,13 +1671,13 @@ pub fn SkillsTabContent(
                                                     }
                                                     let pokemon_id = pokemon_id_for_forget;
                                                     let skill_id = skill_for_menu.type_id;
-                                                    spawn(async move {
-                                                        start_global_loading("遗忘技能中...");
+                                                    action_loading.set(true);
+                                                    dioxus_core::spawn_forever(async move {
                                                         let api = NewApiClient::new();
                                                         match api.forget_skill(pokemon_id, skill_id).await {
                                                             Ok(_) => {
                                                                 show_success("技能遗忘成功");
-                                                                refresh_trigger_for_forget += 1;
+                                                                refresh_pokemon_list();
                                                             }
                                                             Err(e) => {
                                                                 // 服务端已统一返回中文错误信息（如
@@ -1647,7 +1685,9 @@ pub fn SkillsTabContent(
                                                                 show_error(format!("遗忘技能失败：{}", e));
                                                             }
                                                         }
-                                                        stop_global_loading();
+                                                        if let Ok(mut loading) = action_loading.try_write() {
+                                                            *loading = false;
+                                                        }
                                                     });
                                                 }
                                             },
@@ -1722,7 +1762,11 @@ pub fn SkillsTabContent(
             }
 
             for _ in 0..empty_slots_count {
-                div { class: "skill-slot-empty", onclick: handle_learn_click,
+                button {
+                    r#type: "button",
+                    class: "skill-slot-empty",
+                    disabled: *action_loading.read(),
+                    onclick: handle_learn_click,
                     div { class: "skill-slot-plus", "+" }
                     div { class: "skill-slot-hint", "点击学习新技能" }
                 }
@@ -1734,9 +1778,12 @@ pub fn SkillsTabContent(
             SkillLearnModal {
                 pokemon_id,
                 on_close: move |_| {
-                    show_learn_modal.set(false);
+                    if !*action_loading.read() {
+                        show_learn_modal.set(false);
+                    }
                 },
                 on_learn: handle_learn_skill,
+                action_loading,
                 title: format!("学习新技能 (Lv.{})", pokemon_level),
             }
         }
@@ -1748,9 +1795,10 @@ fn SkillLearnModal(
     pokemon_id: u64,
     on_close: EventHandler<()>,
     on_learn: EventHandler<LearnableSkill>,
+    action_loading: Signal<bool>,
     title: String,
 ) -> Element {
-    let resource = use_resource(move || async move {
+    let mut resource = use_resource(move || async move {
         let api = NewApiClient::new();
         api.get_learnable_skills(pokemon_id).await
     });
@@ -1773,6 +1821,13 @@ fn SkillLearnModal(
             div { class: "skill-learn-content",
                 if loading {
                     div { class: "skill-learn-loading", "加载技能列表中..." }
+                } else if let Some(Err(error)) = resource_data.as_ref() {
+                    div { role: "alert", class: "error-message", "技能加载失败：{error}" }
+                    button {
+                        class: "btn btn-primary",
+                        onclick: move |_| resource.restart(),
+                        "重新加载技能"
+                    }
                 } else if available.is_empty() && unavailable.is_empty() {
                     div { class: "skill-learn-empty", "暂无可学习的技能" }
                 } else {
@@ -1782,6 +1837,7 @@ fn SkillLearnModal(
                             SkillLearnItem {
                                 skill: skill.clone(),
                                 on_learn,
+                                action_loading,
                             }
                         }
                     }
@@ -1792,6 +1848,7 @@ fn SkillLearnModal(
                             SkillLearnItem {
                                 skill: skill.clone(),
                                 on_learn,
+                                action_loading,
                             }
                         }
                     }
@@ -1802,20 +1859,27 @@ fn SkillLearnModal(
 }
 
 #[component]
-fn SkillLearnItem(skill: LearnableSkill, on_learn: EventHandler<LearnableSkill>) -> Element {
+fn SkillLearnItem(
+    skill: LearnableSkill,
+    on_learn: EventHandler<LearnableSkill>,
+    action_loading: Signal<bool>,
+) -> Element {
     let is_available = skill.is_available;
     let skill_clone = skill.clone();
 
     let handle_click = move |_: MouseEvent| {
-        if !is_available {
+        if !is_available || *action_loading.read() {
             return;
         }
         on_learn.call(skill_clone.clone());
     };
 
     rsx! {
-        div {
+        button {
+            r#type: "button",
             class: if is_available { "skill-learn-item" } else { "skill-learn-item disabled" },
+            style: "width: 100%; text-align: left; font: inherit;",
+            disabled: !is_available || *action_loading.read(),
             onclick: handle_click,
             div { class: "skill-learn-item-header",
                 span { class: "skill-learn-name", "{skill.name}" }

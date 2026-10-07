@@ -1583,8 +1583,8 @@ function calculate_rewards($mypokemon, $myusersdata, $npc, $npc_level, $map)
 
     // 金币
     $drop_money = json_decode($npc['drop_money'], true);
-    $money_min = !empty($drop_money[0]) ? $drop_money[0] : 10;
-    $money_max = !empty($drop_money[1]) ? $drop_money[1] : 50;
+    $money_min = isset($drop_money[0]) ? $drop_money[0] : 10;
+    $money_max = isset($drop_money[1]) ? $drop_money[1] : 50;
     $money = rand($money_min, $money_max) * $myusersdata['strength'];
 
     return [

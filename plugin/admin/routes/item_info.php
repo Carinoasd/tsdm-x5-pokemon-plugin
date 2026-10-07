@@ -37,76 +37,118 @@ function get_item_info($id)
   }
 }
 
+function admin_item_fail($reason, $rollback = false)
+{
+  if ($rollback) DB::query('ROLLBACK');
+  exit(json_encode(['success' => false, 'reason' => $reason], JSON_UNESCAPED_UNICODE));
+}
+
+function admin_item_count($value)
+{
+  // pm_myitem.nums is a signed SMALLINT. Reject coercions and overflow before writing.
+  $count = (is_int($value) || is_string($value))
+    ? filter_var($value, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1, 'max_range' => 32767]])
+    : false;
+  if ($count === false) admin_item_fail('物品数量必须是 1 至 32767 的整数');
+  return $count;
+}
+
+function admin_item_lock_owner($uid)
+{
+  if (!DB::fetch_first("SELECT uid FROM pm_usersdata WHERE uid=$uid FOR UPDATE")) {
+    admin_item_fail("未找到用户 #$uid", true);
+  }
+}
+
+function admin_item_equipped_slots($id)
+{
+  $count = 0;
+  $rows = DB::fetch_all("SELECT equipmentid1, equipmentid2, equipmentid3, equipmentid4 FROM pm_mypm
+    WHERE equipmentid1=$id OR equipmentid2=$id OR equipmentid3=$id OR equipmentid4=$id");
+  foreach ($rows as $row) {
+    for ($slot = 1; $slot <= 4; $slot++) {
+      if (intval($row['equipmentid' . $slot]) === $id) $count++;
+    }
+  }
+  return $count;
+}
+
 function set_item_info($info)
 {
-  $id = intval($info["id"]);
-  if ($query = DB::fetch_first("SELECT * from pm_myitem where `id`='$id'")) {
-    // 提前检查，禁止修改持有用户
-    if (intval($query['uid']) != intval($info["owner"])) {
-      $json_ret = [];
-      $json_ret["success"] = false;
-      $json_ret["reason"] = "无法修改物品信息，禁止修改持有用户信息 #$id";
-      exit(json_encode($json_ret, JSON_UNESCAPED_UNICODE));
+  $id = intval($info['id'] ?? 0);
+  $uid = intval($info['owner'] ?? 0);
+  $itemid = intval($info['type_id'] ?? 0);
+  $nums = admin_item_count($info['count'] ?? null);
+  DB::query('START TRANSACTION');
+  try {
+    admin_item_lock_owner($uid);
+    $row = DB::fetch_first("SELECT * FROM pm_myitem WHERE id=$id FOR UPDATE");
+    if (!$row) admin_item_fail("无法查询物品信息 #$id", true);
+    if (intval($row['uid']) !== $uid) admin_item_fail("禁止修改持有用户信息 #$id", true);
+    if (!DB::fetch_first("SELECT id FROM pm_itemdata WHERE id=$itemid")) {
+      admin_item_fail("未找到物品类型 #$itemid", true);
     }
-
-    if (intval($query['itemid']) != intval($info["type_id"])) {
-      DB::query("UPDATE pm_myitem set `itemid`='" . intval($info["type_id"]) . "' where `id`='$id'");
+    $occupied = admin_item_equipped_slots($id);
+    if ($occupied && intval($row['itemid']) !== $itemid) {
+      admin_item_fail('物品仍在装备中，请先卸下装备再修改类型', true);
     }
-    if (intval($query['nums']) != intval($info["count"])) {
-      DB::query("UPDATE pm_myitem set `nums`='" . intval($info["count"]) . "' where `id`='$id'");
-    }
-  } else {
-    $json_ret = [];
-    $json_ret["success"] = false;
-    $json_ret["reason"] = "无法查询物品信息 #$id";
-    exit(json_encode($json_ret, JSON_UNESCAPED_UNICODE));
+    if ($nums < $occupied) admin_item_fail('物品数量不能少于正在使用的装备槽数', true);
+    DB::query("UPDATE pm_myitem SET itemid='$itemid', nums=$nums WHERE id=$id AND uid=$uid");
+    DB::query('COMMIT');
+  } catch (Throwable $error) {
+    DB::query('ROLLBACK');
+    throw $error;
   }
 }
 
 function insert_item_info($info)
 {
-  $uid = intval($info["owner"]);
-  $itemid = intval($info["type_id"]);
-  $nums = intval($info["count"]);
+  $uid = intval($info['owner'] ?? 0);
+  $itemid = intval($info['type_id'] ?? 0);
+  $nums = admin_item_count($info['count'] ?? null);
 
-  // 提前检查，对应物品类型必须存在
-  if (!DB::fetch_first("SELECT id from pm_itemdata where id='$itemid'")) {
-    $json_ret = [];
-    $json_ret["success"] = false;
-    $json_ret["reason"] = "未找到物品类型 #$itemid";
-    exit(json_encode($json_ret, JSON_UNESCAPED_UNICODE));
+  // Share the account lock with purchases, item use and equipment changes.
+  DB::query('START TRANSACTION');
+  try {
+    admin_item_lock_owner($uid);
+    if (!DB::fetch_first("SELECT id FROM pm_itemdata WHERE id=$itemid")) {
+      admin_item_fail("未找到物品类型 #$itemid", true);
+    }
+    $existing = DB::fetch_first("SELECT id, nums FROM pm_myitem WHERE uid=$uid AND itemid='$itemid' ORDER BY id LIMIT 1 FOR UPDATE");
+    if ($existing) {
+      $id = intval($existing['id']);
+      $limit = 32767 - $nums;
+      DB::query("UPDATE pm_myitem SET nums = nums + $nums WHERE id=$id AND uid=$uid AND nums >= 0 AND nums <= $limit");
+      if (!DB::affected_rows()) admin_item_fail('物品总数量超出范围，请检查现有数量', true);
+    } else {
+      DB::query("INSERT INTO pm_myitem (uid,itemid,nums) VALUES ($uid,'$itemid',$nums)");
+      $id = intval(DB::insert_id());
+    }
+    DB::query('COMMIT');
+  } catch (Throwable $error) {
+    DB::query('ROLLBACK');
+    throw $error;
   }
-
-  // 提前检查，对应用户必须存在
-  if (!DB::fetch_first("SELECT uid from pm_usersdata where uid='$uid'")) {
-    $json_ret = [];
-    $json_ret["success"] = false;
-    $json_ret["reason"] = "未找到用户 #$uid";
-    exit(json_encode($json_ret, JSON_UNESCAPED_UNICODE));
-  }
-
-  // 检查用户是否已拥有该类型物品
-  if ($existing = DB::fetch_first("SELECT id, nums from pm_myitem where `uid`='$uid' and `itemid`='$itemid'")) {
-    // 已存在，累加数量
-    $existing_id = intval($existing['id']);
-    $new_nums = intval($existing['nums']) + $nums;
-    DB::query("UPDATE pm_myitem set `nums`='$new_nums' where `id`='$existing_id'");
-    return $existing_id;
-  }
-
-  // 不存在，创建新条目
-  DB::query("INSERT INTO pm_myitem (
-    `uid`,`itemid`,`nums`
-  ) VALUES (
-    '$uid','$itemid','$nums'
-  )");
-
-  $new_id = DB::insert_id();
-  return $new_id;
+  return $id;
 }
 
 function delete_item_info($id)
 {
   $id = intval($id);
-  DB::query("DELETE FROM pm_myitem where `id`='$id'");
+  // Discover the immutable owner, then re-read inventory after taking its lock.
+  $row = DB::fetch_first("SELECT uid FROM pm_myitem WHERE id=$id");
+  if (!$row) admin_item_fail("无法查询物品信息 #$id");
+  $uid = intval($row['uid']);
+  DB::query('START TRANSACTION');
+  try {
+    admin_item_lock_owner($uid);
+    $row = DB::fetch_first("SELECT * FROM pm_myitem WHERE id=$id AND uid=$uid FOR UPDATE");
+    if (!$row) admin_item_fail("无法查询物品信息 #$id", true);
+    if (admin_item_equipped_slots($id) > 0) admin_item_fail('物品仍在装备中，请先卸下装备再删除', true);
+    DB::query("DELETE FROM pm_myitem WHERE id=$id AND uid=$uid");
+    DB::query('COMMIT');
+  } catch (Throwable $error) {
+    DB::query('ROLLBACK');
+    throw $error;
+  }
 }
