@@ -31,7 +31,7 @@ pub fn GlobalConfigPage() -> Element {
 
     use_effect(move || {
         let state = ADMIN_GLOBAL_CONFIG.read().clone();
-        if state.initialized || state.loading {
+        if state.initialized || state.loading || state.load_error.is_some() {
             return;
         }
         reload_global_config();
@@ -94,7 +94,22 @@ pub fn GlobalConfigPage() -> Element {
                 }
             }
 
-            div { class: "admin-config-grid",
+            if let Some(error) = state.load_error.clone() {
+                div { class: "admin-card", role: "alert",
+                    p { "读取配置失败：{error}" }
+                    p { "请重新读取配置，成功后才能编辑或保存。" }
+                    button {
+                        class: "admin-btn admin-btn--primary",
+                        disabled: is_busy,
+                        onclick: move |_| reload_global_config(),
+                        "重新读取配置"
+                    }
+                }
+            }
+            fieldset {
+                class: "admin-config-grid",
+                style: "border:0;margin:0;padding:0;min-width:0;",
+                disabled: is_busy || !state.initialized,
                 Section { title: "基础设定", open: true,
                     BoolField {
                         label: "是否开放",
@@ -326,7 +341,11 @@ pub fn GlobalConfigPage() -> Element {
                         span { class: "admin-list-status-bar__item",
                             span { class: "admin-list-status-bar__label", "配置状态" }
                             strong { class: "admin-list-status-bar__value",
-                                if is_dirty {
+                                if state.loading {
+                                    "处理中"
+                                } else if !state.initialized {
+                                    "尚未成功读取"
+                                } else if is_dirty {
                                     "有未保存修改"
                                 } else {
                                     "已同步"
@@ -339,13 +358,13 @@ pub fn GlobalConfigPage() -> Element {
                     IconButton {
                         icon: IconName::RotateCcw,
                         tooltip: "恢复已保存版本".to_string(),
-                        disabled: is_busy || !is_dirty,
+                        disabled: is_busy || !state.initialized || !is_dirty,
                         onclick: move |_| reset_global_config_to_saved(),
                     }
                     IconButton {
                         icon: IconName::Save,
                         tooltip: "保存配置".to_string(),
-                        disabled: is_busy || !is_dirty,
+                        disabled: is_busy || !state.initialized || !is_dirty,
                         onclick: move |_| save_global_config(config_for_bottom_save.clone()),
                     }
                 }
@@ -355,17 +374,20 @@ pub fn GlobalConfigPage() -> Element {
 }
 
 fn reload_global_config() {
+    if *ADMIN_BUSY.read() || ADMIN_GLOBAL_CONFIG.read().loading {
+        return;
+    }
     begin_global_config_request();
     set_busy(true);
 
-    spawn(async move {
+    dioxus_core::spawn_forever(async move {
         match get_global_config().await {
             Ok(config) => {
                 finish_global_config_load(config);
                 set_notice(AdminNoticeLevel::Info, "全局配置已重新加载");
             }
             Err(error) => {
-                finish_global_config_attempt();
+                finish_global_config_attempt(Some(error.to_string()));
                 set_notice(
                     AdminNoticeLevel::Error,
                     format!("读取全局配置失败: {}", error),
@@ -377,25 +399,27 @@ fn reload_global_config() {
 }
 
 fn save_global_config(config: GlobalConfigType) {
+    if *ADMIN_BUSY.read() || !ADMIN_GLOBAL_CONFIG.read().is_dirty() {
+        return;
+    }
     begin_global_config_request();
     set_busy(true);
 
-    spawn(async move {
+    dioxus_core::spawn_forever(async move {
         match set_global_config(config).await {
-            Ok(_saved) => {
-                // 保存成功后，重新从服务器获取最新配置
-                reload_global_config();
+            Ok(saved) => {
+                finish_global_config_load(saved);
                 set_notice(AdminNoticeLevel::Success, "全局配置已保存");
             }
             Err(error) => {
-                finish_global_config_attempt();
+                finish_global_config_attempt(None);
                 set_notice(
                     AdminNoticeLevel::Error,
                     format!("保存全局配置失败: {}", error),
                 );
-                set_busy(false);
             }
         }
+        set_busy(false);
     });
 }
 

@@ -117,23 +117,94 @@ function get_pokemon_info($id)
   }
 }
 
+function admin_pokemon_fail($reason, $rollback = false)
+{
+  if ($rollback) DB::query('ROLLBACK');
+  exit(json_encode(['success' => false, 'reason' => $reason], JSON_UNESCAPED_UNICODE));
+}
+
+function admin_pokemon_lock_owner($uid)
+{
+  $owner = DB::fetch_first("SELECT uid, npcid FROM pm_usersdata WHERE uid=$uid FOR UPDATE");
+  if (!$owner) admin_pokemon_fail("未找到用户 #$uid", true);
+  return $owner;
+}
+
+function admin_pokemon_validate_skills($skills, $uid, $petid = null)
+{
+  if (!is_array($skills)) admin_pokemon_fail('技能数据格式错误', true);
+  $seen = [];
+  foreach ($skills as $skill) {
+    if (!is_array($skill)) admin_pokemon_fail('技能数据格式错误', true);
+    $id = $skill['type_id'] ?? null;
+    $count = $skill['count'] ?? null;
+    if ((!is_int($id) && !is_string($id)) || !filter_var($id, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1, 'max_range' => 16777215]]) ||
+        (!is_int($count) && !is_string($count)) || filter_var($count, FILTER_VALIDATE_INT, ['options' => ['min_range' => 0, 'max_range' => 32767]]) === false) {
+      admin_pokemon_fail('技能编号或次数无效', true);
+    }
+    $id = intval($id);
+    if (isset($seen[$id])) admin_pokemon_fail('技能不能重复', true);
+    $seen[$id] = true;
+    if ($petid === null) {
+      $row = DB::fetch_first("SELECT id FROM pm_skill WHERE id=$id FOR UPDATE");
+    } else {
+      $row = DB::fetch_first("SELECT id FROM pm_myskill WHERE uid=$uid AND petid=$petid AND skillid=$id FOR UPDATE");
+    }
+    if (!$row) admin_pokemon_fail("宠物信息更新失败，未找到技能信息 #$id", true);
+  }
+}
+
+function admin_pokemon_replacement($uid, $id)
+{
+  $replacement = DB::fetch_first("SELECT id FROM pm_mypm WHERE uid=$uid AND id!=$id ORDER BY site ASC, id ASC LIMIT 1 FOR UPDATE");
+  if (!$replacement) admin_pokemon_fail('必须保留一只首位宠物', true);
+  $next_id = intval($replacement['id']);
+  DB::query("UPDATE pm_mypm SET site=1 WHERE id=$next_id AND uid=$uid");
+}
+
+function admin_pokemon_prepare_site($owner, $id, $old_site, $site)
+{
+  $uid = intval($owner['uid']);
+  if (intval($owner['npcid']) > 0 && ($old_site === 1 || $site === 1)) {
+    admin_pokemon_fail('战斗中的首位宠物无法修改或替换', true);
+  }
+  if ($old_site === null && !DB::fetch_first("SELECT id FROM pm_mypm WHERE uid=$uid AND site=1 FOR UPDATE")) {
+    // As with the first capture, a first grant must leave the player a leader.
+    if (intval($owner['npcid']) > 0) admin_pokemon_fail('战斗中无法替换首位宠物', true);
+    $site = 1;
+  }
+  if ($site === 1) {
+    DB::query("UPDATE pm_mypm SET site=2 WHERE uid=$uid AND site=1 AND id!=$id");
+  } elseif ($old_site === 1) {
+    admin_pokemon_replacement($uid, $id);
+  }
+  return $site;
+}
+
 function set_pokemon_info($info)
 {
   $id = intval($info["id"]);
-  if ($query = DB::fetch_first("SELECT * from pm_mypm where `id`='$id'")) {
+  $uid = intval($info['owner'] ?? 0);
+  // Translate before starting the transaction: these legacy helpers may exit.
+  $site = translate_pokemon_site_label_to_id($info['site'] ?? 'header');
+  $state = translate_pokemon_status_label_to_id($info['status'] ?? 'normal');
+  DB::query('START TRANSACTION');
+  try {
+  $owner = admin_pokemon_lock_owner($uid);
+  if ($query = DB::fetch_first("SELECT * from pm_mypm where `id`='$id' FOR UPDATE")) {
     // 提前检查，禁止修改持有用户
     if (intval($query['uid']) != intval($info["owner"])) {
-      $json_ret = [];
-      $json_ret["success"] = false;
-      $json_ret["reason"] = "无法修改宠物信息，禁止修改持有用户信息 #$id";
-      exit(json_encode($json_ret, JSON_UNESCAPED_UNICODE));
+      admin_pokemon_fail("无法修改宠物信息，禁止修改持有用户信息 #$id", true);
     }
+
+    admin_pokemon_validate_skills($info['skills'] ?? [], $uid, $id);
+    $site = admin_pokemon_prepare_site($owner, $id, intval($query['site']), $site);
 
     if ($query['nickname'] != ($info["name"] ?? $query['nickname'])) {
       DB::query("UPDATE pm_mypm set `nickname`='" . addslashes($info["name"] ?? $query['nickname']) . "' where `id`='$id'");
     }
-    if (intval($query['site']) != translate_pokemon_site_label_to_id($info["site"] ?? "header")) {
-      DB::query("UPDATE pm_mypm set `site`='" . translate_pokemon_site_label_to_id($info["site"] ?? "header") . "' where `id`='$id'");
+    if (intval($query['site']) != $site) {
+      DB::query("UPDATE pm_mypm set `site`='$site' where `id`='$id'");
     }
 
     if (intval($query['level']) != intval($info["level"] ?? $query['level'])) {
@@ -151,8 +222,8 @@ function set_pokemon_info($info)
     if (boolval($query['is_shiny']) != boolval($info["is_shiny"] ?? false)) {
       DB::query("UPDATE pm_mypm set `is_shiny`='" . (boolval($info["is_shiny"] ?? false) ? 1 : 0) . "' where `id`='$id'");
     }
-    if ($query['state'] != translate_pokemon_status_label_to_id($info["status"] ?? "normal")) {
-      DB::query("UPDATE pm_mypm set `state`='" . translate_pokemon_status_label_to_id($info["status"] ?? "normal") . "' where `id`='$id'");
+    if ($query['state'] != $state) {
+      DB::query("UPDATE pm_mypm set `state`='$state' where `id`='$id'");
     }
     if ($query['sex'] != translate_pokemon_sex_label_to_id($info["sex"] ?? "male")) {
       DB::query("UPDATE pm_mypm set `sex` ='" . translate_pokemon_sex_label_to_id($info["sex"] ?? "male") . "' where `id`='$id'");
@@ -217,18 +288,17 @@ function set_pokemon_info($info)
           DB::query("UPDATE pm_myskill set `skillnum`='$skillnum' where `uid`='$uid' AND `petid`='$petid' AND `skillid`='$skillid'");
         }
       } else {
-        $json_ret = [];
-        $json_ret["success"] = false;
-        $json_ret["reason"] = "宠物信息更新失败，未找到技能信息 #$id";
-        exit(json_encode($json_ret, JSON_UNESCAPED_UNICODE));
+        admin_pokemon_fail("宠物信息更新失败，未找到技能信息 #$id", true);
       }
     }
     }
   } else {
-    $json_ret = [];
-    $json_ret["success"] = false;
-    $json_ret["reason"] = "宠物信息更新失败，未找到 #$id";
-    exit(json_encode($json_ret, JSON_UNESCAPED_UNICODE));
+    admin_pokemon_fail("宠物信息更新失败，未找到 #$id", true);
+  }
+  DB::query('COMMIT');
+  } catch (Throwable $error) {
+    DB::query('ROLLBACK');
+    throw $error;
   }
 }
 
@@ -266,22 +336,16 @@ function insert_pokemon_info($info)
   $equipmentid3 = is_null($info["armor_slots_id"][2]) ? 0 : intval($info["armor_slots_id"][2]);
   $equipmentid4 = is_null($info["armor_slots_id"][3]) ? 0 : intval($info["armor_slots_id"][3]);
 
-  // 提前检查，对应宠物类型必须存在（名称与性格沿用种族数据，与捕捉路径一致）
-  $type_data = DB::fetch_first("SELECT * from pm_data where id='$pmno'");
+  DB::query('START TRANSACTION');
+  try {
+  $owner = admin_pokemon_lock_owner($uid);
+  // Validate all references before changing either the leader or the new pet.
+  $type_data = DB::fetch_first("SELECT * from pm_data where id='$pmno' FOR UPDATE");
   if (!$type_data) {
-    $json_ret = [];
-    $json_ret["success"] = false;
-    $json_ret["reason"] = "未找到宠物类型 #$pmno";
-    exit(json_encode($json_ret, JSON_UNESCAPED_UNICODE));
+    admin_pokemon_fail("未找到宠物类型 #$pmno", true);
   }
-
-  // 提前检查，对应用户必须存在
-  if (!DB::fetch_first("SELECT uid from pm_usersdata where uid='$uid'")) {
-    $json_ret = [];
-    $json_ret["success"] = false;
-    $json_ret["reason"] = "未找到用户 #$uid";
-    exit(json_encode($json_ret, JSON_UNESCAPED_UNICODE));
-  }
+  admin_pokemon_validate_skills($info['skills'] ?? [], $uid);
+  $site = admin_pokemon_prepare_site($owner, 0, null, $site);
 
   $pmname = addslashes($type_data['name']);
   $sx = addslashes($type_data['xs']);
@@ -337,7 +401,11 @@ function insert_pokemon_info($info)
         '$uid', '$new_id', '$skillid', '$skillnum'
       )");
   }
-
+  DB::query('COMMIT');
+  } catch (Throwable $error) {
+    DB::query('ROLLBACK');
+    throw $error;
+  }
   return $new_id;
 }
 
@@ -345,50 +413,38 @@ function delete_pokemon_info($id)
 {
   $id = intval($id);
 
-  // 获取要删除的宠物信息
+  // Discover the immutable owner before taking the shared account lock.
   $pokemon = DB::fetch_first("SELECT `uid`, `site` FROM pm_mypm WHERE `id`='$id'");
   if (!$pokemon) {
-    $json_ret = [];
-    $json_ret["success"] = false;
-    $json_ret["reason"] = "未找到宠物 #$id";
-    exit(json_encode($json_ret, JSON_UNESCAPED_UNICODE));
+    admin_pokemon_fail("未找到宠物 #$id");
   }
 
   $uid = intval($pokemon['uid']);
+  DB::query('START TRANSACTION');
+  try {
+  $owner = admin_pokemon_lock_owner($uid);
+  $pokemon = DB::fetch_first("SELECT uid, site FROM pm_mypm WHERE id=$id AND uid=$uid FOR UPDATE");
+  if (!$pokemon) admin_pokemon_fail("未找到宠物 #$id", true);
   $site = intval($pokemon['site']);
+  if ($site === 1 && intval($owner['npcid']) > 0) admin_pokemon_fail('战斗中的首位宠物无法放生', true);
 
   // 检查玩家的宠物总数
   $total_count = intval(DB::result_first("SELECT COUNT(*) FROM pm_mypm WHERE `uid`='$uid'"));
   if ($total_count <= 1) {
-    $json_ret = [];
-    $json_ret["success"] = false;
-    $json_ret["reason"] = "无法放生最后一只宠物";
-    exit(json_encode($json_ret, JSON_UNESCAPED_UNICODE));
+    admin_pokemon_fail('无法放生最后一只宠物', true);
   }
 
   // 如果是首位宠物（site=1），需要选择替补
   if ($site === 1) {
-    // 优先从背包（site=2）选择第一个宠物作为替补
-    $replacement = DB::fetch_first("SELECT `id` FROM pm_mypm WHERE `uid`='$uid' AND `site`='2' ORDER BY `id` ASC LIMIT 1");
-
-    // 如果背包没有，从仓库（site=3）选择
-    if (!$replacement) {
-      $replacement = DB::fetch_first("SELECT `id` FROM pm_mypm WHERE `uid`='$uid' AND `site`='3' ORDER BY `id` ASC LIMIT 1");
-    }
-
-    // 如果仓库也没有，从医院（site=4）选择
-    if (!$replacement) {
-      $replacement = DB::fetch_first("SELECT `id` FROM pm_mypm WHERE `uid`='$uid' AND `site`='4' ORDER BY `id` ASC LIMIT 1");
-    }
-
-    // 更新替补宠物为首位
-    if ($replacement) {
-      $replacement_id = intval($replacement['id']);
-      DB::query("UPDATE pm_mypm SET `site`='1' WHERE `id`='$replacement_id'");
-    }
+    admin_pokemon_replacement($uid, $id);
   }
 
   // 删除宠物
-  DB::query("DELETE FROM pm_mypm WHERE `id`='$id'");
-  DB::query("DELETE FROM pm_myskill WHERE `petid`='$id'");
+  DB::query("DELETE FROM pm_mypm WHERE `id`='$id' AND uid=$uid");
+  DB::query("DELETE FROM pm_myskill WHERE `petid`='$id' AND uid=$uid");
+  DB::query('COMMIT');
+  } catch (Throwable $error) {
+    DB::query('ROLLBACK');
+    throw $error;
+  }
 }

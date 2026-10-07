@@ -11,9 +11,11 @@
 | Read repairs | A stale list or detail request cannot replace newer healing, battle damage, state or equipment-dependent HP values. Uncontested reads still repair invalid legacy values. | PHP snapshot regressions and MariaDB barriers around real CGI reads |
 | Admin filters | All conditions combine regardless of order. Names resolve to matching IDs, exclusions retain their meaning, and Chinese sale flags match the selected value. | Actual admin dispatch and SQL against MariaDB |
 | Admin inventory | Grants and edits preserve valid owners, item types, quantity limits and equipped references. Concurrent grants serialize, and failed writes roll back. | PHP integrity checks and MariaDB transactions |
+| Admin Pokemon | Grants, edits and releases preserve one leader and the last Pokemon. Failed multi-table writes roll back; concurrent releases serialize with player actions. | Actual admin dispatch against MariaDB, failure injection and concurrent workers |
 | Admin catalog identities | New records use database-generated IDs, including after deleting the highest record and during concurrent inserts. Existing references cannot silently attach to unrelated replacement records. | Actual catalog handlers against MariaDB in both SQL modes |
 | Configuration capacity | Long announcement lists and quoted skill text survive storage. Old configuration columns expand before any settings are written; explicit upgrades can run again. | MariaDB strict and non-strict SQL modes, upgrade failure checks and legacy announcement reads |
 | Configuration concurrency | Concurrent first reads preserve defaults and newer administrator values. Explicit saves still apply if another reader creates the key first. Only lock conflicts retry, with a fixed attempt limit. | MariaDB barriers and native Discuz error-contract regressions |
+| Legacy export text | Archived X2 SQL strings retain whitespace, escapes, Unicode and NULL values. Invalid input leaves existing output intact. | Export CLI tests and original-versus-converted MariaDB imports |
 | Admin saves and user selection | A pending save submits once, failed saves retain the draft, and completed saves release the loading state. Related Pokemon and inventory responses remain bound to the selected user. | Actual admin WASM with delayed requests and rejected saves |
 | Maintenance | Either closed switch blocks player operations; named staff, authorized administration and public announcements retain access. | Actual router regressions and PHP CGI requests against MariaDB |
 | Legacy announcements | The first config, admin or topics read migrates legacy notices. An explicitly cleared list stays empty; concurrent readers cannot overwrite a new administrator notice. | Admin input round trips and MariaDB barriers before migration inserts |
@@ -66,6 +68,7 @@ php scripts/test/live_database.php
 php scripts/test/pokemon_state_database.php
 php scripts/test/admin_filter_database.php
 php scripts/test/admin_item_database.php
+php scripts/test/admin_pokemon_database.php
 php scripts/test/admin_catalog_database.php
 php scripts/test/admin_identity_database.php
 php scripts/test/config_concurrency_database.php
@@ -134,6 +137,21 @@ unchanged, and can be run again without changes.
 This checks SQL and game data behavior; it does not install Discuz or test forum
 authentication. For existing sites affected by the original item evolution seed,
 see [Seed data repairs](../migrations/seed-fixes/README.md).
+
+The archived X2 dump converter has a separate text-preservation check:
+
+```sh
+python scripts/test/x2_export_regressions.py
+python scripts/test/x2_export_regressions.py --database
+```
+
+The second command uses the same `TSDM_DB_*` settings and requires PHP with
+`mysqli`. Set `TSDM_PHP_EXECUTABLE` and `TSDM_PHP_INI` for a custom PHP runtime.
+It imports both a generated legacy dump and the converted SQL into an isolated
+database, then compares the stored values with independent expected values.
+The converter accepts archived X2 fixed-column-order dumps; see its module
+documentation for supported literals and SQL modes. Unsupported input fails
+before replacing the requested output file.
 
 ## Browser checks
 

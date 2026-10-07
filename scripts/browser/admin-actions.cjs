@@ -7,8 +7,10 @@ const assetRoot = path.resolve(process.env.ADMIN_WASM_DIRECTORY || path.join(__d
 const artifacts = path.join(__dirname, 'artifacts/admin-actions');
 const prefix = '/source/plugin/pokemon/wasm/';
 const html = `<!doctype html><html><meta charset="utf-8"><link rel="stylesheet" href="${prefix}admin.css"><script src="${prefix}lucide.min.js"></script><div id="main"></div><script type="module">import init,{WebHandle} from '${prefix}_admin.js';await init({module_or_path:'${prefix}_admin_bg.wasm'});await new WebHandle().start();</script></html>`;
-async function fixture() {
-  const state = {requests: [], rows: {}, unexpected: [], hold: null, afterHold: null, fail: null, releases: [], completed: [], itemReplies: {}};
+async function fixture(options = {}) {
+  const state = {requests: [], rows: {}, unexpected: [], hold: null, afterHold: null, fail: null, releases: [], completed: [], itemReplies: {},
+    config: {_TYPE:'global_config',version:'proof',ann_title:'server title',ann_url:'https://example.invalid/notice',medical_price:7777,egg_price:3210},
+    ...options};
   const server = http.createServer(async (req, res) => {
     try {
       const url = new URL(req.url, 'http://localhost');
@@ -19,7 +21,14 @@ async function fixture() {
         if (state.hold === payload.action || (typeof state.hold === 'function' && state.hold(payload))) await new Promise(resolve => state.releases.push(resolve));
         let result;
         if (state.fail === payload.action) result = {success:false,reason:'proof rejected save'};
-        else if (payload.action === 'list::global_config') result = {success:true,data:[{_TYPE:'global_config',version:'proof'}]};
+        else if (payload.action === 'list::global_config') {
+          result = state.failInitialConfig && state.requests.filter(p=>p.action==='list::global_config').length===1
+            ? {success:false,reason:'initial config unavailable'} : {success:true,data:[state.config]};
+        } else if (payload.action === 'set::global_config') {
+          state.config = {...JSON.parse(payload.data),_TYPE:'global_config'};
+          state.config.ann_title = state.config.ann_title.trim();
+          result = {success:true,data:[state.config]};
+        }
         else {
           const rows = state.rows[entity] ||= [];
           if (operation === 'count') result = {success:true,data:[{count:rows.length}]};
@@ -49,10 +58,10 @@ async function fixture() {
   await new Promise(resolve => server.listen(0,'127.0.0.1',resolve));
   return {state,url:`http://127.0.0.1:${server.address().port}/plugin.php?id=pokemon:pokemon&index=admin`,close:async()=>{state.releases.splice(0).forEach(resolve=>resolve());server.closeAllConnections();await new Promise(resolve=>server.close(resolve));}};
 }
-async function run(name, action) {
+async function run(name, action, options = {}) {
   if (process.env.ADMIN_CASE_FILTER && !new RegExp(process.env.ADMIN_CASE_FILTER).test(name)) return;
   await fs.mkdir(artifacts,{recursive:true});
-  const app = await fixture(); const browser = await chromium.launch({headless:true});
+  const app = await fixture(options); const browser = await chromium.launch({headless:true});
   const context = await browser.newContext({viewport:{width:1440,height:1000}});
   context.setDefaultTimeout(10000);context.setDefaultNavigationTimeout(20000);
   await context.tracing.start({screenshots:true,snapshots:true});
@@ -88,6 +97,59 @@ async function openUser(page, uid) {
   await expect(page.locator('.admin-table--user-item-info tbody tr')).toHaveCount(1);
 }
 (async()=>{
+  await run('config-initial-failure-blocks-default-save-and-can-retry',async(page,state)=>{
+    const title=page.getByPlaceholder('输入公告标题',{exact:true});
+    await expect(page.locator('.admin-toast--error')).toContainText('initial config unavailable');
+    await expect(title).toBeDisabled();
+    await expect(page.getByRole('button',{name:'保存配置',exact:true})).toBeDisabled();
+    await page.getByRole('button',{name:'道具数据',exact:true}).click();
+    await expect(page.locator('.admin-fullscreen-overlay')).toHaveCount(0);
+    await page.getByRole('button',{name:'全局配置',exact:true}).click();
+    assert.equal(state.requests.filter(p=>p.action==='set::global_config').length,0);
+    await page.getByRole('button',{name:'重新读取配置',exact:true}).click();
+    await expect(title).toHaveValue('server title');
+    await expect(title).toBeEnabled();
+    await title.fill('changed title');
+    await page.getByRole('button',{name:'保存配置',exact:true}).click();
+    await expect(page.locator('.admin-toast--success')).toContainText('全局配置已保存');
+    await expect(page.locator('.admin-fullscreen-overlay')).toHaveCount(0);
+    const saved=JSON.parse(state.requests.find(p=>p.action==='set::global_config').data);
+    assert.equal(saved.medical_price,7777);assert.equal(saved.egg_price,3210);
+    assert.equal(saved.ann_url,'https://example.invalid/notice');assert.equal(saved.ann_title,'changed title');
+    assert.equal(state.requests.filter(p=>p.action==='list::global_config').length,2);
+  },{failInitialConfig:true});
+  await run('config-rejected-save-retains-draft-for-retry',async(page,state)=>{
+    const title=page.getByPlaceholder('输入公告标题',{exact:true});
+    await expect(title).toHaveValue('server title');
+    await title.fill('keep this draft');
+    state.fail='set::global_config';
+    await page.getByRole('button',{name:'保存配置',exact:true}).click();
+    await expect(page.locator('.admin-toast--error')).toContainText('proof rejected save');
+    await expect(title).toHaveValue('keep this draft');await expect(title).toBeEnabled();
+    assert.equal(state.config.ann_title,'server title');
+    state.fail=null;
+    await page.getByRole('button',{name:'保存配置',exact:true}).click();
+    await expect(page.locator('.admin-toast--success')).toContainText('全局配置已保存');
+    assert.equal(state.config.ann_title,'keep this draft');
+    assert.equal(state.requests.filter(p=>p.action==='set::global_config').length,2);
+  });
+  await run('config-pending-save-blocks-edits-and-repeat-submission',async(page,state)=>{
+    const title=page.getByPlaceholder('输入公告标题',{exact:true});
+    await expect(title).toHaveValue('server title');
+    await title.fill('  canonical title  ');
+    state.hold='set::global_config';
+    await page.getByRole('button',{name:'保存配置',exact:true}).evaluate(button=>{button.click();button.click();button.click();});
+    await expect.poll(()=>state.releases.length).toBe(1);
+    await expect(title).toBeDisabled();
+    await title.focus();await page.keyboard.type('late edit');
+    await expect(title).toHaveValue('  canonical title  ');
+    assert.equal(state.requests.filter(p=>p.action==='set::global_config').length,1);
+    state.hold=null;state.releases.splice(0).forEach(resolve=>resolve());
+    await expect(title).toHaveValue('canonical title');
+    await expect(page.locator('.admin-fullscreen-overlay')).toHaveCount(0);
+    await expect(page.getByRole('button',{name:'保存配置',exact:true})).toBeDisabled();
+    assert.equal(state.requests.filter(p=>p.action==='list::global_config').length,1);
+  });
   await run('map-save-busy',async(page,state)=>{
     await openCreate(page,'地图设定','新增地图');
     await page.getByPlaceholder('地图名称',{exact:true}).fill('proof map');

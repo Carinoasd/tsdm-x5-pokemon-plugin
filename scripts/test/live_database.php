@@ -705,6 +705,9 @@ try {
         'Boss metadata also survives a healing item action');
     $db->query("UPDATE pm_battle_unit SET hp = 1 WHERE battle_id = $boss_id AND side = 'enemy'");
     $db->query('UPDATE pm_usersdata SET hp = 1 WHERE uid = 7');
+    // This assertion tests victory metadata, not the faster Boss's 20% evasion.
+    // Seed 2 draws enemy damage/crit, then an ally hit roll of 46 (>20).
+    $db->query("UPDATE pm_battle SET rng_seed = 2, rng_counter = 0 WHERE id = $boss_id");
     $boss_victory = request('battle', 'turn', action_input($boss_item['data'], 'fixture-boss-victory', ['skill_id' => 12]));
     $contracts['boss_victory'] = $boss_victory['data'] ?? [];
     check($boss_victory['success'] && $boss_victory['data']['status'] === 'victory' && $boss_victory['data']['wild_pokemon']['is_boss']

@@ -40,6 +40,8 @@ closing a user clears pending confirmation dialogs, and that older metadata
 responses cannot overwrite newer saved values.
 Granting items also keeps the selected item and quantity after a rejected request,
 blocks duplicate submissions, and waits for the updated inventory before unlocking.
+Configuration tests reject saves before a successful initial read, retry failed
+reads and writes without losing settings, and block edits and repeated clicks while saving.
 
 Screenshots and Playwright traces are written to the ignored `artifacts/`
 directory. Set `PLAYWRIGHT_BROWSERS_PATH` if Chromium is installed in a custom

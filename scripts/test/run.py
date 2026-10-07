@@ -396,6 +396,21 @@ def test_php_regression(name, filename):
         ok(name)
 
 
+def test_x2_export_regression():
+    import subprocess
+
+    name = "X2 data export regression"
+    print(f"\n=== {name} ===")
+    suite = ROOT / "scripts" / "test" / "x2_export_regressions.py"
+    result = subprocess.run([sys.executable, str(suite)], capture_output=True,
+                            text=True, encoding="utf-8")
+    print((result.stdout + result.stderr).rstrip())
+    if result.returncode:
+        fail(name)
+    else:
+        ok(name)
+
+
 def main():
     print("TSDM Pokemon Plugin — Static Test Suite")
     print("=" * 60)
@@ -408,6 +423,7 @@ def main():
     test_active_pokemon_switch()
     test_party_pokemon_moves()
     test_migration_coverage()
+    test_x2_export_regression()
     test_learned_skill_authorization()
     test_php_syntax()
     test_equipment_occupancy()

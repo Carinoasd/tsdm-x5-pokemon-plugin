@@ -143,6 +143,10 @@ jobs:
         run: php scripts/test/admin_catalog_database.php && php scripts/test/admin_identity_database.php
       - name: Verify concurrent configuration defaults and saves
         run: php scripts/test/config_concurrency_database.php
+      - name: Verify administrative Pokemon transactions
+        run: php scripts/test/admin_pokemon_database.php
+      - name: Verify legacy export values against MariaDB
+        run: python3 scripts/test/x2_export_regressions.py --database
       - name: Verify forum topic visibility against MariaDB
         run: TSDM_TOPICS_REAL_DB=1 php scripts/test/topics_permissions.php
       - name: Exercise real PHP routes against MariaDB
