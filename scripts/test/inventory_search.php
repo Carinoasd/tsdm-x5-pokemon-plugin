@@ -33,6 +33,7 @@ function load_inventory_functions($file, $names)
 }
 
 load_inventory_functions(__DIR__ . '/../../plugin/api/index.php', ['get_param', 'pm_sql_v', 'pm_sql', 'pm_table', 'validate_uid']);
+load_inventory_functions(__DIR__ . '/../../plugin/api/utils.php', ['api_get_item_module', 'api_is_trainer_item', 'api_trainer_item_modules', 'api_item_use_target', 'api_ensure_itemdata_module_column']);
 load_inventory_functions(__DIR__ . '/../../plugin/api/user.php', ['api_get_inventory', 'get_item_type_name']);
 require __DIR__ . '/../../plugin/api/constants.php';
 
@@ -49,6 +50,18 @@ class DB
 {
     public static $rows = [];
     public static $total = 0;
+    public static function fetch_first($sql)
+    {
+        // api_get_inventory 的 module 列自愈探测：约定列已存在，避免触发 ALTER。
+        if (preg_match("/^SHOW COLUMNS FROM \S+ LIKE 'module'$/", $sql)) {
+            return ['Field' => 'module', 'Type' => 'varchar(30)'];
+        }
+        throw new RuntimeException('Unexpected read: ' . $sql);
+    }
+    public static function query($sql)
+    {
+        throw new RuntimeException('Unexpected write: ' . $sql);
+    }
     public static function fetch_all($sql)
     {
         if (!preg_match('/WHERE m.uid = (\d+)(.*?)GROUP BY m.id/is', $sql, $where)) throw new RuntimeException('Missing owner filter');
